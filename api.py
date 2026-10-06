@@ -75,8 +75,11 @@ def load_model() -> int:
     return MODEL_DIM
 
 
-def embed(text: str):
-    return MODEL.encode([text], show_progress_bar=False)[0]
+def embed(text: str) -> str:
+    # pgvector aceita literal text '[v1,v2,...]'; retornar string evita
+    # psycopg tentar adaptar numpy/list como float[] (que nao casa com vector)
+    vec = MODEL.encode([text], show_progress_bar=False)[0]
+    return "[" + ",".join(f"{x:.7f}" for x in vec.tolist()) + "]"
 
 
 # ------------------------------------------------------------------ db ----
@@ -192,7 +195,19 @@ def requires(scope: str):
 
 # ------------------------------------------------------------------ app ---
 ORIGINS = [o.strip() for o in os.environ.get("MINIRAG_CORS_ORIGINS", "").split(",") if o.strip()]
-app = FastAPI(title="Minirag", version="1.0.0")
+
+
+@asynccontextmanager
+async def lifespan(app: "FastAPI"):
+    # boot: carrega o modelo de embedding e cria tabelas/chave inicial
+    # ANTES de o uvicorn comecar a servir; se falhar, container morre
+    # (healthcheck nao marca saudavel falso).
+    load_model()
+    init_db()
+    yield
+
+
+app = FastAPI(title="Minirag", version="1.0.0", lifespan=lifespan)
 app.add_middleware(
     CORSMiddleware,
     allow_origins=ORIGINS,
@@ -222,7 +237,7 @@ def do_ingest(doc_id: str, title: Optional[str], content: str) -> dict:
             cur.execute("DELETE FROM chunks WHERE doc_id = %s", (doc_id,))
             cur.executemany(
                 "INSERT INTO chunks (doc_id, title, body, embedding) "
-                "VALUES (%s, %s, %s, %s)",
+                "VALUES (%s, %s, %s, %s::vector)",
                 [(doc_id, title, c, embed(c)) for c in chunks],
             )
     return {"doc_id": doc_id, "chunks": len(chunks)}
@@ -247,9 +262,9 @@ def search(body: SearchBody, user: dict = Depends(requires("search"))):
         with conn.cursor() as cur:
             cur.execute(
                 "SELECT id, doc_id, coalesce(title, ''), body, "
-                "embedding <=> %s AS dist "
+                "embedding <=> %s::vector AS dist "
                 "FROM chunks "
-                "ORDER BY embedding <=> %s LIMIT %d",
+                "ORDER BY embedding <=> %s::vector LIMIT %d",
                 (vec, vec, body.k),
             )
             rows = cur.fetchall()
