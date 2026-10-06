@@ -1,0 +1,61 @@
+# RAG service — Postgres(pgvector) + FastAPI + nomic-embed-text
+# 2 containers: rag-db (banco) + rag-api (serviço, porta local por padrão)
+#
+# Para usar com Dokploy: crie um projeto "docker", aponte pra essa pasta,
+# e preencha as variáveis na aba Environment (ou num .env):
+#   RAG_DB_USER / RAG_DB_PASSWORD  (senha do banco; mesma nos dois serviços)
+#   RAG_CORS_ORIGINS               (ex.: https://seudominio.com)
+# A chave inicial sai no log do container (linha "CHAVE INICIAL").
+
+services:
+  rag-db:
+    image: pgvector/pgvector:pg17
+    container_name: rag-db
+    restart: unless-stopped
+    environment:
+      POSTGRES_USER: ${RAG_DB_USER:-rag}
+      POSTGRES_PASSWORD: ${RAG_DB_PASSWORD:-rag}
+      POSTGRES_DB: ${RAG_DB_NAME:-rag}
+    volumes:
+      - rag_data:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U ${RAG_DB_USER:-rag} -d ${RAG_DB_NAME:-rag}"]
+      interval: 10s
+      timeout: 5s
+      retries: 10
+      start_period: 25s
+
+  rag-api:
+    build: .
+    container_name: rag-api
+    restart: unless-stopped
+    environment:
+      RAG_MODEL: ${RAG_MODEL:-nomic-ai/nomic-embed-text}
+      RAG_MODEL_DIR: /app/models
+      RAG_DB_HOST: rag-db
+      RAG_DB_PORT: "5432"
+      RAG_DB_USER: ${RAG_DB_USER:-rag}
+      RAG_DB_PASSWORD: ${RAG_DB_PASSWORD:-rag}
+      RAG_DB_NAME: ${RAG_DB_NAME:-rag}
+      RAG_MAX_CHUNK_WORDS: ${RAG_MAX_CHUNK_WORDS:-500}
+      RAG_CHUNK_OVERLAP: ${RAG_CHUNK_OVERLAP:-80}
+      RAG_TOP_K: ${RAG_TOP_K:-5}
+      RAG_MIN_SCORE: ${RAG_MIN_SCORE:-0.55}
+      RAG_CORS_ORIGINS: ${RAG_CORS_ORIGINS:-}
+    depends_on:
+      rag-db:
+        condition: service_healthy
+    healthcheck:
+      test: ["CMD", "python", "-c",
+             "import urllib.request;urllib.request.urlopen('http://localhost:8000/health')"]
+      interval: 15s
+      timeout: 5s
+      retries: 12
+      start_period: 120s
+    ports:
+      # Só localhost por padrão; expõe pra internet via seu proxy/Dokploy,
+      # não no host direto.
+      - "127.0.0.1:8000:8000"
+
+volumes:
+  rag_data:
