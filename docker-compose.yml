@@ -1,49 +1,49 @@
 # RAG service — Postgres(pgvector) + FastAPI + nomic-embed-text
-# 2 containers: rag-db (banco) + rag-api (serviço, porta local por padrão)
+# 2 containers: minirag-db (banco) + minirag-api (serviço, porta local por padrão)
 #
 # Para usar com Dokploy: crie um projeto "docker", aponte pra essa pasta,
 # e preencha as variáveis na aba Environment (ou num .env):
-#   RAG_DB_USER / RAG_DB_PASSWORD  (senha do banco; mesma nos dois serviços)
-#   RAG_CORS_ORIGINS               (ex.: https://seudominio.com)
+#   MINIRAG_DB_USER / MINIRAG_DB_PASSWORD  (senha do banco; mesma nos dois serviços)
+#   MINIRAG_CORS_ORIGINS               (ex.: https://seudominio.com)
 # A chave inicial sai no log do container (linha "CHAVE INICIAL").
 
 services:
-  rag-db:
+  minirag-db:
     image: pgvector/pgvector:pg17
-    container_name: rag-db
+    container_name: minirag-db
     restart: unless-stopped
     environment:
-      POSTGRES_USER: ${RAG_DB_USER:-rag}
-      POSTGRES_PASSWORD: ${RAG_DB_PASSWORD:-rag}
-      POSTGRES_DB: ${RAG_DB_NAME:-rag}
+      POSTGRES_USER: ${MINIRAG_DB_USER:-minirag}
+      POSTGRES_PASSWORD: ${MINIRAG_DB_PASSWORD:-minirag}
+      POSTGRES_DB: ${MINIRAG_DB_NAME:-minirag}
     volumes:
-      - rag_data:/var/lib/postgresql/data
+      - minirag_data:/var/lib/postgresql/data
     healthcheck:
-      test: ["CMD-SHELL", "pg_isready -U ${RAG_DB_USER:-rag} -d ${RAG_DB_NAME:-rag}"]
+      test: ["CMD-SHELL", "pg_isready -U ${MINIRAG_DB_USER:-minirag} -d ${MINIRAG_DB_NAME:-minirag}"]
       interval: 10s
       timeout: 5s
       retries: 10
       start_period: 25s
 
-  rag-api:
+  minirag-api:
     build: .
-    container_name: rag-api
+    container_name: minirag-api
     restart: unless-stopped
     environment:
-      RAG_MODEL: ${RAG_MODEL:-nomic-ai/nomic-embed-text}
-      RAG_MODEL_DIR: /app/models
-      RAG_DB_HOST: rag-db
-      RAG_DB_PORT: "5432"
-      RAG_DB_USER: ${RAG_DB_USER:-rag}
-      RAG_DB_PASSWORD: ${RAG_DB_PASSWORD:-rag}
-      RAG_DB_NAME: ${RAG_DB_NAME:-rag}
-      RAG_MAX_CHUNK_WORDS: ${RAG_MAX_CHUNK_WORDS:-500}
-      RAG_CHUNK_OVERLAP: ${RAG_CHUNK_OVERLAP:-80}
-      RAG_TOP_K: ${RAG_TOP_K:-5}
-      RAG_MIN_SCORE: ${RAG_MIN_SCORE:-0.55}
-      RAG_CORS_ORIGINS: ${RAG_CORS_ORIGINS:-}
+      MINIRAG_MODEL: ${MINIRAG_MODEL:-nomic-ai/nomic-embed-text}
+      MINIRAG_MODEL_DIR: /app/models
+      MINIRAG_DB_HOST: minirag-db
+      MINIRAG_DB_PORT: "5432"
+      MINIRAG_DB_USER: ${MINIRAG_DB_USER:-minirag}
+      MINIRAG_DB_PASSWORD: ${MINIRAG_DB_PASSWORD:-minirag}
+      MINIRAG_DB_NAME: ${MINIRAG_DB_NAME:-minirag}
+      MINIRAG_MAX_CHUNK_WORDS: ${MINIRAG_MAX_CHUNK_WORDS:-500}
+      MINIRAG_CHUNK_OVERLAP: ${MINIRAG_CHUNK_OVERLAP:-80}
+      MINIRAG_TOP_K: ${MINIRAG_TOP_K:-5}
+      MINIRAG_MIN_SCORE: ${MINIRAG_MIN_SCORE:-0.55}
+      MINIRAG_CORS_ORIGINS: ${MINIRAG_CORS_ORIGINS:-}
     depends_on:
-      rag-db:
+      minirag-db:
         condition: service_healthy
     healthcheck:
       test: ["CMD", "python", "-c",
@@ -58,4 +58,4 @@ services:
       - "127.0.0.1:8000:8000"
 
 volumes:
-  rag_data:
+  minirag_data:

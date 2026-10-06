@@ -1,4 +1,4 @@
-"""RAG service — ingest, search and API keys.
+"""Minirag service — ingest, search and API keys.
 
 Stack: FastAPI + Postgres (pgvector) + nomic-embed-text (sentence-transformers).
 
@@ -45,17 +45,17 @@ class Config:
 
 
 CONFIG = Config(
-    model=os.environ.get("RAG_MODEL", "nomic-ai/nomic-embed-text"),
-    model_dir=os.environ.get("RAG_MODEL_DIR", "/app/models"),
-    db_host=os.environ.get("RAG_DB_HOST", "rag-db"),
-    db_port=int(os.environ.get("RAG_DB_PORT", "5432")),
-    db_user=os.environ.get("RAG_DB_USER", "rag"),
-    db_password=os.environ.get("RAG_DB_PASSWORD", "rag"),
-    db_name=os.environ.get("RAG_DB_NAME", "rag"),
-    max_chunk_words=int(os.environ.get("RAG_MAX_CHUNK_WORDS", "500")),
-    chunk_overlap=int(os.environ.get("RAG_CHUNK_OVERLAP", "80")),
-    top_k=int(os.environ.get("RAG_TOP_K", "5")),
-    min_score=float(os.environ.get("RAG_MIN_SCORE", "0.55")),
+    model=os.environ.get("MINIRAG_MODEL", "nomic-ai/nomic-embed-text"),
+    model_dir=os.environ.get("MINIRAG_MODEL_DIR", "/app/models"),
+    db_host=os.environ.get("MINIRAG_DB_HOST", "minirag-db"),
+    db_port=int(os.environ.get("MINIRAG_DB_PORT", "5432")),
+    db_user=os.environ.get("MINIRAG_DB_USER", "minirag"),
+    db_password=os.environ.get("MINIRAG_DB_PASSWORD", "minirag"),
+    db_name=os.environ.get("MINIRAG_DB_NAME", "minirag"),
+    max_chunk_words=int(os.environ.get("MINIRAG_MAX_CHUNK_WORDS", "500")),
+    chunk_overlap=int(os.environ.get("MINIRAG_CHUNK_OVERLAP", "80")),
+    top_k=int(os.environ.get("MINIRAG_TOP_K", "5")),
+    min_score=float(os.environ.get("MINIRAG_MIN_SCORE", "0.55")),
 )
 
 
@@ -129,8 +129,8 @@ def init_db():
                         secret[:8],
                     ),
                 )
-                print(f"[rag] CHAVE INICIAL: {secret}")
-                print("[rag] guarde esta chave; crie mais via POST /keys")
+                print(f"[minirag] CHAVE INICIAL: {secret}")
+                print("[minirag] guarde esta chave; crie mais via POST /keys")
 
 
 # ------------------------------------------------------------- chunking ---
@@ -191,8 +191,8 @@ def requires(scope: str):
 
 
 # ------------------------------------------------------------------ app ---
-ORIGINS = [o.strip() for o in os.environ.get("RAG_CORS_ORIGINS", "").split(",") if o.strip()]
-app = FastAPI(title="RAG", version="1.0.0")
+ORIGINS = [o.strip() for o in os.environ.get("MINIRAG_CORS_ORIGINS", "").split(",") if o.strip()]
+app = FastAPI(title="Minirag", version="1.0.0")
 app.add_middleware(
     CORSMiddleware,
     allow_origins=ORIGINS,
