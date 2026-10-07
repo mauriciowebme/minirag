@@ -1,4 +1,4 @@
-# RAG service — FastAPI + Postgres(pgvector) + nomic-embed-text
+# RAG service — FastAPI + Postgres(pgvector) + nomic-embed-text-v1.5
 FROM python:3.11-slim
 
 ENV PYTHONDONTWRITEBYTECODE=1 \

@@ -1,4 +1,4 @@
-# RAG service — Postgres(pgvector) + FastAPI + nomic-embed-text
+# RAG service — Postgres(pgvector) + FastAPI + nomic-embed-text-v1.5
 # 2 containers: minirag-db (banco) + minirag-api (serviço, porta local por padrão)
 #
 # Para usar com Dokploy: crie um projeto "docker", aponte pra essa pasta,

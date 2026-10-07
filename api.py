@@ -1,6 +1,6 @@
 """Minirag service — ingest, search and API keys.
 
-Stack: FastAPI + Postgres (pgvector) + nomic-embed-text (sentence-transformers).
+Stack: FastAPI + Postgres (pgvector) + nomic-embed-text-v1.5 (sentence-transformers).
 
 Endpoints:
   GET  /health        -> public
