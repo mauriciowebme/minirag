@@ -1,16 +1,21 @@
-"""Minirag — RAG multi-tenant (ingest + search).
+"""Minirag — serviço RAG multi-tenant (ingest + search).
 
 Stack: FastAPI + Postgres (pgvector) + nomic-embed-text-v1.5 (sentence-transformers).
 
-Acesso: variavel de ambiente MINIRAG_USERS, lista "nome:chave" separada por
-virgula. Sem chave na lista, nao ha entrada. Cada usuario ve e escreve APENAS
-na propria memoria (tenant = nome) — nada vaza entre usuarios.
+Acesso em DOIS niveis:
+  1. LOGIN (cabecalho Authorization Bearer *** da lista MINIRAG_USERS
+     ("nome:chave" separados por virgula). Chave fora da lista = 401.
+  2. MEMORIA (campo "memoria" no corpo do pedido): gaveta dentro daquele
+     login (ex.: id da empresa). Sem o campo, usa a memoria padrao do
+     login (string vazia). Gavetas de logins diferentes NUNCA se encostam
+     — nem quando tem o mesmo nome: "empresa42" do ia-go e "empresa42" do
+     mauricio sao memorias distintas.
 
 Endpoints:
   GET  /health   -> publico
-  POST /ingest   -> chave valida; grava no tenant do usuario
-  POST /search   -> chave valida; so le o tenant do usuario
-  GET  /docs     -> chave valida; so lista o tenant do usuario
+  POST /ingest   -> grava na (login, memoria) do chamador
+  POST /search   -> le apenas a (login, memoria) do chamador
+  GET  /docs     -> lista apenas a (login, memoria); ?memoria=...
 """
 import hmac
 import os
@@ -117,23 +122,29 @@ def init_db():
                 "CREATE TABLE IF NOT EXISTS chunks ("
                 "id BIGSERIAL PRIMARY KEY, "
                 "tenant TEXT NOT NULL, "
+                "memoria TEXT NOT NULL DEFAULT '', "
                 "doc_id TEXT NOT NULL, "
                 "title TEXT, "
                 "body TEXT NOT NULL, "
                 "embedding VECTOR(%d) NOT NULL, "
                 "ingested_at TIMESTAMPTZ NOT NULL DEFAULT now())" % MODEL_DIM
             )
-            # banco ja existente (versao sem tenant): adiciona a coluna viva
+            # banco ja existente (versao sem tenant/memoria): colunas vivas
             cur.execute(
                 "ALTER TABLE chunks "
                 "ADD COLUMN IF NOT EXISTS tenant TEXT NOT NULL DEFAULT 'default'"
+            )
+            cur.execute(
+                "ALTER TABLE chunks "
+                "ADD COLUMN IF NOT EXISTS memoria TEXT NOT NULL DEFAULT ''"
             )
             cur.execute(
                 "CREATE INDEX IF NOT EXISTS chunks_embedding_idx "
                 "ON chunks USING hnsw(embedding vector_cosine_ops)"
             )
             cur.execute(
-                "CREATE INDEX IF NOT EXISTS chunks_tenant_idx ON chunks (tenant)"
+                "CREATE INDEX IF NOT EXISTS chunks_scope_idx "
+                "ON chunks (tenant, memoria)"
             )
     if not USERS:
         print("[minirag] AVISO: MINIRAG_USERS vazio — nenhum pedido entra")
@@ -175,6 +186,7 @@ def chunk_text(text: str, max_words: int, overlap: int):
 
 # --------------------------------------------------------------- auth ----
 def authenticate(request: Request):
+    """Nivel 1: quem esta logando. A memoria (nivel 2) vem no corpo do pedido."""
     authz = request.headers.get("Authorization", "")
     token = authz[len("Bearer "):] if authz.startswith("Bearer ") else authz
     token = token.strip()
@@ -203,7 +215,7 @@ async def lifespan(app: "FastAPI"):
 # docs_url=None: o Swagger do FastAPI mora em /docs, que colidiria com o
 # nosso GET /docs (listagem de documentos do tenant). Serviço interno,
 # entao desligamos a UI de docs do framework.
-app = FastAPI(title="Minirag", version="1.1.0", lifespan=lifespan,
+app = FastAPI(title="Minirag", version="1.2.0", lifespan=lifespan,
               docs_url=None, redoc_url=None)
 app.add_middleware(
     CORSMiddleware,
@@ -223,29 +235,35 @@ class IngestBody(BaseModel):
     doc_id: str
     title: Optional[str] = None
     content: str = Field(..., min_length=1)
+    memoria: str = Field(default="", max_length=128)
 
 
-def do_ingest(doc_id: str, title: Optional[str], content: str, tenant: str) -> dict:
+def do_ingest(doc_id: str, title: Optional[str], content: str,
+              tenant: str, memoria: str = "") -> dict:
+    memoria = memoria.strip()
     chunks = chunk_text(content, CONFIG.max_chunk_words, CONFIG.chunk_overlap)
     if not chunks:
         raise HTTPException(400, "nada para ingerir")
     with connect() as conn:
         with conn.cursor() as cur:
             cur.execute(
-                "DELETE FROM chunks WHERE doc_id = %s AND tenant = %s",
-                (doc_id, tenant),
+                "DELETE FROM chunks "
+                "WHERE doc_id = %s AND tenant = %s AND memoria = %s",
+                (doc_id, tenant, memoria),
             )
             cur.executemany(
-                "INSERT INTO chunks (tenant, doc_id, title, body, embedding) "
-                "VALUES (%s, %s, %s, %s, %s::vector)",
-                [(tenant, doc_id, title, c, embed(c)) for c in chunks],
+                "INSERT INTO chunks (tenant, memoria, doc_id, title, body, embedding) "
+                "VALUES (%s, %s, %s, %s, %s, %s::vector)",
+                [(tenant, memoria, doc_id, title, c, embed(c)) for c in chunks],
             )
-    return {"tenant": tenant, "doc_id": doc_id, "chunks": len(chunks)}
+    return {"tenant": tenant, "memoria": memoria, "doc_id": doc_id,
+            "chunks": len(chunks)}
 
 
 @app.post("/ingest")
 def ingest(body: IngestBody, user: dict = Depends(authenticate)):
-    return do_ingest(body.doc_id, body.title, body.content, user["tenant"])
+    return do_ingest(body.doc_id, body.title, body.content,
+                     user["tenant"], body.memoria)
 
 
 #---------------------------------------------------------- search ----------
@@ -253,19 +271,21 @@ class SearchBody(BaseModel):
     query: str = Field(..., min_length=1)
     k: int = Field(default=CONFIG.top_k, ge=1, le=50)
     min_score: float = Field(default=CONFIG.min_score, ge=0.0, le=1.0)
+    memoria: str = Field(default="", max_length=128)
 
 
 @app.post("/search")
 def search(body: SearchBody, user: dict = Depends(authenticate)):
     vec = embed(body.query)
+    memoria = body.memoria.strip()
     with connect() as conn:
         with conn.cursor() as cur:
             cur.execute(
                 "SELECT id, doc_id, coalesce(title, ''), body, "
                 "embedding <=> %s::vector AS dist "
-                "FROM chunks WHERE tenant = %s "
+                "FROM chunks WHERE tenant = %s AND memoria = %s "
                 "ORDER BY embedding <=> %s::vector LIMIT %s",
-                (vec, user["tenant"], vec, body.k),
+                (vec, user["tenant"], memoria, vec, body.k),
             )
             rows = cur.fetchall()
     items = []
@@ -283,22 +303,25 @@ def search(body: SearchBody, user: dict = Depends(authenticate)):
                 "text": r[3],
             }
         )
-    return {"tenant": user["tenant"], "items": items, "total": len(items)}
+    return {"tenant": user["tenant"], "memoria": memoria,
+            "items": items, "total": len(items)}
 
 
 @app.get("/docs")
-def list_docs(user: dict = Depends(authenticate)):
+def list_docs(memoria: str = "", user: dict = Depends(authenticate)):
+    memoria = memoria.strip()
     with connect() as conn:
         with conn.cursor() as cur:
             cur.execute(
                 "SELECT doc_id, coalesce(max(title), ''), count(*), max(ingested_at) "
-                "FROM chunks WHERE tenant = %s "
+                "FROM chunks WHERE tenant = %s AND memoria = %s "
                 "GROUP BY doc_id ORDER BY max(ingested_at) DESC",
-                (user["tenant"],),
+                (user["tenant"], memoria),
             )
             rows = cur.fetchall()
     return {
         "tenant": user["tenant"],
+        "memoria": memoria,
         "docs": [
             {
                 "doc_id": r[0],
