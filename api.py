@@ -1,22 +1,20 @@
-"""Minirag service — ingest, search and API keys.
+"""Minirag — RAG multi-tenant (ingest + search).
 
 Stack: FastAPI + Postgres (pgvector) + nomic-embed-text-v1.5 (sentence-transformers).
 
-Endpoints:
-  GET  /health        -> public
-  POST /ingest        -> scope=ingest
-  POST /search        -> scope=search
-  GET  /docs          -> scope=search
-  POST /keys          -> scope=ingest
-  GET  /keys          -> scope=ingest
+Acesso: variavel de ambiente MINIRAG_USERS, lista "nome:chave" separada por
+virgula. Sem chave na lista, nao ha entrada. Cada usuario ve e escreve APENAS
+na propria memoria (tenant = nome) — nada vaza entre usuarios.
 
-On first start it creates a bootstrap key (scope=ingest) and prints its
-secret once. Keep it; from then on you create scoped keys via /keys.
+Endpoints:
+  GET  /health   -> publico
+  POST /ingest   -> chave valida; grava no tenant do usuario
+  POST /search   -> chave valida; so le o tenant do usuario
+  GET  /docs     -> chave valida; so lista o tenant do usuario
 """
-import hashlib
+import hmac
 import os
 import re
-import secrets
 from contextlib import asynccontextmanager
 from dataclasses import dataclass
 from typing import Optional
@@ -57,6 +55,24 @@ CONFIG = Config(
     top_k=int(os.environ.get("MINIRAG_TOP_K", "5")),
     min_score=float(os.environ.get("MINIRAG_MIN_SCORE", "0.55")),
 )
+
+
+def parse_users(raw: str):
+    """'nome:chave, outro:outra' -> [(nome, chave), ...]"""
+    users = []
+    for entry in raw.split(","):
+        entry = entry.strip()
+        if not entry or ":" not in entry:
+            continue
+        name, _, key = entry.partition(":")
+        name, key = name.strip(), key.strip()
+        if name and key:
+            users.append((name, key))
+    return users
+
+
+# Lista de acesso lida UMA vez no boot (trocar = reiniciar o servico)
+USERS = parse_users(os.environ.get("MINIRAG_USERS", ""))
 
 
 # ---------------------------------------------------------------- model ----
@@ -100,40 +116,32 @@ def init_db():
             cur.execute(
                 "CREATE TABLE IF NOT EXISTS chunks ("
                 "id BIGSERIAL PRIMARY KEY, "
+                "tenant TEXT NOT NULL, "
                 "doc_id TEXT NOT NULL, "
                 "title TEXT, "
                 "body TEXT NOT NULL, "
                 "embedding VECTOR(%d) NOT NULL, "
                 "ingested_at TIMESTAMPTZ NOT NULL DEFAULT now())" % MODEL_DIM
             )
+            # banco ja existente (versao sem tenant): adiciona a coluna viva
+            cur.execute(
+                "ALTER TABLE chunks "
+                "ADD COLUMN IF NOT EXISTS tenant TEXT NOT NULL DEFAULT 'default'"
+            )
             cur.execute(
                 "CREATE INDEX IF NOT EXISTS chunks_embedding_idx "
                 "ON chunks USING hnsw(embedding vector_cosine_ops)"
             )
             cur.execute(
-                "CREATE TABLE IF NOT EXISTS api_keys ("
-                "id BIGSERIAL PRIMARY KEY, "
-                "name TEXT NOT NULL, "
-                "scope TEXT NOT NULL CHECK (scope IN ('search', 'ingest')), "
-                "secret_hash TEXT NOT NULL UNIQUE, "
-                "secret_prefix TEXT NOT NULL, "
-                "created_at TIMESTAMPTZ NOT NULL DEFAULT now())"
+                "CREATE INDEX IF NOT EXISTS chunks_tenant_idx ON chunks (tenant)"
             )
-            cur.execute("SELECT count(*) FROM api_keys")
-            if cur.fetchone()[0] == 0:
-                secret = secrets.token_urlsafe(32)
-                cur.execute(
-                    "INSERT INTO api_keys (name, scope, secret_hash, secret_prefix) "
-                    "VALUES (%s, %s, %s, %s)",
-                    (
-                        "bootstrap",
-                        "ingest",
-                        hashlib.sha256(secret.encode()).hexdigest(),
-                        secret[:8],
-                    ),
-                )
-                print(f"[minirag] CHAVE INICIAL: {secret}")
-                print("[minirag] guarde esta chave; crie mais via POST /keys")
+    if not USERS:
+        print("[minirag] AVISO: MINIRAG_USERS vazio — nenhum pedido entra")
+    else:
+        print(
+            "[minirag] %d usuario(s) com acesso: %s"
+            % (len(USERS), ", ".join(n for n, _ in USERS))
+        )
 
 
 # ------------------------------------------------------------- chunking ---
@@ -172,25 +180,10 @@ def authenticate(request: Request):
     token = token.strip()
     if not token:
         raise HTTPException(401, "falta Authorization: Bearer ***")
-    h = hashlib.sha256(token.encode()).hexdigest()
-    with connect() as conn:
-        with conn.cursor() as cur:
-            cur.execute(
-                "SELECT id, name, scope FROM api_keys WHERE secret_hash = %s", (h,)
-            )
-            row = cur.fetchone()
-    if row is None:
-        raise HTTPException(401, "API key invalida")
-    return {"id": row[0], "name": row[1], "scope": row[2]}
-
-
-def requires(scope: str):
-    def checker(user: dict = Depends(authenticate)):
-        if user["scope"] != scope:
-            raise HTTPException(403, f"chave sem escopo {scope}")
-        return user
-
-    return checker
+    for name, key in USERS:
+        if hmac.compare_digest(token, key):
+            return {"tenant": name}
+    raise HTTPException(401, "chave nao habilitada")
 
 
 # ------------------------------------------------------------------ app ---
@@ -199,15 +192,19 @@ ORIGINS = [o.strip() for o in os.environ.get("MINIRAG_CORS_ORIGINS", "").split("
 
 @asynccontextmanager
 async def lifespan(app: "FastAPI"):
-    # boot: carrega o modelo de embedding e cria tabelas/chave inicial
-    # ANTES de o uvicorn comecar a servir; se falhar, container morre
-    # (healthcheck nao marca saudavel falso).
+    # boot: carrega o modelo de embedding e cria tabelas ANTES de o uvicorn
+    # comecar a servir; se falhar, container morre (healthcheck nao marca
+    # saudavel falso).
     load_model()
     init_db()
     yield
 
 
-app = FastAPI(title="Minirag", version="1.0.0", lifespan=lifespan)
+# docs_url=None: o Swagger do FastAPI mora em /docs, que colidiria com o
+# nosso GET /docs (listagem de documentos do tenant). Serviço interno,
+# entao desligamos a UI de docs do framework.
+app = FastAPI(title="Minirag", version="1.1.0", lifespan=lifespan,
+              docs_url=None, redoc_url=None)
 app.add_middleware(
     CORSMiddleware,
     allow_origins=ORIGINS,
@@ -218,7 +215,7 @@ app.add_middleware(
 
 @app.get("/health")
 def health():
-    return {"status": "ok", "dim": MODEL_DIM}
+    return {"status": "ok", "dim": MODEL_DIM, "usuarios": len(USERS)}
 
 
 # ---------------------------------------------------------- ingest ---------
@@ -228,24 +225,27 @@ class IngestBody(BaseModel):
     content: str = Field(..., min_length=1)
 
 
-def do_ingest(doc_id: str, title: Optional[str], content: str) -> dict:
+def do_ingest(doc_id: str, title: Optional[str], content: str, tenant: str) -> dict:
     chunks = chunk_text(content, CONFIG.max_chunk_words, CONFIG.chunk_overlap)
     if not chunks:
         raise HTTPException(400, "nada para ingerir")
     with connect() as conn:
         with conn.cursor() as cur:
-            cur.execute("DELETE FROM chunks WHERE doc_id = %s", (doc_id,))
-            cur.executemany(
-                "INSERT INTO chunks (doc_id, title, body, embedding) "
-                "VALUES (%s, %s, %s, %s::vector)",
-                [(doc_id, title, c, embed(c)) for c in chunks],
+            cur.execute(
+                "DELETE FROM chunks WHERE doc_id = %s AND tenant = %s",
+                (doc_id, tenant),
             )
-    return {"doc_id": doc_id, "chunks": len(chunks)}
+            cur.executemany(
+                "INSERT INTO chunks (tenant, doc_id, title, body, embedding) "
+                "VALUES (%s, %s, %s, %s, %s::vector)",
+                [(tenant, doc_id, title, c, embed(c)) for c in chunks],
+            )
+    return {"tenant": tenant, "doc_id": doc_id, "chunks": len(chunks)}
 
 
 @app.post("/ingest")
-def ingest(body: IngestBody, user: dict = Depends(requires("ingest"))):
-    return do_ingest(body.doc_id, body.title, body.content)
+def ingest(body: IngestBody, user: dict = Depends(authenticate)):
+    return do_ingest(body.doc_id, body.title, body.content, user["tenant"])
 
 
 #---------------------------------------------------------- search ----------
@@ -256,21 +256,21 @@ class SearchBody(BaseModel):
 
 
 @app.post("/search")
-def search(body: SearchBody, user: dict = Depends(requires("search"))):
+def search(body: SearchBody, user: dict = Depends(authenticate)):
     vec = embed(body.query)
     with connect() as conn:
         with conn.cursor() as cur:
             cur.execute(
                 "SELECT id, doc_id, coalesce(title, ''), body, "
                 "embedding <=> %s::vector AS dist "
-                "FROM chunks "
+                "FROM chunks WHERE tenant = %s "
                 "ORDER BY embedding <=> %s::vector LIMIT %s",
-                (vec, vec, body.k),
+                (vec, user["tenant"], vec, body.k),
             )
             rows = cur.fetchall()
     items = []
     for i, r in enumerate(rows, 1):
-        score = 1.0 - float(r[4])  # <=> with vector_cosine_ops = 1 - cos
+        score = 1.0 - float(r[4])  # <=> com vector_cosine_ops = 1 - cos
         if score < body.min_score:
             break
         items.append(
@@ -283,19 +283,22 @@ def search(body: SearchBody, user: dict = Depends(requires("search"))):
                 "text": r[3],
             }
         )
-    return {"items": items, "total": len(items)}
+    return {"tenant": user["tenant"], "items": items, "total": len(items)}
 
 
 @app.get("/docs")
-def list_docs(user: dict = Depends(requires("search"))):
+def list_docs(user: dict = Depends(authenticate)):
     with connect() as conn:
         with conn.cursor() as cur:
             cur.execute(
                 "SELECT doc_id, coalesce(max(title), ''), count(*), max(ingested_at) "
-                "FROM chunks GROUP BY doc_id ORDER BY max(ingested_at) DESC"
+                "FROM chunks WHERE tenant = %s "
+                "GROUP BY doc_id ORDER BY max(ingested_at) DESC",
+                (user["tenant"],),
             )
             rows = cur.fetchall()
     return {
+        "tenant": user["tenant"],
         "docs": [
             {
                 "doc_id": r[0],
@@ -304,61 +307,5 @@ def list_docs(user: dict = Depends(requires("search"))):
                 "updated_at": r[3].isoformat() if r[3] else None,
             }
             for r in rows
-        ]
-    }
-
-
-#------------------------------------------------------------------ keys ---
-class CreateKeyBody(BaseModel):
-    name: str = Field(..., max_length=64)
-    scope: str = Field(..., pattern="^(search|ingest)$")
-
-
-@app.post("/keys")
-def create_key(body: CreateKeyBody, user: dict = Depends(requires("ingest"))):
-    secret = secrets.token_urlsafe(32)
-    with connect() as conn:
-        with conn.cursor() as cur:
-            cur.execute(
-                "INSERT INTO api_keys (name, scope, secret_hash, secret_prefix) "
-                "VALUES (%s, %s, %s, %s)",
-                (
-                    body.name,
-                    body.scope,
-                    hashlib.sha256(secret.encode()).hexdigest(),
-                    secret[:8],
-                ),
-            )
-            cur.execute("SELECT lastval()")
-            key_id = cur.fetchone()[0]
-    return {
-        "id": key_id,
-        "name": body.name,
-        "scope": body.scope,
-        "prefix": secret[:8],
-        "secret": secret,
-        "note": "guarde esta chave; ela so aparece uma vez",
-    }
-
-
-@app.get("/keys")
-def list_keys(user: dict = Depends(requires("ingest"))):
-    with connect() as conn:
-        with conn.cursor() as cur:
-            cur.execute(
-                "SELECT id, name, scope, secret_prefix, created_at "
-                "FROM api_keys ORDER BY created_at DESC"
-            )
-            rows = cur.fetchall()
-    return {
-        "keys": [
-            {
-                "id": r[0],
-                "name": r[1],
-                "scope": r[2],
-                "prefix": r[3],
-                "created_at": r[4].isoformat(),
-            }
-            for r in rows
-        ]
+        ],
     }

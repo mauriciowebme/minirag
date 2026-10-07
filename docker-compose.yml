@@ -4,8 +4,9 @@
 # Para usar com Dokploy: crie um projeto "docker", aponte pra essa pasta,
 # e preencha as variáveis na aba Environment (ou num .env):
 #   MINIRAG_DB_USER / MINIRAG_DB_PASSWORD  (senha do banco; mesma nos dois serviços)
+#   MINIRAG_USERS                    lista "nome:chave" separada por vírgula —
+#                                    cada nome é um tenant com memória própria
 #   MINIRAG_CORS_ORIGINS               (ex.: https://seudominio.com)
-# A chave inicial sai no log do container (linha "CHAVE INICIAL").
 
 services:
   minirag-db:
@@ -41,6 +42,7 @@ services:
       MINIRAG_CHUNK_OVERLAP: ${MINIRAG_CHUNK_OVERLAP:-80}
       MINIRAG_TOP_K: ${MINIRAG_TOP_K:-5}
       MINIRAG_MIN_SCORE: ${MINIRAG_MIN_SCORE:-0.55}
+      MINIRAG_USERS: ${MINIRAG_USERS:-}
       MINIRAG_CORS_ORIGINS: ${MINIRAG_CORS_ORIGINS:-}
     depends_on:
       minirag-db:

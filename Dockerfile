@@ -16,15 +16,17 @@ RUN pip install --no-cache-dir --upgrade pip \
          torch --index-url https://download.pytorch.org/whl/cpu \
     && pip install --no-cache-dir -r requirements.txt
 
-COPY api.py .
-
 # Asa o modelo de embedding na imagem (custo de build; o boot fica instantaneo)
+# Fica ANTES do COPY do codigo: mudar api.py nao invalida esta camada
+# (senao cada commit rebaixaria ~500 MB de modelo).
 RUN python - <<'PY'
 from sentence_transformers import SentenceTransformer
 m = SentenceTransformer("nomic-ai/nomic-embed-text-v1.5")
 m.save("/app/models")
 print("model saved, dim =", m.get_embedding_dimension())
 PY
+
+COPY api.py .
 
 EXPOSE 8000
 
