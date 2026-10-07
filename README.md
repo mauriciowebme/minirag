@@ -74,8 +74,8 @@ Sem o campo `memoria`, o pedido cai na gaveta padrão do login (string vazia).
 ### `POST /ingest` — colocar texto na memória
 
 **Request:**
-```json
-POST http://<servidor>:8000/ingest
+```
+POST /ingest
 Authorization: Bearer ***
 Content-Type: application/json
 
@@ -91,9 +91,9 @@ Content-Type: application/json
 
 | campo | tipo | obrigatório | descrição |
 |-------|------|-------------|-----------|
-| `doc_id` | string | sim | identificador do documento (re-ingestão com o mesmo `doc_id` **substitui** os pedaços antigos) |
+| `doc_id` | string | sim | id do documento (re-ingestão com mesmo `doc_id` **substitui**) |
 | `title` | string | não | título (aparece nos resultados) |
-| `content` | string | sim | o **texto puro** (extraído do arquivo antes se for .md/.pdf/.docx) |
+| `content` | string | sim | o **texto puro** (extraído do arquivo antes, se for .md/.pdf/.docx) |
 | `memoria` | string | não | gaveta (ex.: id da empresa); vazio = gaveta padrão do login |
 
 **Response (200):**
@@ -111,8 +111,8 @@ Content-Type: application/json
 ### `POST /search` — perguntar na memória
 
 **Request:**
-```json
-POST http://<servidor>:8000/search
+```
+POST /search
 Authorization: Bearer ***
 Content-Type: application/json
 
@@ -168,7 +168,7 @@ Se a gaveta não existe ou não tem nada parecido → `"total": 0, "items": []`.
 
 **Request:**
 ```
-GET http://<servidor>:8000/docs?memoria=empresa42
+GET /docs?memoria=empresa42
 Authorization: Bearer ***
 ```
 
