@@ -29,7 +29,7 @@ PERGUNTA
 Pergunta também vira digital → compara com as guardadas
    │
    ▼
-MELEHORES PEDAÇOS + nota (0 a 1)
+MELHORES PEDAÇOS + nota (0 a 1)
 ```
 
 Quem **responde** a pergunta (redige em linguagem natural) é o modelo de LLM
@@ -94,7 +94,7 @@ Content-Type: application/json
 | `doc_id` | string | sim | id do documento (re-ingestão com mesmo `doc_id` **substitui**) |
 | `title` | string | não | título (aparece nos resultados) |
 | `content` | string | sim | o **texto puro** (extraído do arquivo antes, se for .md/.pdf/.docx) |
-| `memoria` | string | não | gaveta (ex.: id da empresa); vazio = gaveta padrão do login |
+| `memoria` | string | não | gaveta (ex.: id da empresa); máx. 128 chars; vazio = gaveta padrão do login |
 
 **Response (200):**
 ```json
@@ -130,7 +130,7 @@ Content-Type: application/json
 |-------|------|---------|-----------|
 | `query` | string | — | a pergunta (texto) |
 | `memoria` | string | `""` | gaveta (mesma regra do ingest) |
-| `k` | int | `5` | quantos pedaços devolver (máx. 50) |
+| `k` | int | `5` | quantos pedaços devolver (1 a 50) |
 | `min_score` | float | `0.55` | nota mínima pra valer (0 a 1); itens abaixo são cortados |
 
 **Response (200):**
@@ -204,8 +204,8 @@ Authorization: Bearer ***
 | código | situação |
 |--------|----------|
 | `401` | chave não está na lista `MINIRAG_USERS` (ou falta o header `Authorization`) |
-| `400` | `content` vazio em ingest |
-| `422` | JSON malformado ou campo obrigatório ausente |
+| `400` | `content` com só espaços em ingest (nada pra cortar em pedaço) |
+| `422` | JSON malformado, `content` vazio, `doc_id` ausente, `memoria` > 128 chars, `k` fora de 1–50 |
 
 Exemplo de 401:
 ```json
