@@ -30,7 +30,7 @@ services:
     container_name: minirag-api
     restart: unless-stopped
     environment:
-      MINIRAG_MODEL: ${MINIRAG_MODEL:-nomic-ai/nomic-embed-text}
+      MINIRAG_MODEL: ${MINIRAG_MODEL:-nomic-ai/nomic-embed-text-v1.5}
       MINIRAG_MODEL_DIR: /app/models
       MINIRAG_DB_HOST: minirag-db
       MINIRAG_DB_PORT: "5432"

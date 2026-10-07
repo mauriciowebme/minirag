@@ -21,9 +21,9 @@ COPY api.py .
 # Asa o modelo de embedding na imagem (custo de build; o boot fica instantaneo)
 RUN python - <<'PY'
 from sentence_transformers import SentenceTransformer
-m = SentenceTransformer("nomic-ai/nomic-embed-text", show_progress_bar=False)
-m.save_model("/app/models")
-print("model saved, dim =", m.get_sentence_embedding_dimension())
+m = SentenceTransformer("nomic-ai/nomic-embed-text-v1.5")
+m.save("/app/models")
+print("model saved, dim =", m.get_embedding_dimension())
 PY
 
 EXPOSE 8000

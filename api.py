@@ -45,7 +45,7 @@ class Config:
 
 
 CONFIG = Config(
-    model=os.environ.get("MINIRAG_MODEL", "nomic-ai/nomic-embed-text"),
+    model=os.environ.get("MINIRAG_MODEL", "nomic-ai/nomic-embed-text-v1.5"),
     model_dir=os.environ.get("MINIRAG_MODEL_DIR", "/app/models"),
     db_host=os.environ.get("MINIRAG_DB_HOST", "minirag-db"),
     db_port=int(os.environ.get("MINIRAG_DB_PORT", "5432")),
@@ -68,9 +68,9 @@ def load_model() -> int:
     global MODEL, MODEL_DIM
     if MODEL is None:
         if os.path.exists(CONFIG.model_dir):
-            MODEL = SentenceTransformer(CONFIG.model_dir, show_progress_bar=False)
+            MODEL = SentenceTransformer(CONFIG.model_dir)
         else:
-            MODEL = SentenceTransformer(CONFIG.model, show_progress_bar=False)
+            MODEL = SentenceTransformer(CONFIG.model)
         MODEL_DIM = int(MODEL.encode(["x"], show_progress_bar=False)[0].shape[0])
     return MODEL_DIM
 
@@ -108,7 +108,7 @@ def init_db():
             )
             cur.execute(
                 "CREATE INDEX IF NOT EXISTS chunks_embedding_idx "
-                "ON chunks USING ivfflat(embedding vector_cosine_ops) WITH (lists = 10)"
+                "ON chunks USING hnsw(embedding vector_cosine_ops)"
             )
             cur.execute(
                 "CREATE TABLE IF NOT EXISTS api_keys ("
@@ -264,7 +264,7 @@ def search(body: SearchBody, user: dict = Depends(requires("search"))):
                 "SELECT id, doc_id, coalesce(title, ''), body, "
                 "embedding <=> %s::vector AS dist "
                 "FROM chunks "
-                "ORDER BY embedding <=> %s::vector LIMIT %d",
+                "ORDER BY embedding <=> %s::vector LIMIT %s",
                 (vec, vec, body.k),
             )
             rows = cur.fetchall()
