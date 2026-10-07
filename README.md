@@ -290,6 +290,10 @@ curl http://127.0.0.1:8000/health
 > **Nota:** a porta 8000 fica exposta só no host (`127.0.0.1:8000`).
 > A publicação pra internet é feita pelo proxy do Dokploy.
 
+> **Persistência:** o Postgres guarda os dados num volume nomeado
+> (`minirag_data`). O volume sobrevive a reinícios e redeploys; pra zerar
+> tudo (banco + memórias), use `docker-compose down -v`.
+
 ---
 
 ## Variáveis de ambiente
