@@ -8,8 +8,8 @@ Acesso em DOIS niveis:
   2. MEMORIA (campo "memoria" no corpo do pedido): gaveta dentro daquele
      login (ex.: id da empresa). Sem o campo, usa a memoria padrao do
      login (string vazia). Gavetas de logins diferentes NUNCA se encostam
-     — nem quando tem o mesmo nome: "empresa42" do ia-go e "empresa42" do
-     mauricio sao memorias distintas.
+     — nem quando tem o mesmo nome: "empresa42" do sistema e "empresa42" do
+     operador sao memorias distintas.
 
 Limites de seguranca (protegem o servidor; uso normal nunca estoura):
   - content: ate MINIRAG_MAX_CONTENT_CHARS chars (default 500.000; estourou = 422)

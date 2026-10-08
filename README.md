@@ -33,7 +33,7 @@ MELHORES PEDAÇOS + nota (0 a 1)
 ```
 
 Quem **responde** a pergunta (redige em linguagem natural) é o modelo de LLM
-(ex.: Clauricio via LiteLLM gateway). O minirag é a **bibliotecária**: entrega
+(ex.: o LLM via gateway). O minirag é a **bibliotecária**: entrega
 os pedaços certos; o LLM é o **redator**.
 
 ---
@@ -50,11 +50,11 @@ separados por vírgula. Sem uma dessas chaves no cabeçalho `Authorization`,
 nenhum pedido é atendido (401).
 
 ```
-MINIRAG_USERS=sistema:abc123,mauricio:def456
+MINIRAG_USERS=sistema:abc123,operador:def456
 ```
 
 - `sistema` — o backend do sistema (uma chave só, atende todas as empresas)
-- `mauricio` — acesso manual do Mauricio
+- `operador` — acesso manual do administrador
 
 ### Nível 2 — Gaveta / memória (qual memória usar)
 
@@ -63,7 +63,7 @@ separada**. No cenário, a gaveta é o `id da empresa`: o backend manda
 `memoria: "empresa42"` e só enxerga os documentos daquela empresa.
 
 **Regra de ouro:** o mesmo nome de gaveta em logins diferentes são memórias
-que **nunca se encostam**. `empresa42` do `sistema` ≠ `empresa42` do `mauricio`.
+que **nunca se encostam**. `empresa42` do `sistema` ≠ `empresa42` do `operador`.
 
 Sem o campo `memoria`, o pedido cai na gaveta padrão do login (string vazia).
 
@@ -355,7 +355,7 @@ for d in docs["docs"]:
 
 ```bash
 # 1) Defina as variáveis
-export MINIRAG_USERS="sistema:abc123,mauricio:def456"
+export MINIRAG_USERS="sistema:abc123,operador:def456"
 export MINIRAG_DB_PASSWORD="senha-forte"
 
 # 2) Build e subida (primeira vez: ~15 min — assa o modelo de 768 dim na imagem)
@@ -419,7 +419,7 @@ para o backend em produção). Em cada operação:
 - **Ingestão:** o usuário da empresa 42 envia um documento → o backend
   chama `POST /ingest` com `memoria: "empresa42"`.
 - **Busca:** o usuário pergunta → o backend chama `POST /search` com
-  `memoria: "empresa42"` → pega os pedaços → manda pro LLM (Clauricio via
+  `memoria: "empresa42"` → pega os pedaços → manda pro LLM (via
   gateway) com a pergunta + os pedaços → o LLM responde.
 
 O minirag **não sabe** que o sistema existe. Ele só obedece à chave e à gaveta.
