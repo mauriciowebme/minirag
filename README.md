@@ -50,20 +50,20 @@ separados por vírgula. Sem uma dessas chaves no cabeçalho `Authorization`,
 nenhum pedido é atendido (401).
 
 ```
-MINIRAG_USERS=ia_go:abc123,mauricio:def456
+MINIRAG_USERS=sistema:abc123,mauricio:def456
 ```
 
-- `ia_go` — o backend do IA_GO (uma chave só, atende todas as empresas)
+- `sistema` — o backend do sistema (uma chave só, atende todas as empresas)
 - `mauricio` — acesso manual do Mauricio
 
 ### Nível 2 — Gaveta / memória (qual memória usar)
 
 Dentro de cada login, o campo `memoria` no corpo do pedido abre uma **gaveta
-separada**. No cenário IA_GO, a gaveta é o `id da empresa`: o backend manda
+separada**. No cenário, a gaveta é o `id da empresa`: o backend manda
 `memoria: "empresa42"` e só enxerga os documentos daquela empresa.
 
 **Regra de ouro:** o mesmo nome de gaveta em logins diferentes são memórias
-que **nunca se encostam**. `empresa42` do `ia_go` ≠ `empresa42` do `mauricio`.
+que **nunca se encostam**. `empresa42` do `sistema` ≠ `empresa42` do `mauricio`.
 
 Sem o campo `memoria`, o pedido cai na gaveta padrão do login (string vazia).
 
@@ -182,7 +182,7 @@ Content-Type: application/json
 **Response (200):**
 ```json
 {
-  "tenant": "ia_go",
+  "tenant": "sistema",
   "memoria": "empresa42",
   "total": 2,
   "items": [
@@ -229,7 +229,7 @@ decay na contagem (`chunks_arquivados`).
 **Response (200):**
 ```json
 {
-  "tenant": "ia_go",
+  "tenant": "sistema",
   "memoria": "empresa42",
   "docs": [
     {
@@ -300,7 +300,7 @@ import json, urllib.request
 
 BASE = "http://127.0.0.1:8000"
 CHAVE = "abc123"          # sua chaveapi
-MEMORIA = "empresa42"     # id da empresa no IA_GO
+MEMORIA = "empresa42"     # id da empresa no sistema
 
 def chamar(path, payload=None):
     data = json.dumps(payload).encode() if payload is not None else None
@@ -355,7 +355,7 @@ for d in docs["docs"]:
 
 ```bash
 # 1) Defina as variáveis
-export MINIRAG_USERS="ia_go:abc123,mauricio:def456"
+export MINIRAG_USERS="sistema:abc123,mauricio:def456"
 export MINIRAG_DB_PASSWORD="senha-forte"
 
 # 2) Build e subida (primeira vez: ~15 min — assa o modelo de 768 dim na imagem)
@@ -370,7 +370,7 @@ curl http://127.0.0.1:8000/health
 
 1. No Dokploy: crie um **projeto tipo "docker"**, aponte para a pasta do repo.
 2. Na aba **Environment**, preencha:
-   - `MINIRAG_USERS` — lista `nome:chave` (ex.: `ia_go:abc123`)
+   - `MINIRAG_USERS` — lista `nome:chave` (ex.: `sistema:abc123`)
    - `MINIRAG_DB_USER` / `MINIRAG_DB_PASSWORD` — usuário e senha do Postgres
    - `MINIRAG_CORS_ORIGINS` — origens que podem chamar (ex.: `https://seusite.com`)
 3. O Dokploy faz o build, sobe os dois containers e expõe a porta via proxy.
@@ -411,9 +411,9 @@ curl http://127.0.0.1:8000/health
 
 ---
 
-## Como o IA_GO usa o minirag
+## Como um sistema usa o minirag
 
-O backend do IA_GO guarda **uma** `chaveapi` por ambiente (ex.: `abc123`
+O backend do **sistema** guarda **uma** `chaveapi` por ambiente (ex.: `abc123`
 para o backend em produção). Em cada operação:
 
 - **Ingestão:** o usuário da empresa 42 envia um documento → o backend
@@ -422,8 +422,8 @@ para o backend em produção). Em cada operação:
   `memoria: "empresa42"` → pega os pedaços → manda pro LLM (Clauricio via
   gateway) com a pergunta + os pedaços → o LLM responde.
 
-O minirag **não sabe** que o IA_GO existe. Ele só obedece à chave e à gaveta.
-Quem decide qual empresa existe e qual usuário pertence a qual é o IA_GO.
+O minirag **não sabe** que o sistema existe. Ele só obedece à chave e à gaveta.
+Quem decide qual empresa existe e qual usuário pertence a qual é o sistema.
 
 ---
 
