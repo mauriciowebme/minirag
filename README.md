@@ -366,17 +366,21 @@ docker ps --format '{{.Names}} {{.Status}}' | grep minirag
 curl http://127.0.0.1:8000/health
 ```
 
-### Produção (Dokploy)
+### Produção (qualquer plataforma Docker)
 
-1. No Dokploy: crie um **projeto tipo "docker"**, aponte para a pasta do repo.
-2. Na aba **Environment**, preencha:
+O minirag roda em qualquer ambiente com Docker. Segue um exemplo prático
+(usando o Dokploy, mas vale pra qualquer orquestrador / host):
+
+1. Crie um **projeto tipo "docker"**, aponte para a pasta do repo.
+2. Na aba **Environment** (ou `.env`), preencha:
    - `MINIRAG_USERS` — lista `nome:chave` (ex.: `sistema:abc123`)
    - `MINIRAG_DB_USER` / `MINIRAG_DB_PASSWORD` — usuário e senha do Postgres
    - `MINIRAG_CORS_ORIGINS` — origens que podem chamar (ex.: `https://seusite.com`)
-3. O Dokploy faz o build, sobe os dois containers e expõe a porta via proxy.
+3. Faça o build, suba os dois containers e exponha a porta via seu proxy.
 
 > **Nota:** a porta 8000 fica exposta só no host (`127.0.0.1:8000`).
-> A publicação pra internet é feita pelo proxy do Dokploy.
+> A publicação pra internet é feita pelo **seu proxy** (Dokploy, nginx, Caddy
+> ou o que usar).
 
 > **Persistência:** o Postgres guarda os dados num volume nomeado
 > (`minirag_data`). O volume sobrevive a reinícios e redeploys; pra zerar
