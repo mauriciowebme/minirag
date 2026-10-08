@@ -375,7 +375,9 @@ O minirag roda em qualquer ambiente com Docker. Segue um exemplo prático
 2. Na aba **Environment** (ou `.env`), preencha:
    - `MINIRAG_USERS` — lista `nome:chave` (ex.: `sistema:abc123`)
    - `MINIRAG_DB_USER` / `MINIRAG_DB_PASSWORD` — usuário e senha do Postgres
-   - `MINIRAG_CORS_ORIGINS` — origens que podem chamar (ex.: `https://seusite.com`)
+   - `MINIRAG_CORS_ORIGINS` — origens que podem chamar **a partir de navegador**
+     (ex.: `https://seusite.com`). Só importa pra chamada de JavaScript no
+     navegador; em uso servidor-para-servidor (o padrão) pode ficar vazio
 3. Faça o build, suba os dois containers e exponha a porta via seu proxy.
 
 > **Nota:** a porta 8000 fica exposta só no host (`127.0.0.1:8000`).
@@ -411,7 +413,7 @@ O minirag roda em qualquer ambiente com Docker. Segue um exemplo prático
 | `MINIRAG_DECAY_DIAS` | `30` | sem acesso por N dias → arquiva |
 | `MINIRAG_DECAY_MIN_ACESSOS` | `2` | usado N+ vezes nunca é arquivado |
 | `MINIRAG_DECAY_INTERVALO_MINUTOS` | `60` | de quanto em quanto o loop roda |
-| `MINIRAG_CORS_ORIGINS` | `""` | origens que podem chamar (CORS) |
+| `MINIRAG_CORS_ORIGINS` | `""` | origens de navegador que podem chamar; em uso servidor-para-servidor pode ficar vazio |
 
 ---
 
