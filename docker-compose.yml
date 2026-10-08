@@ -42,6 +42,16 @@ services:
       MINIRAG_CHUNK_OVERLAP: ${MINIRAG_CHUNK_OVERLAP:-80}
       MINIRAG_TOP_K: ${MINIRAG_TOP_K:-5}
       MINIRAG_MIN_SCORE: ${MINIRAG_MIN_SCORE:-0.55}
+      # Limites de seguranca (uso normal nunca estoura)
+      MINIRAG_MAX_CONTENT_CHARS: ${MINIRAG_MAX_CONTENT_CHARS:-500000}
+      MINIRAG_MAX_QUERY_CHARS: ${MINIRAG_MAX_QUERY_CHARS:-2000}
+      MINIRAG_MAX_CHUNKS_TENANT: ${MINIRAG_MAX_CHUNKS_TENANT:-10000}
+      # Memoria inteligente (decay): arquiva chunk sem acesso ha N dias
+      # e com menos de N acessos; reversivel (busca com include_archived revive)
+      MINIRAG_DECAY_ATIVO: ${MINIRAG_DECAY_ATIVO:-1}
+      MINIRAG_DECAY_DIAS: ${MINIRAG_DECAY_DIAS:-30}
+      MINIRAG_DECAY_MIN_ACESSOS: ${MINIRAG_DECAY_MIN_ACESSOS:-2}
+      MINIRAG_DECAY_INTERVALO_MINUTOS: ${MINIRAG_DECAY_INTERVALO_MINUTOS:-60}
       MINIRAG_USERS: ${MINIRAG_USERS:-}
       MINIRAG_CORS_ORIGINS: ${MINIRAG_CORS_ORIGINS:-}
     depends_on:
