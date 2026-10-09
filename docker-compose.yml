@@ -68,8 +68,12 @@ services:
       start_period: 120s
     expose:
       - "8000"
-    # O acesso externo (porta 8000) é SO via Traefik com o domínio
-    # minirag.techupsistemas.com (https://). Nada publicado no host.
+    ports:
+      # Acesso por domínio (Traefik, HTTPS) + os dois caminhos locais que o
+      # IA_GO já usa hoje: localhost do host e o IP da tailnet (o backend de
+      # produção/dev aponta para http://100.64.0.5:8000). Nunca 0.0.0.0.
+      - "127.0.0.1:8000:8000"
+      - "100.64.0.5:8000:8000"
 
 volumes:
   minirag_data:
