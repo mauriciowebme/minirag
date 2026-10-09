@@ -1,9 +1,9 @@
 # RAG service — Postgres(pgvector) + FastAPI + nomic-embed-text-v1.5
 # 2 containers: minirag-db (banco) + minirag-api (serviço, porta local por padrão)
 #
-# Acesso: SÓ pelo Traefik do Dokploy (domínio minirag.techupsistemas.com,
-# HTTPS). Sem ports: publicadas no host — a porta do container é alcançada
-# pela rede interna (expose), e o painel injeta as labels no deploy.
+# Acesso: domínio público via Traefik do Dokploy (minirag.techupsistemas.com,
+# HTTPS) + ports locais 127.0.0.1 e tailnet no api (ver seção ports:).
+# Sem container_name — no Dokploy ele some com os logs/métricas do painel.
 #
 # Para usar com Dokploy: crie um projeto "docker", aponte pra esse repo
 # (branch main), e preencha as variáveis na aba Environment (ou num .env):

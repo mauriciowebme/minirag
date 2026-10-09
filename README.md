@@ -396,11 +396,16 @@ O minirag roda em qualquer ambiente com Docker. Segue um exemplo prático
    - `MINIRAG_CORS_ORIGINS` — origens que podem chamar **a partir de navegador**
      (ex.: `https://seusite.com`). Só importa pra chamada de JavaScript no
      navegador; em uso servidor-para-servidor (o padrão) pode ficar vazio
-3. Faça o build, suba os dois containers e exponha a porta via seu proxy.
+3. Suba os dois containers pelo painel (Dokploy) ou `docker compose up -d` e exponha a porta via seu proxy.
 
-> **Nota:** a porta 8000 fica exposta só no host (`127.0.0.1:8000`).
-> A publicação pra internet é feita pelo **seu proxy** (Dokploy, nginx, Caddy
-> ou o que usar).
+> **Nota:** a porta 8000 fica exposta só no host (`127.0.0.1:8000`) e na
+> tailnet (`100.64.0.5:8000`); a publicação pra internet é pelo Traefik com o
+> domínio — **nunca `0.0.0.0`** (a API só tem chave, sem login).
+>
+> **Produção atual:** Dokploy do Contabo, serviço `minirag` (fonte github,
+> branch `main`, autoDeploy desligado — deploy manual), domínio
+> `https://minirag.techupsistemas.com`. O `docker-compose.yml` é a receita;
+> as chaves (`MINIRAG_USERS`) ficam na aba Environment do painel.
 
 > **Persistência:** o Postgres guarda os dados num volume nomeado
 > (`minirag_data`). O volume sobrevive a reinícios e redeploys; pra zerar
