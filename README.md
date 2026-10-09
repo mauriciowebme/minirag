@@ -463,3 +463,4 @@ Quem decide qual empresa existe e qual usuário pertence a qual é o sistema.
   redige a resposta.
 - **Não gerencia empresas/usuários** — a lista `MINIRAG_USERS` é fixa no
   ambiente; criar/alterar logins = editar variável + reiniciar.
+<!-- probe-autodeploy-1791579912 -->
