@@ -36,6 +36,7 @@ Endpoints:
   GET  /ingest/{job_id} -> status do job (na_fila|processando|concluido|erro)
   POST /search   -> le apenas a (login, memoria) do chamador; ?include_archived
   GET  /docs     -> lista apenas a (login, memoria); ?memoria=...; ?include_archived
+  DELETE /docs/{doc_id} -> apaga o doc (chunks + jobs na fila) na (login, memoria)
   POST /decay    -> roda o arquivamento AGORA (corpo opcional: dias, min_acessos)
 
 Fila de ingestao: o texto e gravado no banco (tabela ingest_jobs) e um worker
@@ -210,7 +211,7 @@ def init_db():
                 "doc_id TEXT NOT NULL, "
                 "title TEXT, "
                 "content TEXT NOT NULL, "
-                "status TEXT NOT NULL DEFAULT 'na_fila', "  # na_fila|processando|concluido|erro
+                "status TEXT NOT NULL DEFAULT 'na_fila', "  # na_fila|processando|concluido|erro|cancelado
                 "chunks_total INT NOT NULL DEFAULT 0, "
                 "chunks_feitos INT NOT NULL DEFAULT 0, "
                 "erro TEXT, "
@@ -352,7 +353,7 @@ async def lifespan(app: "FastAPI"):
 # docs_url=None: o Swagger do FastAPI mora em /docs, que colidiria com o
 # nosso GET /docs (listagem de documentos do tenant). Serviço interno,
 # entao desligamos a UI de docs do framework.
-app = FastAPI(title="Minirag", version="1.4.0", lifespan=lifespan,
+app = FastAPI(title="Minirag", version="1.5.0", lifespan=lifespan,
               docs_url=None, redoc_url=None)
 app.add_middleware(
     CORSMiddleware,
@@ -626,6 +627,58 @@ def list_docs(memoria: str = "", include_archived: bool = False,
 class DecayBody(BaseModel):
     dias: Optional[int] = Field(default=None, ge=0)
     min_acessos: Optional[int] = Field(default=None, ge=0)
+
+
+# ------------------------------------------------------------ delete doc ---
+@app.delete("/docs/{doc_id}")
+def delete_doc(doc_id: str, memoria: str = "", user: dict = Depends(authenticate)):
+    """Apaga DEFINITIVAMENTE um documento do chamador (chunks + jobs pendentes).
+
+    Escopo: só (login, memoria) de quem chama — mesmo isolamento da busca.
+    Regras:
+      - job 'processando' deste doc -> 409 (esperar a ingestao terminar;
+        assim o worker nao recria chunks depois do DELETE);
+      - jobs 'na_fila' deste doc    -> viram 'cancelado' (nunca rodam);
+      - chunks do doc (inclusive arquivados) -> apagados;
+      - doc inexistente no escopo   -> 404.
+    """
+    memoria = memoria.strip()
+    with connect() as conn:
+        with conn.cursor() as cur:
+            cur.execute(
+                "SELECT count(*) FROM chunks "
+                "WHERE tenant = %s AND memoria = %s AND doc_id = %s",
+                (user["tenant"], memoria, doc_id),
+            )
+            n_chunks = cur.fetchone()[0]
+            cur.execute(
+                "SELECT count(*) FROM ingest_jobs "
+                "WHERE tenant = %s AND memoria = %s AND doc_id = %s "
+                "AND status = 'processando'",
+                (user["tenant"], memoria, doc_id),
+            )
+            processandos = cur.fetchone()[0]
+            if processandos:
+                raise HTTPException(
+                    409, "documento em processamento agora; "
+                    "acompanhe o job e apague quando terminar")
+            if n_chunks == 0:
+                raise HTTPException(404, "documento nao encontrado nesta memoria")
+            cur.execute(
+                "UPDATE ingest_jobs SET status = 'cancelado', finalizado_em = now() "
+                "WHERE tenant = %s AND memoria = %s AND doc_id = %s "
+                "AND status = 'na_fila'",
+                (user["tenant"], memoria, doc_id),
+            )
+            cancelados = cur.rowcount
+            cur.execute(
+                "DELETE FROM chunks "
+                "WHERE tenant = %s AND memoria = %s AND doc_id = %s",
+                (user["tenant"], memoria, doc_id),
+            )
+            apagados = cur.rowcount
+    return {"tenant": user["tenant"], "memoria": memoria, "doc_id": doc_id,
+            "chunks_apagados": apagados, "jobs_cancelados": cancelados}
 
 
 @app.post("/decay")

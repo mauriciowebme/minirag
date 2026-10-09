@@ -245,6 +245,24 @@ decay na contagem (`chunks_arquivados`).
 
 ---
 
+### `DELETE /docs/{doc_id}` — apagar um documento
+
+**Request:**
+```
+DELETE /docs/regras-reuniao?memoria=empresa42
+Authorization: Bearer ***
+```
+
+Apaga DEFINITIVAMENTE os chunks do doc naquela (login, memória) — inclusive
+arquivados — e cancela jobs `na_fila` do mesmo doc. Não toca em docs de
+outros logins nem de outras gavetas.
+
+**Respostas:** `200` com `{"chunks_apagados": 3, "jobs_cancelados": 0}` ·
+`404` doc não existe na gaveta · `409` doc está `processando` agora
+(esperar a ingestão terminar, senão o worker recriaria os chunks).
+
+---
+
 ### `POST /decay` — rodar o "esquecimento" agora
 
 O serviço já roda o decay sozinho a cada `MINIRAG_DECAY_INTERVALO_MINUTOS`.

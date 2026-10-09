@@ -67,7 +67,11 @@ services:
     ports:
       # Só localhost por padrão; expõe pra internet via seu proxy/Dokploy,
       # não no host direto.
+      # Só localhost (uso de containers na mesma rede) + IP do tailscale0 do
+      # host: acessível APENAS pela tailnet (ex.: backend de dev na VM).
+      # Nunca 0.0.0.0 — a porta não nasce na WAN da Contabo.
       - "127.0.0.1:8000:8000"
+      - "100.64.0.5:8000:8000"
 
 volumes:
   minirag_data:
