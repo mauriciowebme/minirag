@@ -1,8 +1,12 @@
 # RAG service — Postgres(pgvector) + FastAPI + nomic-embed-text-v1.5
 # 2 containers: minirag-db (banco) + minirag-api (serviço, porta local por padrão)
 #
-# Para usar com Dokploy: crie um projeto "docker", aponte pra essa pasta,
-# e preencha as variáveis na aba Environment (ou num .env):
+# Acesso: SÓ pelo Traefik do Dokploy (domínio minirag.techupsistemas.com,
+# HTTPS). Sem ports: publicadas no host — a porta do container é alcançada
+# pela rede interna (expose), e o painel injeta as labels no deploy.
+#
+# Para usar com Dokploy: crie um projeto "docker", aponte pra esse repo
+# (branch main), e preencha as variáveis na aba Environment (ou num .env):
 #   MINIRAG_DB_USER / MINIRAG_DB_PASSWORD  (senha do banco; mesma nos dois serviços)
 #   MINIRAG_USERS                    lista "nome:chave" separada por vírgula —
 #                                    cada nome é um tenant com memória própria
@@ -11,7 +15,6 @@
 services:
   minirag-db:
     image: pgvector/pgvector:pg17
-    container_name: minirag-db
     restart: unless-stopped
     environment:
       POSTGRES_USER: ${MINIRAG_DB_USER:-minirag}
@@ -28,7 +31,6 @@ services:
 
   minirag-api:
     build: .
-    container_name: minirag-api
     restart: unless-stopped
     environment:
       MINIRAG_MODEL: ${MINIRAG_MODEL:-nomic-ai/nomic-embed-text-v1.5}
@@ -64,14 +66,10 @@ services:
       timeout: 5s
       retries: 12
       start_period: 120s
-    ports:
-      # Só localhost por padrão; expõe pra internet via seu proxy/Dokploy,
-      # não no host direto.
-      # Só localhost (uso de containers na mesma rede) + IP do tailscale0 do
-      # host: acessível APENAS pela tailnet (ex.: backend de dev na VM).
-      # Nunca 0.0.0.0 — a porta não nasce na WAN da Contabo.
-      - "127.0.0.1:8000:8000"
-      - "100.64.0.5:8000:8000"
+    expose:
+      - "8000"
+    # O acesso externo (porta 8000) é SO via Traefik com o domínio
+    # minirag.techupsistemas.com (https://). Nada publicado no host.
 
 volumes:
   minirag_data:
