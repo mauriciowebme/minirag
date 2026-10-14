@@ -26,7 +26,7 @@ m.save("/app/models")
 print("model saved, dim =", m.get_embedding_dimension())
 PY
 
-COPY api.py .
+COPY api.py mcp_server.py ./
 
 EXPOSE 8000
 

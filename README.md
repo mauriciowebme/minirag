@@ -295,6 +295,34 @@ Os dois campos são **opcionais** — sem corpo, usa os defaults do servidor.
 
 ---
 
+## MCP — acesso por agentes (POST /mcp)
+
+Além da REST, o minirag fala **MCP (Model Context Protocol)** em
+`POST /mcp`: JSON-RPC 2.0 sobre HTTP, stateless (sem sessão, sem SSE),
+mesma porta, mesma chave Bearer, mesmas gavetas (`memoria`). É a porta
+que agentes de IA (ex.: o Hermes) usam; a REST continua intacta pro
+IA_GO.
+
+**Fluxo do cliente MCP:**
+1. `initialize` → servidor devolve `protocolVersion`, `capabilities.tools`, `serverInfo`.
+2. `notifications/initialized` → aceito (202, sem corpo).
+3. `tools/list` → as 6 ferramentas: `health`, `search`, `ingest`, `ingest_status`, `list_docs`, `delete_doc` (argumentos idênticos aos corpos da REST).
+4. `tools/call` → `{"name": "search", "arguments": {"query": "...", "memoria": "empresa42"}}` → resposta no formato MCP (`content: [{type: "text", text: "<JSON>"}]`).
+
+**Exemplo (curl):**
+```bash
+curl -X POST https://minirag.techupsistemas.com/mcp \
+  -H "Authorization: Bearer $CHAVE" -H "Content-Type: application/json" \
+  -d '{"jsonrpc":"2.0","id":1,"method":"tools/call","params":{"name":"search","arguments":{"query":"que horas é a reunião","memoria":"empresa42"}}}'
+```
+
+Erros de tool viram `result` com `isError: true` (linguagem do MCP); erro
+de auth/protocolo segue o padrão JSON-RPC (`-32001`, `-32601`, `-32700`).
+O código da camada está em `mcp_server.py` (~240 linhas; chama as funções
+do `api.py` direto, sem HTTP interno, sem duplicar regra).
+
+---
+
 ## Erros
 
 | código | situação |

@@ -38,6 +38,9 @@ Endpoints:
   GET  /docs     -> lista apenas a (login, memoria); ?memoria=...; ?include_archived
   DELETE /docs/{doc_id} -> apaga o doc (chunks + jobs na fila) na (login, memoria)
   POST /decay    -> roda o arquivamento AGORA (corpo opcional: dias, min_acessos)
+  POST /mcp      -> servidor MCP (JSON-RPC 2.0, streamable HTTP stateless) —
+                    mesma auth Bearer; tools: health/search/ingest/
+                    ingest_status/list_docs/delete_doc (ver mcp_server.py)
 
 Fila de ingestao: o texto e gravado no banco (tabela ingest_jobs) e um worker
 de fundo faz os embeddings pedaco a pedaco (~6 s cada em CPU). O pedido volta
@@ -353,7 +356,7 @@ async def lifespan(app: "FastAPI"):
 # docs_url=None: o Swagger do FastAPI mora em /docs, que colidiria com o
 # nosso GET /docs (listagem de documentos do tenant). Serviço interno,
 # entao desligamos a UI de docs do framework.
-app = FastAPI(title="Minirag", version="1.5.0", lifespan=lifespan,
+app = FastAPI(title="Minirag", version="1.6.0", lifespan=lifespan,
               docs_url=None, redoc_url=None)
 app.add_middleware(
     CORSMiddleware,
@@ -361,6 +364,12 @@ app.add_middleware(
     allow_methods=["GET", "POST", "OPTIONS"],
     allow_headers=["Authorization", "Content-Type"],
 )
+
+# Servidor MCP (JSON-RPC sobre POST /mcp) — mesma app, mesma auth, chama as
+# funcoes deste modulo direto (sem HTTP interno). Ver mcp_server.py.
+from mcp_server import mcp_endpoint  # noqa: E402  (import apos `app`)
+
+app.post("/mcp")(mcp_endpoint)
 
 
 @app.get("/health")
