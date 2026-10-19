@@ -431,13 +431,23 @@ O minirag roda em qualquer ambiente com Docker. Segue um exemplo prático
 > domínio — **nunca `0.0.0.0`** (a API só tem chave, sem login).
 >
 > **Produção atual:** Dokploy do Contabo, serviço `minirag` (fonte github,
-> branch `main`, autoDeploy desligado — deploy manual), domínio
-> `https://minirag.techupsistemas.com`. O `docker-compose.yml` é a receita;
-> as chaves (`MINIRAG_USERS`) ficam na aba Environment do painel.
+> branch `main`, **autoDeploy ligado** — todo push em `main` reimplanta),
+> domínio `https://minirag.techupsistemas.com`. O `docker-compose.yml` é a
+> receita; as chaves (`MINIRAG_USERS`) ficam na aba Environment do painel.
 
 > **Persistência:** o Postgres guarda os dados num volume nomeado
 > (`minirag_data`). O volume sobrevive a reinícios e redeploys; pra zerar
 > tudo (banco + memórias), use `docker-compose down -v`.
+
+> **O serviço sumiu depois de um reboot do host?** No boot, o daemon religa os
+> containers sem respeitar o `depends_on`, então a API pode cair ao tentar o
+> `init_db` antes do Postgres aceitar conexão — e um container **parado** é
+> apagado pela faxina agendada do Dokploy ("Docker Cleanup", que roda
+> `docker container prune --force` + `docker image prune -a --force`), levando
+> container e imagem. Sinais: `docker ps -a` sem o `minirag-api`, `GET /health`
+> respondendo 404 pelo domínio, banco continuando `Up`. Recuperar: qualquer
+> push em `main` reimplanta (o primeiro build volta a baixar torch + modelo,
+> ~500 MB).
 
 ---
 
