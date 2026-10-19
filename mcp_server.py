@@ -29,7 +29,7 @@ from fastapi.responses import JSONResponse, Response
 from pydantic import ValidationError
 
 PROTOCOLOS_SUPORTADOS = ("2025-06-18", "2025-03-10", "2024-11-05")
-SERVER_INFO = {"name": "minirag", "version": "1.7.0"}
+SERVER_INFO = {"name": "minirag", "version": "1.9.0"}
 
 # Schemas JSON (inputSchema) das tools — args viram o corpo da REST
 TOOLS = [
@@ -163,12 +163,16 @@ async def _execute_tool(name, args, user):
             raise LookupError("job nao existe (ou e de outro usuario)")
         return st
     if name == "list_docs":
+        # SEMPRE por nome: a REST ganhou parametros novos (tenant) e chamadas
+        # posicionais silenciosamente reiam o dict user no lugar errado.
         return await asyncio.to_thread(
-            api.list_docs, args.get("memoria", ""),
-            bool(args.get("include_archived", False)), user)
+            api.list_docs, memoria=args.get("memoria", ""),
+            include_archived=bool(args.get("include_archived", False)),
+            user=user)
     if name == "delete_doc":
         return await asyncio.to_thread(
-            api.delete_doc, args["doc_id"], args.get("memoria", ""), user)
+            api.delete_doc, doc_id=args["doc_id"],
+            memoria=args.get("memoria", ""), user=user)
     raise LookupError("tool desconhecida: %s" % name)
 
 

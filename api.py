@@ -18,13 +18,21 @@ Limites de seguranca (protegem o servidor; uso normal nunca estoura):
              estourou = 413; regravar o MESMO doc_id nao conta dobrado)
   - gaveta:  nome de memoria com ate 128 chars
 
-Memória inteligente (decay):
-  Cada busca que devolve um chunk carimba last_accessed_at e soma access_count.
-  De MINIRAG_DECAY_INTERVALO_MINUTOS em MINIRAG_DECAY_INTERVALO_MINUTOS (e via
-  POST /decay), vira ARQUIVADO o chunk com access_count < MIN_ACESSOS e sem
-  acesso ha mais de DIAS. Busca normal nao ve arquivados; busca com
-  include_archived=true acha E devolve o chunk pra ativa (esquece, mas lembra
-  se precisarem de novo). Nada e apagado — arquivamento e reversivel.
+Modelo de documentos (v1.8):
+  A fonte da verdade passou a ser a tabela `documents` (conteudo original
+  inteiro, por (tenant, memoria, doc_id)). Os chunks sao INDICE DERIVADO:
+  todo ingest/editao grava o documento e reembedding o indexa; editar um
+  arquivo = PUT /documents/{doc_id} (volta pra fila, versão antiga no ar até
+  o job concluir). Docs anteriores a v1.8 sao reconstruidos no boot pela
+  concatenacao dos chunks (origem='reconstruido').
+
+Memória inteligente (decay, v1.8 — por DOCUMENTO):
+  Cada busca que devolve um chunk carimba uso no chunk; o decay agrega a
+  soma de acessos e o ultimo acesso DOS CHUNKS DO DOCUMENTO e arquiva o
+  documento INTEIRO (nunca mais "metade de uma nota" esfriada). Busca com
+  include_archived acha arquivado e REVIVE o documento inteiro. Nada e
+  apagado — arquivamento e reversivel. POST /decay agora so mexe no tenant
+  de quem chama; a chave operador pode rodar global (?tenant vazio).
   Nota de performance: embedding e CPU-only (~6 s por chunk de 500 palavras);
   arquivo de 2.000 linhas (~69 chunks) demora ~6-7 min pra ingerir, e o teto
   de 500k chars (~218 chunks) pode levar ~20 min — o pedido segura a conexão
@@ -32,15 +40,23 @@ Memória inteligente (decay):
 
 Endpoints:
   GET  /health   -> publico
-  POST /ingest   -> entra na FILA (responde 202 + job_id na hora; nao segura conexão)
+  POST /ingest   -> entra na FILA (202 + job_id; nao segura conexao). Operador
+                    pode mirar outro tenant no campo "tenant" do corpo.
   GET  /ingest/{job_id} -> status do job (na_fila|processando|concluido|erro)
   POST /search   -> le apenas a (login, memoria) do chamador; ?include_archived
   GET  /docs     -> lista apenas a (login, memoria); ?memoria=...; ?include_archived
-  DELETE /docs/{doc_id} -> apaga o doc (chunks + jobs na fila) na (login, memoria)
-  POST /decay    -> roda o arquivamento AGORA (corpo opcional: dias, min_acessos)
+  DELETE /docs/{doc_id} -> apaga o doc (chunks + documents + jobs na fila)
+  GET  /gavetas  -> mapa tenant x memoria x docs/chunks (tenant: so o seu;
+                    operador: tudo, ou ?tenant=<nome>)
+  GET  /jobs     -> fila de ingestao com status (?status=..., ?tenant=..., ?limit=)
+  GET  /documents/{doc_id}       -> conteudo original do arquivo (fonte da verdade)
+  GET  /documents/{doc_id}/raw   -> download com Content-Disposition
+  PUT  /documents/{doc_id}       -> EDICAO: grava novo conteudo e reindexa (fila)
+  POST /decay    -> arquivamento AGORA, no escopo de quem chama (operador: global)
   POST /mcp      -> servidor MCP (JSON-RPC 2.0, streamable HTTP stateless) —
                     mesma auth Bearer; tools: health/search/ingest/
                     ingest_status/list_docs/delete_doc (ver mcp_server.py)
+  GET  /painel   -> interface web (login por chave; modo tenant ou operador)
 
 Fila de ingestao: o texto e gravado no banco (tabela ingest_jobs) e um worker
 de fundo faz os embeddings pedaco a pedaco (~6 s cada em CPU). O pedido volta
@@ -50,6 +66,7 @@ processamento; se o container reiniciar no meio, o job volta pra fila
 """
 import asyncio
 import hmac
+import json
 import os
 import re
 import time
@@ -60,6 +77,8 @@ from typing import Optional
 import psycopg
 from fastapi import Depends, FastAPI, HTTPException, Request
 from fastapi.middleware.cors import CORSMiddleware
+from fastapi.responses import Response
+from fastapi.staticfiles import StaticFiles
 from pydantic import BaseModel, Field
 from sentence_transformers import SentenceTransformer
 
@@ -129,6 +148,34 @@ def parse_users(raw: str):
 
 # Lista de acesso lida UMA vez no boot (trocar = reiniciar o servico)
 USERS = parse_users(os.environ.get("MINIRAG_USERS", ""))
+
+# v1.8: chave(s) de OPERADOR (MINIRAG_OPERADOR="nome:chave,..."). Escopo novo:
+# ve TODAS as gavetas e pode operar em tenant alheio (?tenant= / corpo).
+# Login comum permanece rigorosamente por-tenant como sempre.
+OPERADOR = parse_users(os.environ.get("MINIRAG_OPERADOR", ""))
+
+
+def is_operador(user: dict) -> bool:
+    return bool(user.get("operador"))
+
+
+def tenant_for(user: dict, arg: Optional[str]) -> str:
+    """Tenant ALVO de uma operacao especifica (docs, ingest, search...).
+
+    Login comum: SEMPRE o proprio (arg ignorado — nao ha como escapar do
+    proprio escopo). Operador: ?tenant=<nome> se dado, senao o proprio nome.
+    """
+    if is_operador(user):
+        return (arg or "").strip() or user["tenant"]
+    return user["tenant"]
+
+
+def tenant_filter(user: dict, arg: Optional[str]):
+    """Filtro para agregados (/gavetas, /jobs): None = ver tudo (operador)."""
+    if is_operador(user):
+        a = (arg or "").strip()
+        return a if a else None  # None => sem filtro WHERE tenant
+    return user["tenant"]
 
 
 # ---------------------------------------------------------------- model ----
@@ -265,6 +312,21 @@ def init_db():
                 "CREATE INDEX IF NOT EXISTS ingest_jobs_status_idx "
                 "ON ingest_jobs (status, id)"
             )
+            # v1.8: DOCUMENTS — a fonte da verdade (conteudo original inteiro).
+            # chunks passou a ser indice DERIVADO: editar o doc reindexa tudo.
+            cur.execute(
+                "CREATE TABLE IF NOT EXISTS documents ("
+                "tenant TEXT NOT NULL, "
+                "memoria TEXT NOT NULL DEFAULT '', "
+                "doc_id TEXT NOT NULL, "
+                "title TEXT, "
+                "content TEXT NOT NULL, "
+                "size_bytes BIGINT NOT NULL DEFAULT 0, "
+                "origem TEXT NOT NULL DEFAULT 'direto', "  # direto|reconstruido
+                "criado_em TIMESTAMPTZ NOT NULL DEFAULT now(), "
+                "atualizado_em TIMESTAMPTZ NOT NULL DEFAULT now(), "
+                "PRIMARY KEY (tenant, memoria, doc_id))"
+            )
     # container pode ter morrido no meio de um job: devolve pra fila no boot
     with connect() as conn:
         with conn.cursor() as cur:
@@ -272,6 +334,26 @@ def init_db():
                 "UPDATE ingest_jobs SET status = 'na_fila', chunks_feitos = 0 "
                 "WHERE status = 'processando'"
             )
+    # v1.8: migracao — reconstrói documents dos chunks pre-v1.8 (concatena na
+    # ordem de insercao; origem='reconstruido' marca fonte aproximada).
+    with connect() as conn:
+        with conn.cursor() as cur:
+            cur.execute(
+                "INSERT INTO documents (tenant, memoria, doc_id, title, "
+                "content, size_bytes, origem, criado_em, atualizado_em) "
+                "SELECT c.tenant, c.memoria, c.doc_id, max(c.title), "
+                "string_agg(c.body, ' ' ORDER BY c.id), "
+                "sum(octet_length(c.body)), 'reconstruido', "
+                "min(c.ingested_at), max(c.ingested_at) "
+                "FROM chunks c "
+                "WHERE NOT EXISTS (SELECT 1 FROM documents d "
+                "WHERE d.tenant = c.tenant AND d.memoria = c.memoria "
+                "AND d.doc_id = c.doc_id) "
+                "GROUP BY c.tenant, c.memoria, c.doc_id"
+            )
+            if cur.rowcount:
+                print("[minirag] documents: %d doc(s) reconstruido(s) de chunks"
+                      % cur.rowcount, flush=True)
     if not USERS:
         print("[minirag] AVISO: MINIRAG_USERS vazio — nenhum pedido entra")
     else:
@@ -279,6 +361,9 @@ def init_db():
             "[minirag] %d usuario(s) com acesso: %s"
             % (len(USERS), ", ".join(n for n, _ in USERS))
         )
+        if OPERADOR:
+            print("[minirag] operador ativo: %s (ve todas as gavetas)"
+                  % ", ".join(n for n, _ in OPERADOR))
         print(
             "[minirag] limites: content<=%d chars, query<=%d chars, "
             "%d chunks/usuario; decay=%s (%d dias, min %d acessos, a cada %d min)"
@@ -321,36 +406,61 @@ def chunk_text(text: str, max_words: int, overlap: int):
 
 
 # --------------------------------------------------------------- decay ----
-def run_decay(dias: Optional[int] = None, min_acessos: Optional[int] = None) -> dict:
-    """Arquiva (sem apagar) chunks pouco usados ha muito tempo. Global.
+def run_decay(dias: Optional[int] = None, min_acessos: Optional[int] = None,
+              tenant: Optional[str] = None) -> dict:
+    """Arquiva (sem apagar) documentos pouco usados ha muito tempo. v1.8: a
+    DECISAO E POR DOCUMENTO — soma dos acessos dos chunks do doc; o doc inteiro
+    vira arquivado (nunca mais metade de uma nota esfriada sozinha).
 
-    dias/min_acessos None = usa o CONFIG. dias=0 arquiva tudo abaixo do
-    minimo de acessos AGORA (util p/ teste e operacao manual).
+    dias/min_acessos None = usa o CONFIG. dias=0 arquiva tudo abaixo do minimo
+    AGORA (util p/ teste e operacao manual). tenant=None = global (so operador
+    chega aqui sem filtro; POST /decay passa o tenant de quem chama).
     """
     d = CONFIG.decay_dias if dias is None else dias
     m = CONFIG.decay_min_acessos if min_acessos is None else min_acessos
+    escopo = " AND u.tenant = %s" if tenant is not None else ""
+    params = (m, d, tenant) if tenant is not None else (m, d)
     with connect() as conn:
         with conn.cursor() as cur:
             cur.execute(
-                "UPDATE chunks SET archived_at = now() "
-                "WHERE archived_at IS NULL "
-                "AND access_count < %s "
-                "AND COALESCE(last_accessed_at, ingested_at) "
-                "< now() - make_interval(days => %s)",
-                (m, d),
+                "WITH uso AS ("
+                "  SELECT tenant, memoria, doc_id, "
+                "         sum(access_count) AS acessos, "
+                "         max(COALESCE(last_accessed_at, ingested_at)) AS ultimo "
+                "  FROM chunks GROUP BY tenant, memoria, doc_id"
+                ") "
+                "UPDATE chunks c SET archived_at = now() "
+                "FROM uso u "
+                "WHERE u.tenant = c.tenant AND u.memoria = c.memoria "
+                "  AND u.doc_id = c.doc_id "
+                "  AND c.archived_at IS NULL "
+                "  AND u.acessos < %s "
+                "  AND u.ultimo < now() - make_interval(days => %s)"
+                + escopo.replace("u.tenant", "c.tenant")
+                + " RETURNING c.tenant, c.memoria, c.doc_id",
+                params,
             )
-            agora = cur.rowcount
+            atingidos = cur.fetchall()
+            docs_afetados = {(r[0], r[1], r[2]) for r in atingidos}
+            f = " WHERE tenant = %s" if tenant is not None else ""
             cur.execute(
                 "SELECT count(*) FILTER (WHERE archived_at IS NULL), "
-                "count(*) FILTER (WHERE archived_at IS NOT NULL) FROM chunks"
+                "count(*) FILTER (WHERE archived_at IS NOT NULL) FROM chunks" + f,
+                (tenant,) if tenant is not None else (),
             )
             ativos, arquivados = cur.fetchone()
-    return {"arquivados_agora": agora, "ativos": ativos, "arquivados": arquivados}
+    return {"arquivados_agora": len(atingidos),
+            "docs_arquivados_agora": len(docs_afetados),
+            "ativos": ativos, "arquivados": arquivados}
 
 
 # --------------------------------------------------------------- auth ----
 def authenticate(request: Request):
-    """Nivel 1: quem esta logando. A memoria (nivel 2) vem no corpo do pedido."""
+    """Nivel 1: quem esta logando. A memoria (nivel 2) vem no corpo do pedido.
+
+    v1.8: chaves de MINIRAG_OPERADOR ganham escopo 'operador' (veem tudo);
+    chaves de MINIRAG_USERS permanecem tenant puro (o proprio, sempre).
+    """
     authz = request.headers.get("Authorization", "")
     token = authz[len("Bearer "):] if authz.startswith("Bearer ") else authz
     token = token.strip()
@@ -359,6 +469,9 @@ def authenticate(request: Request):
     for name, key in USERS:
         if hmac.compare_digest(token, key):
             return {"tenant": name}
+    for name, key in OPERADOR:
+        if hmac.compare_digest(token, key):
+            return {"tenant": name, "operador": True}
     raise HTTPException(401, "chave nao habilitada")
 
 
@@ -398,12 +511,12 @@ async def lifespan(app: "FastAPI"):
 # docs_url=None: o Swagger do FastAPI mora em /docs, que colidiria com o
 # nosso GET /docs (listagem de documentos do tenant). Serviço interno,
 # entao desligamos a UI de docs do framework.
-app = FastAPI(title="Minirag", version="1.7.0", lifespan=lifespan,
+app = FastAPI(title="Minirag", version="1.9.0", lifespan=lifespan,
               docs_url=None, redoc_url=None)
 app.add_middleware(
     CORSMiddleware,
     allow_origins=ORIGINS,
-    allow_methods=["GET", "POST", "OPTIONS"],
+    allow_methods=["GET", "POST", "PUT", "DELETE", "OPTIONS"],
     allow_headers=["Authorization", "Content-Type"],
 )
 
@@ -413,10 +526,20 @@ from mcp_server import mcp_endpoint  # noqa: E402  (import apos `app`)
 
 app.post("/mcp")(mcp_endpoint)
 
+# v1.9 — PAINEL: front-end estatico servido pela propria API (pasta painel/).
+# Separacao logica FE/BE sem segundo container: a pagina usa exatamente as
+# mesmas rotas REST + Bearer do resto do servico. Sem a pasta (dev solto),
+# o servico segue normal — so nao ha painel.
+PAINEL_DIR = os.path.join(os.path.dirname(os.path.abspath(__file__)), "painel")
+if os.path.isdir(PAINEL_DIR):
+    app.mount("/painel", StaticFiles(directory=PAINEL_DIR, html=True),
+              name="painel")
+
 
 @app.get("/health")
 def health():
-    return {"status": "ok", "dim": MODEL_DIM, "usuarios": len(USERS)}
+    return {"status": "ok", "dim": MODEL_DIM, "usuarios": len(USERS),
+            "operador": bool(OPERADOR), "versao": "1.9.0"}
 
 
 # ---------------------------------------------------------- ingest ---------
@@ -425,6 +548,12 @@ class IngestBody(BaseModel):
     title: Optional[str] = None
     content: str = Field(..., min_length=1, max_length=CONFIG.max_content_chars)
     memoria: str = Field(default="", max_length=128)
+    tenant: Optional[str] = None  # v1.8: SÓ a chave operador consegue mirar aqui
+
+
+@app.post("/ingest", status_code=202)
+def ingest(body: IngestBody, user: dict = Depends(authenticate)):
+    return enqueue_ingest(body, tenant_for(user, body.tenant))
 
 
 def enqueue_ingest(body: IngestBody, tenant: str) -> dict:
@@ -454,17 +583,17 @@ def enqueue_ingest(body: IngestBody, tenant: str) -> dict:
             "mensagem": "na fila; acompanhe em GET /ingest/%s" % job_id}
 
 
-@app.post("/ingest", status_code=202)
-def ingest(body: IngestBody, user: dict = Depends(authenticate)):
-    return enqueue_ingest(body, user["tenant"])
-
-
-def job_status(cur, job_id: int, tenant: str):
+def job_status(cur, job_id: int, tenant: Optional[str]):
+    filtro = ""
+    params = (job_id,)
+    if tenant is not None:
+        filtro = " AND tenant = %s"
+        params = (job_id, tenant)
     cur.execute(
         "SELECT id, doc_id, coalesce(title,''), memoria, status, chunks_total, "
         "chunks_feitos, erro, criado_em, finalizado_em FROM ingest_jobs "
-        "WHERE id = %s AND tenant = %s",
-        (job_id, tenant),
+        "WHERE id = %s" + filtro,
+        params,
     )
     r = cur.fetchone()
     if not r:
@@ -476,10 +605,12 @@ def job_status(cur, job_id: int, tenant: str):
 
 
 @app.get("/ingest/{job_id}")
-def get_job(job_id: int, user: dict = Depends(authenticate)):
+def get_job(job_id: int, tenant: str = "", user: dict = Depends(authenticate)):
+    # tenant=None = operador sem filtro (acha job de qualquer um); comum so ve o seu
+    alvo = tenant_filter(user, tenant)
     with connect() as conn:
         with conn.cursor() as cur:
-            st = job_status(cur, job_id, user["tenant"])
+            st = job_status(cur, job_id, alvo)
     if st is None:
         raise HTTPException(404, "job nao existe (ou e de outro usuario)")
     return st
@@ -550,6 +681,18 @@ def process_job(job_id, tenant, memoria, doc_id, title, content, chunks_total):
                         "AND doc_id=%s AND id < %s",
                         (tenant, memoria, doc_id, first_new_id),
                     )
+                # v1.8: a fonte da verdade — documento original (re)gravado.
+                cur.execute(
+                    "INSERT INTO documents (tenant, memoria, doc_id, title, "
+                    "content, size_bytes, origem) "
+                    "VALUES (%s, %s, %s, %s, %s, %s, 'direto') "
+                    "ON CONFLICT (tenant, memoria, doc_id) DO UPDATE SET "
+                    "title = EXCLUDED.title, content = EXCLUDED.content, "
+                    "size_bytes = EXCLUDED.size_bytes, origem = 'direto', "
+                    "atualizado_em = now()",
+                    (tenant, memoria, doc_id, title, content,
+                     len(content.encode("utf-8"))),
+                )
                 cur.execute(
                     "UPDATE ingest_jobs SET status='concluido', finalizado_em=now() "
                     "WHERE id = %s",
@@ -583,12 +726,14 @@ class SearchBody(BaseModel):
     min_score: float = Field(default=CONFIG.min_score, ge=0.0, le=1.0)
     memoria: str = Field(default="", max_length=128)
     include_archived: bool = False
+    tenant: Optional[str] = None  # v1.8: ignorado por login comum; operador mira
 
 
 @app.post("/search")
 def search(body: SearchBody, user: dict = Depends(authenticate)):
     vec = embed(body.query)
     memoria = body.memoria.strip()
+    tenant = tenant_for(user, body.tenant)
     where = "tenant = %s AND memoria = %s"
     if not body.include_archived:
         where += " AND archived_at IS NULL"
@@ -600,7 +745,7 @@ def search(body: SearchBody, user: dict = Depends(authenticate)):
                 "archived_at IS NOT NULL AS arquivado "
                 f"FROM chunks WHERE {where} "
                 "ORDER BY embedding <=> %s::vector LIMIT %s",
-                (vec, user["tenant"], memoria, vec, body.k),
+                (vec, tenant, memoria, vec, body.k),
             )
             rows = cur.fetchall()
     items = []
@@ -619,10 +764,12 @@ def search(body: SearchBody, user: dict = Depends(authenticate)):
                 "arquivado": bool(r[5]),
             }
         )
-    # memoria inteligente: o que foi devolvido ganha carimbo de uso; chunk
-    # arquivado achado por include_archived VOLTA para a ativa (revive)
+    # memoria inteligente: o que foi devolvido ganha carimbo de uso; em v1.8
+    # incluir arquivado REVIVE O DOCUMENTO INTEIRO do chunk achado (simetria
+    # com o decay, que tambem decide por documento — nunca meias notas ativas)
     if items:
         ids = [it["chunk_id"] for it in items]
+        docs_reviver = sorted({it["doc_id"] for it in items if it["arquivado"]})
         with connect() as conn:
             with conn.cursor() as cur:
                 cur.execute(
@@ -630,21 +777,23 @@ def search(body: SearchBody, user: dict = Depends(authenticate)):
                     "access_count = access_count + 1 WHERE id = ANY(%s)",
                     (ids,),
                 )
-                if body.include_archived:
+                if docs_reviver:
                     cur.execute(
                         "UPDATE chunks SET archived_at = NULL "
-                        "WHERE id = ANY(%s) AND archived_at IS NOT NULL",
-                        (ids,),
+                        "WHERE tenant = %s AND memoria = %s "
+                        "AND doc_id = ANY(%s) AND archived_at IS NOT NULL",
+                        (tenant, memoria, docs_reviver),
                     )
-    return {"tenant": user["tenant"], "memoria": memoria,
+    return {"tenant": tenant, "memoria": memoria,
             "items": items, "total": len(items)}
 
 
 # ---------------------------------------------------------- docs -----------
 @app.get("/docs")
 def list_docs(memoria: str = "", include_archived: bool = False,
-              user: dict = Depends(authenticate)):
+              tenant: str = "", user: dict = Depends(authenticate)):
     memoria = memoria.strip()
+    tenant = tenant_for(user, tenant)
     where = "tenant = %s AND memoria = %s"
     if not include_archived:
         where += " AND archived_at IS NULL"
@@ -655,11 +804,11 @@ def list_docs(memoria: str = "", include_archived: bool = False,
                 "count(*) FILTER (WHERE archived_at IS NOT NULL) "
                 f"FROM chunks WHERE {where} "
                 "GROUP BY doc_id ORDER BY max(ingested_at) DESC",
-                (user["tenant"], memoria),
+                (tenant, memoria),
             )
             rows = cur.fetchall()
     return {
-        "tenant": user["tenant"],
+        "tenant": tenant,
         "memoria": memoria,
         "docs": [
             {
@@ -674,6 +823,175 @@ def list_docs(memoria: str = "", include_archived: bool = False,
     }
 
 
+# --------------------------------------------------- agregados (v1.8) ------
+@app.get("/gavetas")
+def list_gavetas(tenant: str = "", user: dict = Depends(authenticate)):
+    """Mapa da memoria: tenant x gaveta x docs x chunks (vivos/arquivados).
+
+    Login comum ve so o dele; chave operador ve TUDO (ou ?tenant=<nome>).
+    """
+    alvo = tenant_filter(user, tenant)
+    where = ""
+    params = ()
+    if alvo is not None:
+        where = "WHERE tenant = %s"
+        params = (alvo,)
+    with connect() as conn:
+        with conn.cursor() as cur:
+            cur.execute(
+                "SELECT tenant, memoria, count(*), count(DISTINCT doc_id), "
+                "count(*) FILTER (WHERE archived_at IS NOT NULL), "
+                "min(ingested_at), max(ingested_at) "
+                "FROM chunks " + where + " "
+                "GROUP BY tenant, memoria ORDER BY tenant, memoria",
+                params,
+            )
+            rows = cur.fetchall()
+            cur.execute(
+                "SELECT count(*) FROM documents"
+                + (" WHERE tenant = %s" if alvo is not None else ""),
+                params,
+            )
+            n_docs_fonte = cur.fetchone()[0]
+    return {
+        "operador": is_operador(user),
+        "gavetas": [
+            {
+                "tenant": r[0],
+                "memoria": r[1],
+                "chunks": r[2],
+                "docs": r[3],
+                "chunks_arquivados": r[4],
+                "primeiro_ingress": r[5].isoformat() if r[5] else None,
+                "ultimo_ingress": r[6].isoformat() if r[6] else None,
+            }
+            for r in rows
+        ],
+        "documentos_fonte": n_docs_fonte,
+    }
+
+
+@app.get("/jobs")
+def list_jobs(status: str = "", tenant: str = "", limit: int = 50,
+              user: dict = Depends(authenticate)):
+    """Fila de ingestao com status (?status=na_fila|processando|concluido|
+    erro|cancelado). Login comum: so os jobs dele; operador: todos."""
+    alvo = tenant_filter(user, tenant)
+    conds, params = [], []
+    if alvo is not None:
+        conds.append("tenant = %s")
+        params.append(alvo)
+    if status.strip():
+        conds.append("status = %s")
+        params.append(status.strip())
+    where = ("WHERE " + " AND ".join(conds) + " ") if conds else ""
+    lim = max(1, min(int(limit), 200))
+    with connect() as conn:
+        with conn.cursor() as cur:
+            cur.execute(
+                "SELECT id, tenant, memoria, doc_id, coalesce(title,''), status, "
+                "chunks_total, chunks_feitos, erro, criado_em, finalizado_em "
+                "FROM ingest_jobs " + where +
+                "ORDER BY id DESC LIMIT %s",
+                tuple(params + [lim]),
+            )
+            rows = cur.fetchall()
+            cur.execute(
+                "SELECT status, count(*) FROM ingest_jobs "
+                + where.rstrip() + " GROUP BY status",
+                tuple(params),
+            )
+            resumo = {r[0]: r[1] for r in cur.fetchall()}
+    return {
+        "resumo_por_status": resumo,
+        "jobs": [
+            {"job_id": r[0], "tenant": r[1], "memoria": r[2], "doc_id": r[3],
+             "title": r[4], "status": r[5], "chunks_total": r[6],
+             "chunks_feitos": r[7], "erro": r[8],
+             "criado_em": r[9].isoformat() if r[9] else None,
+             "finalizado_em": r[10].isoformat() if r[10] else None}
+            for r in rows
+        ],
+    }
+
+
+# ------------------------------------------------ documents (v1.8) ----------
+def get_document_row(cur, tenant: str, memoria: str, doc_id: str):
+    cur.execute(
+        "SELECT title, content, size_bytes, origem, criado_em, atualizado_em "
+        "FROM documents WHERE tenant = %s AND memoria = %s AND doc_id = %s",
+        (tenant, memoria, doc_id),
+    )
+    return cur.fetchone()
+
+
+@app.get("/documents/{doc_id}")
+def get_document(doc_id: str, memoria: str = "", tenant: str = "",
+                 user: dict = Depends(authenticate)):
+    """Conteudo ORIGINAL do arquivo (a fonte da verdade — nao os chunks)."""
+    t = tenant_for(user, tenant)
+    with connect() as conn:
+        with conn.cursor() as cur:
+            r = get_document_row(cur, t, memoria.strip(), doc_id)
+    if not r:
+        raise HTTPException(404, "documento nao encontrado nesta memoria")
+    return {"tenant": t, "memoria": memoria.strip(), "doc_id": doc_id,
+            "title": r[0], "content": r[1], "size_bytes": r[2], "origem": r[3],
+            "criado_em": r[4].isoformat(), "atualizado_em": r[5].isoformat()}
+
+
+@app.get("/documents/{doc_id}/raw")
+def download_document(doc_id: str, memoria: str = "", tenant: str = "",
+                      user: dict = Depends(authenticate)):
+    """Download do arquivo original (Content-Disposition anexo)."""
+    t = tenant_for(user, tenant)
+    with connect() as conn:
+        with conn.cursor() as cur:
+            r = get_document_row(cur, t, memoria.strip(), doc_id)
+    if not r:
+        raise HTTPException(404, "documento nao encontrado nesta memoria")
+    nome = re.sub(r"[^A-Za-z0-9._-]", "_", (r[0] or doc_id))[:80] or "documento"
+    return Response(
+        content=r[1], media_type="text/plain; charset=utf-8",
+        headers={"Content-Disposition": 'attachment; filename="%s.txt"' % nome},
+    )
+
+
+class EditBody(BaseModel):
+    content: str = Field(..., min_length=1, max_length=CONFIG.max_content_chars)
+    title: Optional[str] = None
+    memoria: str = Field(default="", max_length=128)
+    tenant: Optional[str] = None
+
+
+@app.put("/documents/{doc_id}")
+def put_document(doc_id: str, body: EditBody,
+                 user: dict = Depends(authenticate)):
+    """EDICAO do arquivo: grava conteudo novo e REINDEXA (volta pra fila).
+
+    A busca continua respondendo com a versao anterior ate o job concluir —
+    a mesma garantia do ingest original. Responde 202 + job_id.
+    """
+    t = tenant_for(user, body.tenant)
+    memoria = body.memoria.strip()
+    with connect() as conn:
+        with conn.cursor() as cur:
+            cur.execute(
+                "SELECT 1 FROM chunks WHERE tenant=%s AND memoria=%s AND doc_id=%s "
+                "LIMIT 1",
+                (t, memoria, doc_id),
+            )
+            if not cur.fetchone():
+                raise HTTPException(404, "documento nao existe nesta memoria "
+                                         "(para criar, use POST /ingest)")
+    ing = IngestBody(doc_id=doc_id, title=body.title, content=body.content,
+                     memoria=body.memoria)
+    r = enqueue_ingest(ing, t)
+    r["doc_id"] = doc_id
+    r["mensagem"] = "edicao na fila; reindexando — versao antiga no ar ate concluir"
+    return Response(status_code=202, content=json.dumps(r, ensure_ascii=False))
+
+
 # ---------------------------------------------------------- decay ----------
 class DecayBody(BaseModel):
     dias: Optional[int] = Field(default=None, ge=0)
@@ -682,8 +1000,11 @@ class DecayBody(BaseModel):
 
 # ------------------------------------------------------------ delete doc ---
 @app.delete("/docs/{doc_id}")
-def delete_doc(doc_id: str, memoria: str = "", user: dict = Depends(authenticate)):
-    """Apaga DEFINITIVAMENTE um documento do chamador (chunks + jobs pendentes).
+def delete_doc(doc_id: str, memoria: str = "", tenant: str = "",
+               user: dict = Depends(authenticate)):
+    """Apaga DEFINITIVAMENTE um documento do chamador (chunks + documents +
+    jobs pendentes). v1.8: a FONTE (documents) vai junto — nao fica 'orfao'
+    editavel de indice apagado.
 
     Escopo: só (login, memoria) de quem chama — mesmo isolamento da busca.
     Regras:
@@ -694,49 +1015,67 @@ def delete_doc(doc_id: str, memoria: str = "", user: dict = Depends(authenticate
       - doc inexistente no escopo   -> 404.
     """
     memoria = memoria.strip()
+    tenant = tenant_for(user, tenant)
     with connect() as conn:
         with conn.cursor() as cur:
             cur.execute(
                 "SELECT count(*) FROM chunks "
                 "WHERE tenant = %s AND memoria = %s AND doc_id = %s",
-                (user["tenant"], memoria, doc_id),
+                (tenant, memoria, doc_id),
             )
             n_chunks = cur.fetchone()[0]
             cur.execute(
                 "SELECT count(*) FROM ingest_jobs "
                 "WHERE tenant = %s AND memoria = %s AND doc_id = %s "
                 "AND status = 'processando'",
-                (user["tenant"], memoria, doc_id),
+                (tenant, memoria, doc_id),
             )
             processandos = cur.fetchone()[0]
             if processandos:
                 raise HTTPException(
                     409, "documento em processamento agora; "
                     "acompanhe o job e apague quando terminar")
-            if n_chunks == 0:
+            cur.execute(
+                "SELECT count(*) FROM documents "
+                "WHERE tenant = %s AND memoria = %s AND doc_id = %s",
+                (tenant, memoria, doc_id),
+            )
+            n_fonte = cur.fetchone()[0]
+            if n_chunks == 0 and n_fonte == 0:
                 raise HTTPException(404, "documento nao encontrado nesta memoria")
             cur.execute(
                 "UPDATE ingest_jobs SET status = 'cancelado', finalizado_em = now() "
                 "WHERE tenant = %s AND memoria = %s AND doc_id = %s "
                 "AND status = 'na_fila'",
-                (user["tenant"], memoria, doc_id),
+                (tenant, memoria, doc_id),
             )
             cancelados = cur.rowcount
             cur.execute(
                 "DELETE FROM chunks "
                 "WHERE tenant = %s AND memoria = %s AND doc_id = %s",
-                (user["tenant"], memoria, doc_id),
+                (tenant, memoria, doc_id),
             )
             apagados = cur.rowcount
-    return {"tenant": user["tenant"], "memoria": memoria, "doc_id": doc_id,
-            "chunks_apagados": apagados, "jobs_cancelados": cancelados}
+            cur.execute(
+                "DELETE FROM documents "
+                "WHERE tenant = %s AND memoria = %s AND doc_id = %s",
+                (tenant, memoria, doc_id),
+            )
+            fonte_apagada = cur.rowcount
+    return {"tenant": tenant, "memoria": memoria, "doc_id": doc_id,
+            "chunks_apagados": apagados, "jobs_cancelados": cancelados,
+            "fonte_apagada": bool(fonte_apagada)}
 
 
 @app.post("/decay")
 def decay(body: DecayBody, user: dict = Depends(authenticate)):
-    """Roda o decay AGORA (o loop de fundo tambem roda sozinho). Global.
+    """Roda o arquivamento AGORA (o loop de fundo tambem roda sozinho).
 
-    Corpo opcional: {"dias": 0, "min_acessos": 2} sobrepoe o CONFIG
-    (dias=0 arquiva imediatamente tudo abaixo do minimo de acessos).
+    v1.8: escopo POR SEGURANCA — login comum so arquiva o PROPRIO tenant
+    (antes qualquer chave mexia no mundo inteiro). Chave operador sem
+    ?tenant roda global. Corpo: {"dias": 0, "min_acessos": 2} sobrepoe o
+    CONFIG (dias=0 arquiva imediatamente tudo abaixo do minimo de acessos).
+    O loop de fundo continua global (e o mesmo processo, nao ha chamador).
     """
-    return run_decay(dias=body.dias, min_acessos=body.min_acessos)
+    alvo = None if is_operador(user) else user["tenant"]
+    return run_decay(dias=body.dias, min_acessos=body.min_acessos, tenant=alvo)

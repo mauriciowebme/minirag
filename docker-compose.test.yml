@@ -38,6 +38,7 @@ services:
       MINIRAG_DB_WAIT_TRIES: ${MINIRAG_DB_WAIT_TRIES:-30}
       MINIRAG_DB_WAIT_SECONDS: ${MINIRAG_DB_WAIT_SECONDS:-2}
       MINIRAG_USERS: ${MINIRAG_USERS:-}
+      MINIRAG_OPERADOR: ${MINIRAG_OPERADOR:-}
     depends_on:
       minirag-db:
         condition: service_healthy

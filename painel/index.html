@@ -1,0 +1,115 @@
+<!DOCTYPE html>
+<html lang="pt-BR">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Minirag — Painel</title>
+<link rel="stylesheet" href="style.css">
+</head>
+<body>
+<header>
+  <div class="marca">⚡ minirag <span class="sub">painel de memória</span></div>
+  <nav id="nav" hidden>
+    <button data-view="gavetas" class="aba ativa">Gavetas</button>
+    <button data-view="arquivos" class="aba">Arquivos</button>
+    <button data-view="buscar" class="aba">Buscar</button>
+    <button data-view="jobs" class="aba">Fila</button>
+    <button data-view="editor" class="aba" id="abaEditor" hidden>Editor</button>
+    <span class="userbox"><span id="quo"></span>
+      <button id="btnSair" class="linterna">sair</button></span>
+  </nav>
+</header>
+
+<main>
+  <!-- LOGIN -->
+  <section id="vLogin">
+    <div class="cartao entrada">
+      <h1>Entrar</h1>
+      <p class="dica">Use uma chave de tenant (vê só as gavetas dela) ou a
+        chave <b>operador</b> (vê tudo, de todos os tenants).</p>
+      <label>Nome da chave<input id="loginNome" autocomplete="username" placeholder="ex.: ia-go ou operador"></label>
+      <label>Segredo<input id="loginKey" type="password" autocomplete="current-password" placeholder="xxxxxxxx"></label>
+      <div class="linha-botoes"><button id="btnEntrar" class="primario">Entrar</button>
+      <span id="loginErro" class="erro"></span></div>
+      <p class="miudo">O segredo fica só nesta aba do navegador (sessão), nunca em disco.</p>
+    </div>
+  </section>
+
+  <!-- GAVETAS -->
+  <section id="vGavetas" hidden>
+    <div class="linha-botoes">
+      <h2>Mapa da memória</h2>
+      <span class="esp"></span>
+      <button id="btnDecay" title="arquiva documentos pouco usados">rodar decay agora</button>
+    </div>
+    <div id="gavetasInfo" class="dica"></div>
+    <div id="gavetasGrid" class="grade"></div>
+  </section>
+
+  <!-- ARQUIVOS -->
+  <section id="vArquivos" hidden>
+    <div class="linha-botoes">
+      <h2>Arquivos <span id="arqOnde" class="sub2"></span></h2>
+      <span class="esp"></span>
+      <label class="upload linterna">⬆ upload (.txt/.md)
+        <input type="file" id="arquivoInput" accept=".txt,.md,.markdown,text/plain" hidden></label>
+    </div>
+    <div id="arqInfo" class="dica"></div>
+    <table id="arqTabela">
+      <thead><tr><th>título</th><th>doc_id</th><th class="num">chunks</th>
+        <th class="num">arquiv.</th><th>atualizado</th><th></th></tr></thead>
+      <tbody></tbody>
+    </table>
+  </section>
+
+  <!-- EDITOR -->
+  <section id="vEditor" hidden>
+    <div class="linha-botoes">
+      <h2>Editor <span id="edOnde" class="sub2"></span></h2>
+      <span class="esp"></span>
+      <span id="edStatus" class="dica"></span>
+      <button id="btnSalvar" class="primario">salvar &amp; reindexar</button>
+      <button id="btnCancelarEd" class="linterna">fechar</button>
+    </div>
+    <label>título<input id="edTitulo"></label>
+    <textarea id="edConteudo" spellcheck="false" placeholder="conteúdo do arquivo..."></textarea>
+    <p class="miudo">Salvar manda para a fila: a busca continua respondendo a versão
+      antiga até o reembedding terminar (~6 s por chunk em CPU).</p>
+  </section>
+
+  <!-- BUSCAR -->
+  <section id="vBuscar" hidden>
+    <h2>Testar busca semântica <span id="busOnde" class="sub2"></span></h2>
+    <div class="linha-botoes">
+      <input id="busQuery" class="cresce" placeholder="pergunta em linguagem natural...">
+      <button id="btnBuscar" class="primario">buscar</button>
+      <label class="linterna"><input type="checkbox" id="busArq"> incluir arquivados
+        (achar revive o documento)</label>
+    </div>
+    <div id="busResultado"></div>
+  </section>
+
+  <!-- JOBS -->
+  <section id="vJobs" hidden>
+    <div class="linha-botoes">
+      <h2>Fila de ingestão</h2><span class="esp"></span>
+      <select id="jobStatus">
+        <option value="">todos</option><option>na_fila</option>
+        <option>processando</option><option>concluido</option>
+        <option>erro</option><option>cancelado</option>
+      </select>
+      <button id="btnJobs" class="linterna">atualizar</button>
+    </div>
+    <div id="jobsInfo" class="dica"></div>
+    <table id="jobsTabela">
+      <thead><tr><th>job</th><th>tenant</th><th>gaveta</th><th>doc_id</th>
+        <th>status</th><th class="num">progresso</th><th>erro</th></tr></thead>
+      <tbody></tbody>
+    </table>
+  </section>
+</main>
+
+<div id="toast"></div>
+<script src="app.js"></script>
+</body>
+</html>

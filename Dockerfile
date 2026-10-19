@@ -27,6 +27,7 @@ print("model saved, dim =", m.get_embedding_dimension())
 PY
 
 COPY api.py mcp_server.py ./
+COPY painel/ ./painel/
 
 EXPOSE 8000
 

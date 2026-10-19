@@ -98,6 +98,7 @@ Content-Type: application/json
 | `title` | string | não | título (aparece nos resultados) |
 | `content` | string | sim | o **texto puro** (extraído do arquivo antes, se for .md/.pdf/.docx); máx. `MINIRAG_MAX_CONTENT_CHARS` (default 500.000) |
 | `memoria` | string | não | gaveta (ex.: id da empresa); máx. 128 chars; vazio = gaveta padrão do login |
+| `tenant` | string | não | **v1.8**: só a chave operador consegue mirar outro tenant; login comum tem o campo ignorado (sempre cai no próprio) |
 
 **Response (202 — aceito na fila):**
 ```json
@@ -292,6 +293,65 @@ Os dois campos são **opcionais** — sem corpo, usa os defaults do servidor.
 ```json
 { "status": "ok", "dim": 768, "usuarios": 2 }
 ```
+
+---
+
+## v1.8/v1.9 — documentos, decay POR DOCUMENTO, operador e painel (19/10/2026)
+
+### Fonte da verdade: tabela `documents`
+O minirag passou a guardar o **arquivo original inteiro**, não só os pedaços
+embedados. `documents (tenant, memoria, doc_id, title, content, size_bytes,
+origem, criado_em, atualizado_em)` — PK = (tenant, memoria, doc_id). Os
+`chunks` agora são **índice derivado**: editar a fonte reindexa tudo.
+
+- **`GET /documents/{doc_id}?memoria=&tenant=`** — devolve o conteúdo original
+  (`origem`: `direto` = texto que entrou; `reconstruido` = migrado dos chunks
+  no boot, concatenação aproximada).
+- **`GET /documents/{doc_id}/raw`** — download com `Content-Disposition`.
+- **`PUT /documents/{doc_id}`** — edição: corpo `{content, title?, memoria?,
+  tenant?}` → 202 + job_id; entra na MESMA fila do ingest; busca responde a
+  versão antiga até o job concluir; 404 se o doc não existe (criar é /ingest).
+- **`DELETE /docs/{doc_id}`** — agora apaga chunks **+ jobs + documento fonte**
+  (resposta ganha `fonte_apagada`).
+- Docs pré-v1.8 são reconstruídos automaticamente no boot.
+
+### Decay por DOCUMENTO (correção semântica)
+Antes: cada chunk esfriava sozinho → metade de um arquivo podia ser arquivada
+com a outra metade ativa. Agora o uso é **agregado por documento** (soma de
+`access_count`, último acesso mais recente): ou o documento inteiro esfria,
+ou fica inteiro. A busca com `include_archived` revive o **documento inteiro**.
+`POST /decay` mudou de escopo: login comum só arquiva o PRÓPRIO tenant
+(segurança); chave operador roda global. O loop de fundo segue global.
+
+### Chave operador (nível novo, opcional)
+`MINIRAG_OPERADOR="nome:chave"` (formato idêntico ao `MINIRAG_USERS`).
+A mesma rota, alcance decidido pela credencial:
+
+| endpoint | login comum | operador |
+|---|---|---|
+| `GET /gavetas` | só as gavetas dele | **todas**, de todos os tenants (`?tenant=` filtra) |
+| `GET /jobs?status=&limit=` | só os jobs dele | todos os jobs + resumo por status |
+| `?tenant=` em docs/search/ingest/documents/delete | **ignorado** (nunca escapa do próprio) | mira o tenant escolhido |
+
+Nada do isolamento atual enfraquece: a visibilidade extra vive só na chave
+nova. `/health` passa a reportar `operador: true|false` e `versao`.
+
+### Painel — `GET /painel`
+Front-end servido pela própria API (pasta `painel/` no repo; HTML+JS puro,
+sem build, sem segundo container, sem CORS extra). Tela de login: nome da
+chave + segredo (sessão só em `sessionStorage` — fecha a aba, sumiu). Quem
+loga com chave comum vê só as próprias gavetas; com a operador vê o mapa
+inteiro. Telas: **Gavetas** (mapa + botão decay) → **Arquivos** (lista,
+upload .txt/.md, download, apagar) → **Editor** (abre a fonte, salva →
+reindexa com progresso ao vivo) → **Buscar** (teste de score, incluir
+arquivados) → **Fila** (jobs por status).
+
+### Testes
+`test_v18.py` (29 checagens): fonte exata, raw, PUT reindexa, escopos
+tenant×operador, **injeção de tenant ignorada para chave comum**, decay por
+doc com discriminador anti-meia-noite, revive inteiro, jobs agregados, delete
+com fonte. `test_mcp.py` segue 17/17 (tools MCP corrigidas para chamar a REST
+**por nome** — assinaturas mudaram).
 
 ---
 
