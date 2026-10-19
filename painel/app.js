@@ -68,6 +68,8 @@ function guardarEscopo() {
   sessionStorage.setItem("mr_mem", estado.memoria);
 }
 function aposLogin() {
+  document.body.classList.remove("fora");   // saiu da tela exclusiva de login
+  $("#loginErro").textContent = "";
   $("#vLogin").hidden = true; $("#nav").hidden = false;
   $("#quo").innerHTML = `${estado.nome} ` +
     (estado.operador ? '<span class="chip op">operador</span>' : '<span class="chip">tenant</span>');
@@ -75,6 +77,8 @@ function aposLogin() {
 }
 function sair(msg) {
   sessionStorage.clear();
+  document.body.classList.add("fora");     // volta ao palco só com o login
+  $("#abaEditor").hidden = true;
   $("#nav").hidden = true; $("#vLogin").hidden = false;
   document.querySelectorAll("main section").forEach(s => s.hidden = s.id !== "vLogin");
   if (msg) $("#loginErro").textContent = msg;
@@ -278,6 +282,7 @@ $("#jobStatus").addEventListener("change", carregarJobs);
 
 // -------------------------------------------------------------------- boot --
 if (estado.key && estado.nome) {
+  $("#loginErro").textContent = "restaurando sessão…";
   api("/gavetas").then(g => {
     estado.operador = !!g.operador; aposLogin();
   }).catch(() => sair("sessão expirada ou chave inválida"));

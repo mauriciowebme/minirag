@@ -25,6 +25,16 @@ h1 { margin: 0 0 6px; } h2 { margin: 0; font-size: 18px; }
 .cartao { background: var(--card); border: 1px solid var(--borda);
   border-radius: 12px; padding: 22px; }
 .entrada { max-width: 460px; margin: 8vh auto; }
+/* estado "fora" (sem sessão): tela EXCLUSIVA de login — cabeçalho e painel
+   invisíveis; só o card num palco limpo. Autenticou, a classe sai. */
+body.fora header, body.fora #toast { display: none; }
+body.fora { display: flex; align-items: center; justify-content: center;
+  min-height: 100vh;
+  background: radial-gradient(720px 420px at 50% 28%, #141a24 0%, var(--bg) 70%); }
+body.fora main { width: 100%; padding: 0 16px; margin: 0; }
+body.fora .entrada { margin: 0 auto; box-shadow: 0 18px 50px rgba(0,0,0,.45); }
+.selo { color: var(--sub); font-weight: 600; letter-spacing: .4px;
+  font-size: 14px; margin-bottom: 4px; }
 label { display: block; margin: 12px 0; color: var(--sub); font-size: 13px; }
 label > input, textarea, select { width: 100%; margin-top: 4px; }
 input, textarea, select { background: #0d1117; color: var(--txt);
