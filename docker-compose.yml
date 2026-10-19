@@ -31,8 +31,13 @@ services:
 
   minirag-api:
     build: .
-    restart: unless-stopped
+    # always (e nao unless-stopped): se o boot derrubar a API, o Docker tenta
+    # de novo mesmo depois de restart do daemon — nunca fica "parado esperando
+    # mao", que e o estado que a faxina de prune apaga sem deixar rastro.
+    restart: always
     environment:
+      # stdout sem buffer: log de boot aparece no docker logs / no painel
+      PYTHONUNBUFFERED: "1"
       MINIRAG_MODEL: ${MINIRAG_MODEL:-nomic-ai/nomic-embed-text-v1.5}
       MINIRAG_MODEL_DIR: /app/models
       MINIRAG_DB_HOST: minirag-db
@@ -40,6 +45,9 @@ services:
       MINIRAG_DB_USER: ${MINIRAG_DB_USER:-minirag}
       MINIRAG_DB_PASSWORD: ${MINIRAG_DB_PASSWORD:-minirag}
       MINIRAG_DB_NAME: ${MINIRAG_DB_NAME:-minirag}
+      # espera o banco no boot (no do host o Docker religa sem depends_on)
+      MINIRAG_DB_WAIT_TRIES: ${MINIRAG_DB_WAIT_TRIES:-30}
+      MINIRAG_DB_WAIT_SECONDS: ${MINIRAG_DB_WAIT_SECONDS:-2}
       MINIRAG_MAX_CHUNK_WORDS: ${MINIRAG_MAX_CHUNK_WORDS:-500}
       MINIRAG_CHUNK_OVERLAP: ${MINIRAG_CHUNK_OVERLAP:-80}
       MINIRAG_TOP_K: ${MINIRAG_TOP_K:-5}

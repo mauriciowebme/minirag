@@ -52,6 +52,7 @@ import asyncio
 import hmac
 import os
 import re
+import time
 from contextlib import asynccontextmanager
 from dataclasses import dataclass
 from typing import Optional
@@ -73,6 +74,8 @@ class Config:
     db_user: str
     db_password: str
     db_name: str
+    db_wait_tries: int
+    db_wait_seconds: int
     max_chunk_words: int
     chunk_overlap: int
     top_k: int
@@ -94,6 +97,8 @@ CONFIG = Config(
     db_user=os.environ.get("MINIRAG_DB_USER", "minirag"),
     db_password=os.environ.get("MINIRAG_DB_PASSWORD", "minirag"),
     db_name=os.environ.get("MINIRAG_DB_NAME", "minirag"),
+    db_wait_tries=int(os.environ.get("MINIRAG_DB_WAIT_TRIES", "30")),
+    db_wait_seconds=int(os.environ.get("MINIRAG_DB_WAIT_SECONDS", "2")),
     max_chunk_words=int(os.environ.get("MINIRAG_MAX_CHUNK_WORDS", "500")),
     chunk_overlap=int(os.environ.get("MINIRAG_CHUNK_OVERLAP", "80")),
     top_k=int(os.environ.get("MINIRAG_TOP_K", "5")),
@@ -158,6 +163,41 @@ def connect():
         password=CONFIG.db_password,
         dbname=CONFIG.db_name,
     )
+
+
+def wait_db() -> None:
+    """Espera o Postgres aceitar conexao antes de subir o servico.
+
+    Porque isso existe: no boot do servidor o Docker religa cada container por
+    conta propria e NAO respeita o depends_on/healthcheck do compose, entao a
+    API costumava chamar init_db() com o banco ainda frio e morrer. Container
+    morto + a faxina de prune do painel = servico apagado sem rastro.
+
+    Tenta db_wait_tries vezes, dorme db_wait_seconds entre tentativas (default
+    30 x 2s = ate 60s). Esgotou: levanta erro e o container morre com mensagem
+    clara — healthcheck nunca marca saudavel falso, e o restart: always tenta
+    de novo do zero.
+    """
+    last = None
+    for attempt in range(1, CONFIG.db_wait_tries + 1):
+        try:
+            with connect() as conn:
+                conn.execute("SELECT 1")
+            if attempt > 1:
+                # flush: print sem flush fica no buffer quando stdout e um
+                # pipe (docker logs) — o boot ficava sem registro visivel
+                print("[minirag] Postgres respondeu na tentativa %d" % attempt,
+                      flush=True)
+            return
+        except Exception as e:
+            last = e
+            print("[minirag] aguardando Postgres (%d/%d): %s"
+                  % (attempt, CONFIG.db_wait_tries,
+                     str(e).splitlines()[0][:160]), flush=True)
+            time.sleep(CONFIG.db_wait_seconds)
+    raise RuntimeError(
+        "Postgres indisponivel apos %d tentativas de %ds: %s"
+        % (CONFIG.db_wait_tries, CONFIG.db_wait_seconds, last))
 
 
 def init_db():
@@ -328,9 +368,11 @@ ORIGINS = [o.strip() for o in os.environ.get("MINIRAG_CORS_ORIGINS", "").split("
 
 @asynccontextmanager
 async def lifespan(app: "FastAPI"):
-    # boot: carrega o modelo de embedding e cria tabelas ANTES de o uvicorn
-    # comecar a servir; se falhar, container morre (healthcheck nao marca
-    # saudavel falso).
+    # boot: espera o banco, entao carrega o modelo de embedding e cria as
+    # tabelas ANTES de o uvicorn comecar a servir; se o banco nunca aparecer,
+    # o container morre com mensagem clara (healthcheck nao marca saudavel
+    # falso) e o restart policy do Docker tenta de novo.
+    wait_db()
     load_model()
     init_db()
     decay_task = None
@@ -356,7 +398,7 @@ async def lifespan(app: "FastAPI"):
 # docs_url=None: o Swagger do FastAPI mora em /docs, que colidiria com o
 # nosso GET /docs (listagem de documentos do tenant). Serviço interno,
 # entao desligamos a UI de docs do framework.
-app = FastAPI(title="Minirag", version="1.6.0", lifespan=lifespan,
+app = FastAPI(title="Minirag", version="1.7.0", lifespan=lifespan,
               docs_url=None, redoc_url=None)
 app.add_middleware(
     CORSMiddleware,

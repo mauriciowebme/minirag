@@ -28,12 +28,15 @@ services:
   minirag-api:
     build: .
     environment:
+      PYTHONUNBUFFERED: "1"
       MINIRAG_MODEL_DIR: /app/models
       MINIRAG_DB_HOST: minirag-db
       MINIRAG_DB_PORT: "5432"
       MINIRAG_DB_USER: ${MINIRAG_DB_USER:-miniragtest}
       MINIRAG_DB_PASSWORD: ${MINIAG_DB_PWD:-miniragtest}
       MINIRAG_DB_NAME: ${MINIRAG_DB_NAME:-miniragtest}
+      MINIRAG_DB_WAIT_TRIES: ${MINIRAG_DB_WAIT_TRIES:-30}
+      MINIRAG_DB_WAIT_SECONDS: ${MINIRAG_DB_WAIT_SECONDS:-2}
       MINIRAG_USERS: ${MINIRAG_USERS:-}
     depends_on:
       minirag-db:

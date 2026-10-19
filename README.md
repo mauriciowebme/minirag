@@ -429,6 +429,9 @@ O minirag roda em qualquer ambiente com Docker. Segue um exemplo prático
 > **Nota:** a porta 8000 fica exposta só no host (`127.0.0.1:8000`) e na
 > tailnet (`100.64.0.5:8000`); a publicação pra internet é pelo Traefik com o
 > domínio — **nunca `0.0.0.0`** (a API só tem chave, sem login).
+> Cuidado medido no boot de 18/10: o dockerd tentou abrir `100.64.0.5:8000` 6s
+> antes de a interface `tailscale0` existir e falhou com *cannot assign requested
+> address* — publicar porta num IP de VPN depende da VPN já estar de pé.
 >
 > **Produção atual:** Dokploy do Contabo, serviço `minirag` (fonte github,
 > branch `main`, **autoDeploy ligado** — todo push em `main` reimplanta),
@@ -440,14 +443,18 @@ O minirag roda em qualquer ambiente com Docker. Segue um exemplo prático
 > tudo (banco + memórias), use `docker-compose down -v`.
 
 > **O serviço sumiu depois de um reboot do host?** No boot, o daemon religa os
-> containers sem respeitar o `depends_on`, então a API pode cair ao tentar o
-> `init_db` antes do Postgres aceitar conexão — e um container **parado** é
-> apagado pela faxina agendada do Dokploy ("Docker Cleanup", que roda
-> `docker container prune --force` + `docker image prune -a --force`), levando
-> container e imagem. Sinais: `docker ps -a` sem o `minirag-api`, `GET /health`
-> respondendo 404 pelo domínio, banco continuando `Up`. Recuperar: qualquer
-> push em `main` reimplanta (o primeiro build volta a baixar torch + modelo,
-> ~500 MB).
+> containers por conta própria, **sem** respeitar o `depends_on` — e um container
+> que fique **parado** é apagado pela faxina agendada do Dokploy ("Docker
+> Cleanup": `docker container prune --force`, que pega todo container parado, e
+> em seguida `docker image prune -a --force`, que pega a imagem já órfã; volume é
+> o único passo excluído). Sinais: `docker ps -a` sem o `minirag-api`, `GET
+> /health` respondendo 404 pelo domínio, banco continuando `Up`.
+> **Corrigido na v1.7:** a API espera o banco aceitar conexão antes de servir
+> (`MINIRAG_DB_WAIT_TRIES` × `MINIRAG_DB_WAIT_SECONDS`, padrão 30 × 2s = 60s) e
+> o serviço usa `restart: always`. Se o banco nunca aparecer, o processo morre
+> com `RuntimeError` no log — nunca finge saúde — e o Docker tenta o boot de
+> novo. Recuperar um serviço já apagado: qualquer push em `main` reimplanta (o
+> primeiro build volta a baixar torch + modelo, ~500 MB).
 
 ---
 
@@ -463,6 +470,8 @@ O minirag roda em qualquer ambiente com Docker. Segue um exemplo prático
 | `MINIRAG_DB_USER` | `minirag` | usuário do Postgres |
 | `MINIRAG_DB_PASSWORD` | `minirag` | senha do Postgres |
 | `MINIRAG_DB_NAME` | `minirag` | nome do banco |
+| `MINIRAG_DB_WAIT_TRIES` | `30` | tentativas de esperar o Postgres no boot |
+| `MINIRAG_DB_WAIT_SECONDS` | `2` | pausa entre tentativas (30x2 = ate 60s) |
 | `MINIRAG_MAX_CHUNK_WORDS` | `500` | palavras por pedaço |
 | `MINIRAG_CHUNK_OVERLAP` | `80` | palavras de sobreposição entre pedaços |
 | `MINIRAG_TOP_K` | `5` | quantos resultados por busca |
