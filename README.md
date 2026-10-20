@@ -10,6 +10,28 @@ parecidos com a pergunta, com uma nota de 0 a 1.
 
 ---
 
+## v2.5 — imagem e PDF escaneado entram por OCR (20/10/2026)
+
+Antes, foto/print (`png`, `jpg`) era recusada e PDF digitalizado respondia `422`.
+Agora os dois entram: o texto é **lido da imagem** e indexado como qualquer documento.
+
+- **Motor**: [rapidocr](https://github.com/RapidAI/RapidOCR) 3.10 com modelos **PP-OCRv6**
+  (detecção + leitura) em onnxruntime — CPU, offline, sem GPU e sem tesseract.
+  Roda no **processo Python do embedder** (`POST /ocr` interno), não no Node.
+- **Tipos novos**: `png`, `jpg`, `jpeg`, `webp`, `tif`, `tiff` → `tipo_detectado: "imagem"`.
+- **PDF escaneado**: quando a camada de texto tem menos de 20 caracteres, o PDF é
+  rasterizado com `pdftoppm` (poppler) a 150 dpi e cada página passa pelo OCR.
+- **Limite**: 6 páginas de PDF escaneado por arquivo (`MINIRAG_OCR_PAGINAS_MAX`) —
+  medido ~4 s por foto/print e ~12 s por página A4 nesta VPS. Acima disso o envio é
+  recusado com orientação para dividir o arquivo.
+- **Aviso honesto**: OCR erra **número** e embaralha tabela/coluna. O original fica
+  guardado e o `/docs` marca `arquivo.ocr: true` (chip `OCR` no painel) para conferência.
+- Imagem **sem texto** (paisagem, foto de produto) → `422` com mensagem clara;
+  para esse caso o caminho é descrever no nome/nota.
+
+Resposta do `POST /arquivos` ganhou `lido_por_ocr` e `paginas_ocr`; `/health` ganhou
+`ocr: "ok" | "fora"`; o MCP (`upload_file`) aceita imagem sem mudança de assinatura.
+
 ## v2.0 — aplicação em TypeScript, embedding em Python (20/10/2026)
 
 O serviço foi reescrito em **Node/TypeScript**. O contrato HTTP é o mesmo da
@@ -403,11 +425,13 @@ guarda o binário e indexa o texto extraído dele.
 | `POST /arquivos` (multipart, campo `arquivo`) | recebe o arquivo (+ campos `memoria`, `tenant` só p/ operador, `doc_id?`, `title?`), **guarda o original**, converte em texto e enfileira. `201` documento novo · `200` quando **substituiu** (`substituiu:true`) · `422` tipo não aceito/arquivo sem texto · `413` acima de 15 MB |
 | `GET /documents/{doc_id}/arquivo?memoria=` | devolve o **binário original** com `content-type` e nome certos (`404` se o doc foi criado como texto no painel) |
 
-**Tipos aceitos**: pdf, docx, xlsx, csv, html, txt, md (15 MB por arquivo).
+**Tipos aceitos**: pdf, docx, xlsx, csv, html, txt, md e imagem (png, jpg, webp, tiff) — 15 MB por arquivo.
 
 - **pdf** → `pdfjs-dist` (legacy) por página. O `pdf-parse@1.1.1` foi removido: o pdf.js
   embutido nele (2016) recusa PDFs atuais com `bad XRef entry` (medido com fpdf2, Word e
-  LibreOffice). PDF **sem texto** (digitalizado) → `422` explicando que precisa OCR.
+  LibreOffice). PDF **sem texto** (digitalizado) → OCR por página (v2.5).
+- **imagem** (png/jpg/webp/tiff) → OCR direto; imagem menor que 900 px de largura é
+  ampliada 2× antes de ler (medido: recupera linha que se perdia).
 - **docx** → `mammoth` para HTML e daí texto (o markdown do mammoth escapa pontuação:
   `\.`, `\-` e suja o índice).
 - **xlsx** → `exceljs`; cada aba vira `## Planilha: nome`, com `colunas: a | b` e uma
@@ -426,10 +450,10 @@ reindexa — o **original guardado acompanha a edição** (senão o download dev
 versão velha); pdf/docx/xlsx → baixa o original, edita na máquina e sobe de novo (ou
 usa "⬆ versão" no painel, que mantém o mesmo `doc_id`).
 
-No `/docs`, cada item traz `arquivo.nome`, `arquivo.tipo` (texto, pdf, docx, planilha),
-`arquivo.ext` (md, pdf, xlsx… — é o que o painel mostra no chip), `arquivo.editavel`
-e `arquivo.tamanho`; o painel decide entre "abrir no editor" e "baixar original" por
-`editavel`, nunca pelo tipo bruto.
+No `/docs`, cada item traz `arquivo.nome`, `arquivo.tipo` (texto, pdf, docx, planilha,
+imagem), `arquivo.ext` (md, pdf, xlsx, png… — é o que o painel mostra no chip),
+`arquivo.editavel`, `arquivo.ocr` (texto veio de OCR) e `arquivo.tamanho`; o painel
+decide entre "abrir no editor" e "baixar original" por `editavel`, nunca pelo tipo bruto.
 
 **Onde mora o binário**: tabela `arquivos (tenant, memoria, doc_id, nome, mime, tipo,
 tamanho, conteudo BYTEA)`, separada de `documents` de propósito — o worker recria a
@@ -714,6 +738,9 @@ O minirag roda em qualquer ambiente com Docker. Segue um exemplo prático
 | `MINIRAG_MODEL_DIR` | `/app/models` | onde o modelo está assado na imagem |
 | `MINIRAG_EMBEDDER_MODO` | `filho` | `filho` = Node sobe o Python; `externo` = já está no ar |
 | `MINIRAG_EMBEDDER_PORT` | `8001` | porta local (loopback) do embedder |
+| `MINIRAG_OCR_PAGINAS_MAX` | `6` | máximo de páginas de PDF escaneado lidas por arquivo |
+| `MINIRAG_OCR_DPI` | `150` | resolução da rasterização do PDF escaneado (mais dpi = mais lento) |
+| `MINIRAG_OCR_LARGURA_MIN` | `900` | imagem mais estreita que isso é ampliada 2× antes do OCR |
 | `MINIRAG_EMBEDDER_URL` | `http://127.0.0.1:8001` | URL usada pelo Node |
 | `MINIRAG_PYTHON` | `python3` | binário do Python no container |
 | `MINIRAG_WORKER_ATIVO` | `1` | liga o worker da fila (desligue em réplica só-API) |
