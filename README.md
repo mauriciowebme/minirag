@@ -512,7 +512,12 @@ IA_GO.
 **Fluxo do cliente MCP:**
 1. `initialize` → servidor devolve `protocolVersion`, `capabilities.tools`, `serverInfo`.
 2. `notifications/initialized` → aceito (202, sem corpo).
-3. `tools/list` → as 6 ferramentas: `health`, `search`, `ingest`, `ingest_status`, `list_docs`, `delete_doc` (argumentos idênticos aos corpos da REST).
+3. `tools/list` → **15 ferramentas**, espelho das rotas REST (argumentos com os mesmos nomes dos corpos):
+   - **documentos**: `search`, `ingest` (texto), `ingest_status`, `list_docs`, `delete_doc`
+   - **arquivo original**: `upload_file` (`nome` + `conteudo_base64`, até 15 MB), `get_file` (devolve o binário em base64)
+   - **edição**: `edit_doc` (texto novo + reindexação), `rename_doc` (doc_id/título/mover), `archive_doc`
+   - **organização**: `list_gavetas`, `create_gaveta`, `delete_gaveta`
+   - **operação**: `list_jobs`, `health`
 4. `tools/call` → `{"name": "search", "arguments": {"query": "...", "memoria": "empresa42"}}` → resposta no formato MCP (`content: [{type: "text", text: "<JSON>"}]`).
 
 **Exemplo (curl):**
@@ -524,8 +529,15 @@ curl -X POST https://minirag.techupsistemas.com/mcp \
 
 Erros de tool viram `result` com `isError: true` (linguagem do MCP); erro
 de auth/protocolo segue o padrão JSON-RPC (`-32001`, `-32601`, `-32700`).
-O código da camada está em `src/mcp.ts` (~250 linhas; chama as funções de
-negócio direto, sem HTTP interno, sem duplicar regra).
+O código da camada está em `src/mcp.ts` (~380 linhas; chama as funções de
+negócio direto, sem HTTP interno, sem duplicar regra). Agente que fala MCP
+fecha o ciclo inteiro: sobe o PDF (`upload_file`), espera a fila
+(`ingest_status`), baixa o original para editar (`get_file`), sobe de novo com o
+mesmo nome (substitui) ou edita texto (`edit_doc`).
+
+`get_file` devolve base64 dentro do JSON-RPC — arquivo grande infla a resposta
+(15 MB ≈ 20 MB de texto); para uso em massa, prefira a REST
+(`GET /documents/{id}/arquivo`), que devolve o binário puro.
 
 ---
 
