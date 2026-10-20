@@ -5,8 +5,12 @@ import { q, tx } from "./db";
 import { embedUm } from "./embed";
 import { erro404, erro409, erro422, iso } from "./errors";
 import { enqueueIngest, jobStatus, IngestBody } from "./ingest";
+import { docIdDe, extrairTexto, infoArquivo, LIMITE_BYTES } from "./conversor";
 
 type Row = Record<string, any>;
+
+/* tipos guardados que o painel consegue editar como texto (o resto é binário) */
+const TIPOS_EDITAVEIS = new Set(["texto", "md", "markdown", "txt", "csv"]);
 
 export type SearchBody = {
   query: string;
@@ -110,17 +114,36 @@ export async function listDocs(opts: {
      GROUP BY doc_id ORDER BY max(ingested_at) DESC${paginacao}`,
     params,
   );
+  /* arquivo original (binário) por doc — consulta separada para não pesar o GROUP BY */
+  const arq = await q<{ doc_id: string; nome: string; tipo: string; tamanho: string }>(
+    `SELECT doc_id, nome, tipo, tamanho FROM arquivos WHERE tenant = $1 AND memoria = $2`,
+    [tenant, memoria],
+  );
+  const originais = new Map(arq.rows.map((a) => [a.doc_id, a]));
+
   return {
     tenant,
     memoria,
     total: Number(tot.rows[0]?.n ?? 0),
-    docs: r.rows.map((d) => ({
-      doc_id: d.doc_id,
-      title: d.title,
-      chunks: Number(d.chunks),
-      updated_at: iso(d.updated_at),
-      chunks_arquivados: Number(d.arquivados),
-    })),
+    docs: r.rows.map((d) => {
+      const a = originais.get(d.doc_id);
+      return {
+        doc_id: d.doc_id,
+        title: d.title,
+        chunks: Number(d.chunks),
+        updated_at: iso(d.updated_at),
+        chunks_arquivados: Number(d.arquivados),
+        arquivo: a
+          ? {
+              nome: a.nome,
+              tipo: a.tipo,
+              ext: (a.nome.match(/\.([A-Za-z0-9]+)$/)?.[1] ?? a.tipo).toLowerCase(),
+              editavel: TIPOS_EDITAVEIS.has(a.tipo),
+              tamanho: Number(a.tamanho),
+            }
+          : null,
+      };
+    }),
   };
 }
 
@@ -349,6 +372,14 @@ export async function putDocument(
     memoria: body.memoria ?? "",
   };
   const r = await enqueueIngest(ing, t);
+  /* se o doc veio de arquivo de texto (.md/.txt/.csv), o "original" guardado
+     também acompanha a edição — senão o download devolveria a versão antiga */
+  const bytes = Buffer.byteLength(body.content);
+  await q(
+    `UPDATE arquivos SET conteudo=$4, tamanho=$5, atualizado_em=now()
+     WHERE tenant=$1 AND memoria=$2 AND doc_id=$3 AND tipo = ANY($6::text[])`,
+    [t, memoria, docId, Buffer.from(body.content, "utf8"), bytes, [...TIPOS_EDITAVEIS]],
+  );
   return {
     ...r,
     doc_id: docId,
@@ -431,6 +462,11 @@ export async function patchDocument(
     await c.query(
       `UPDATE ingest_jobs SET doc_id=$1, memoria=$2
        WHERE tenant=$3 AND memoria=$4 AND doc_id=$5 AND status='na_fila'`,
+      [novo, dest, t, memoria, docId],
+    );
+    await c.query(
+      `UPDATE arquivos SET doc_id=$1, memoria=$2, atualizado_em=now()
+       WHERE tenant=$3 AND memoria=$4 AND doc_id=$5`,
       [novo, dest, t, memoria, docId],
     );
 
@@ -566,6 +602,7 @@ export async function deleteGaveta(memoriaArg: string, tenantArg: string | null,
     );
     const ch = await c.query(`DELETE FROM chunks WHERE tenant=$1 AND memoria=$2`, [t, memoria]);
     const fo = await c.query(`DELETE FROM documents WHERE tenant=$1 AND memoria=$2`, [t, memoria]);
+    const ar = await c.query(`DELETE FROM arquivos WHERE tenant=$1 AND memoria=$2`, [t, memoria]);
     const rg = await c.query(`DELETE FROM gavetas WHERE tenant=$1 AND memoria=$2`, [t, memoria]);
     if (!ch.rowCount && !fo.rowCount && !rg.rowCount) throw erro404("gaveta vazia ou inexistente");
     return {
@@ -646,6 +683,10 @@ export async function deleteDoc(docId: string, memoriaArg: string, tenantArg: st
       `DELETE FROM documents WHERE tenant=$1 AND memoria=$2 AND doc_id=$3`,
       [tenant, memoria, docId],
     );
+    const delA = await c.query(
+      `DELETE FROM arquivos WHERE tenant=$1 AND memoria=$2 AND doc_id=$3`,
+      [tenant, memoria, docId],
+    );
     return {
       tenant,
       memoria,
@@ -653,8 +694,129 @@ export async function deleteDoc(docId: string, memoriaArg: string, tenantArg: st
       chunks_apagados: del.rowCount ?? 0,
       jobs_cancelados: canc.rowCount ?? 0,
       fonte_apagada: Boolean(delF.rowCount),
+      arquivo_apagado: Boolean(delA.rowCount),
     };
   });
+}
+
+/* ------------------------------------------------- arquivos originais */
+
+/** Guarda (ou substitui) o binário do documento. */
+async function salvarArquivoOriginal(p: {
+  tenant: string;
+  memoria: string;
+  doc_id: string;
+  nome: string;
+  mime: string;
+  tipo: string;
+  conteudo: Buffer;
+}) {
+  const r = await q<{ novo: boolean }>(
+    `INSERT INTO arquivos (tenant, memoria, doc_id, nome, mime, tipo, tamanho, conteudo)
+     VALUES ($1,$2,$3,$4,$5,$6,$7,$8)
+     ON CONFLICT (tenant, memoria, doc_id) DO UPDATE SET
+       nome = EXCLUDED.nome, mime = EXCLUDED.mime, tipo = EXCLUDED.tipo,
+       tamanho = EXCLUDED.tamanho, conteudo = EXCLUDED.conteudo, atualizado_em = now()
+     RETURNING (xmax = 0) AS novo`,
+    [p.tenant, p.memoria, p.doc_id, p.nome, p.mime, p.tipo, p.conteudo.length, p.conteudo],
+  );
+  return { novo: Boolean(r.rows[0]?.novo) };
+}
+
+/**
+ * POST /arquivos: recebe o arquivo, converte em texto, guarda o ORIGINAL e
+ * enfileira a indexação. Mesmo nome (na mesma gaveta) = substitui o antigo.
+ */
+export async function uploadArquivo(
+  params: {
+    nome: string;
+    mime?: string | null;
+    conteudo: Buffer;
+    memoria?: string;
+    tenant?: string | null;
+    doc_id?: string | null;
+    title?: string | null;
+  },
+  user: Usuario,
+) {
+  const info = infoArquivo(params.nome, params.mime); // 422 se o tipo não for aceito
+  if ((params.conteudo?.length ?? 0) > LIMITE_BYTES) {
+    throw erro422(`arquivo maior que ${Math.round(LIMITE_BYTES / 1024 / 1024)} MB`);
+  }
+  const texto = await extrairTexto(params.conteudo, info);
+
+  const tenant = tenantFor(user, params.tenant);
+  const memoria = (params.memoria ?? "").trim();
+  const docIdInformado = (params.doc_id ?? "").trim();
+  const docId = docIdInformado ? docIdInformado.slice(0, 200) : docIdDe(info.nome);
+  if (!docId.trim()) throw erro422("doc_id invalido");
+
+  const anterior = await q(
+    `SELECT 1 FROM documents WHERE tenant=$1 AND memoria=$2 AND doc_id=$3
+     UNION ALL SELECT 1 FROM chunks WHERE tenant=$1 AND memoria=$2 AND doc_id=$3 LIMIT 1`,
+    [tenant, memoria, docId],
+  );
+  const substituiu = Boolean(anterior.rowCount);
+
+  const titulo = (params.title ?? "").trim() || info.nome.replace(/\.[A-Za-z0-9]{1,8}$/, "");
+
+  const ing = await enqueueIngest({ doc_id: docId, title: titulo, content: texto, memoria }, tenant);
+  await salvarArquivoOriginal({
+    tenant,
+    memoria,
+    doc_id: docId,
+    nome: info.nome,
+    mime: info.mime,
+    tipo: info.tipo,
+    conteudo: params.conteudo,
+  });
+  await q(`INSERT INTO gavetas (tenant, memoria) VALUES ($1,$2) ON CONFLICT DO NOTHING`, [tenant, memoria]);
+
+  return {
+    tenant,
+    memoria,
+    doc_id: docId,
+    arquivo: info.nome,
+    tipo: info.ext,
+    tipo_detectado: info.tipo,
+    editavel_na_tela: info.editavel,
+    tamanho: params.conteudo.length,
+    texto_chars: texto.length,
+    substituiu,
+    ...ing,
+    mensagem: substituiu
+      ? `substituiu o documento '${docId}' e voltou para a fila`
+      : `documento novo na fila; acompanhe em GET /ingest/${ing.job_id}`,
+  };
+}
+
+/** Original de um documento (404 quando o doc foi criado como texto puro). */
+export async function getArquivoOriginal(
+  docId: string,
+  memoria: string,
+  tenantArg: string | null,
+  user: Usuario,
+) {
+  const tenant = tenantFor(user, tenantArg);
+  const mem = (memoria ?? "").trim();
+  const r = await q<{ nome: string; mime: string; tipo: string; tamanho: string; conteudo: Buffer }>(
+    `SELECT nome, mime, tipo, tamanho, conteudo FROM arquivos
+     WHERE tenant=$1 AND memoria=$2 AND doc_id=$3`,
+    [tenant, mem, docId],
+  );
+  const a = r.rows[0];
+  if (!a) {
+    throw erro404(
+      "este documento não tem arquivo original guardado (foi criado/editado como texto no painel) — use o download de texto",
+    );
+  }
+  return {
+    nome: a.nome,
+    mime: a.mime,
+    tipo: a.tipo,
+    tamanho: Number(a.tamanho),
+    conteudo: a.conteudo,
+  };
 }
 
 export { documentoRow };

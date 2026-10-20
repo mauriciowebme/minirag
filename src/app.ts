@@ -9,11 +9,14 @@ import { embedderDim, embedderDisponivel } from "./embed";
 import { enqueueIngest, IngestBody } from "./ingest";
 import { runDecay } from "./decay";
 import { mcpHandler } from "./mcp";
+import multipart from "@fastify/multipart";
+import { LIMITE_BYTES } from "./conversor";
 import {
   cancelJob,
   deleteDoc,
   deleteGaveta,
   exportGaveta,
+  getArquivoOriginal,
   getDocument,
   jobParaUsuario,
   listDocs,
@@ -26,6 +29,7 @@ import {
   putDocument,
   retryJob,
   search,
+  uploadArquivo,
 } from "./service";
 
 /* --------------------------------------------------------------- validação */
@@ -121,6 +125,9 @@ export function criarApp(): FastifyInstance {
     }
   });
 
+  /* upload de arquivo: multipart só na rota /arquivos (teto = 15 MB do conversor) */
+  void app.register(multipart, { limits: { fileSize: LIMITE_BYTES, files: 1, fields: 10 } });
+
   const ip = (req: FastifyRequest) =>
     ipCliente(req.headers as Record<string, unknown>, req.ip ?? "?");
 
@@ -158,6 +165,59 @@ export function criarApp(): FastifyInstance {
     };
     const r = await enqueueIngest(body, (await import("./config")).tenantFor(u, b.tenant as string));
     return reply.code(202).send(r);
+  });
+
+  /* ------------------------------------------------------ arquivo original */
+
+  /** POST /arquivos (multipart, campo "arquivo"): guarda o original, converte e enfileira. */
+  app.post("/arquivos", async (req, reply) => {
+    const u = usuario(req);
+    if (!req.isMultipart()) {
+      throw new HttpError(422, "envie como multipart/form-data no campo 'arquivo' (ou use POST /ingest com texto)");
+    }
+    const campos: Record<string, string> = {};
+    let enviado: { nome: string; mime: string; buf: Buffer } | null = null;
+    try {
+      for await (const parte of req.parts()) {
+        if (parte.type === "file") {
+          if (enviado) {
+            await parte.toBuffer(); // segundo arquivo: descarta (1 por request)
+            continue;
+          }
+          const pedacos: Buffer[] = [];
+          for await (const pedaco of parte.file) pedacos.push(pedaco as Buffer);
+          enviado = {
+            nome: (parte.filename ?? "").trim(),
+            mime: parte.mimetype ?? "",
+            buf: Buffer.concat(pedacos),
+          };
+        } else if (typeof parte.value === "string") {
+          campos[parte.fieldname] = parte.value;
+        }
+      }
+    } catch (e) {
+      const code = (e as { code?: string }).code ?? "";
+      if (code === "FST_REQ_FILE_TOO_LARGE" || code === "FST_FILES_LIMIT") {
+        throw new HttpError(413, `arquivo maior que ${Math.round(LIMITE_BYTES / 1024 / 1024)} MB`);
+      }
+      throw e;
+    }
+    if (!enviado) throw new HttpError(422, "nenhum arquivo recebido no campo 'arquivo'");
+    if (!enviado.nome) throw new HttpError(422, "arquivo sem nome — envie com o nome do arquivo");
+
+    const r = await uploadArquivo(
+      {
+        nome: enviado.nome,
+        mime: enviado.mime,
+        conteudo: enviado.buf,
+        memoria: campos.memoria ?? "",
+        tenant: campos.tenant ?? null,
+        doc_id: campos.doc_id ?? null,
+        title: campos.title ?? null,
+      },
+      u,
+    );
+    return reply.code(r.substituiu ? 200 : 201).send(r);
   });
 
   app.get("/ingest/:jobId", async (req) => {
@@ -278,6 +338,20 @@ export function criarApp(): FastifyInstance {
       .header("content-type", "text/plain; charset=utf-8")
       .header("content-disposition", `attachment; filename="${nome}.txt"`)
       .send(d.content);
+  });
+
+  app.get("/documents/:docId/arquivo", async (req, reply) => {
+    const u = usuario(req);
+    const p = req.params as Record<string, string>;
+    const s = req.query as Record<string, string>;
+    const a = await getArquivoOriginal(p.docId, s.memoria ?? "", s.tenant ?? "", u);
+    const nome = nomeArquivo(a.nome || p.docId, "documento");
+    return reply
+      .code(200)
+      .header("content-type", a.mime || "application/octet-stream")
+      .header("content-disposition", `attachment; filename="${nome}"`)
+      .header("content-length", String(a.conteudo.length))
+      .send(a.conteudo);
   });
 
   app.put("/documents/:docId", async (req, reply) => {

@@ -116,6 +116,24 @@ export async function initDb(dim: number): Promise<void> {
       PRIMARY KEY (tenant, memoria, doc_id))`,
   );
 
+  /* Arquivo ORIGINAL enviado (pdf/docx/xlsx...). Fica fora de `documents` de
+     propósito: o worker recria a linha de `documents` a cada reindexação e não
+     pode encostar no binário. */
+  await q(
+    `CREATE TABLE IF NOT EXISTS arquivos (
+      tenant TEXT NOT NULL,
+      memoria TEXT NOT NULL DEFAULT '',
+      doc_id TEXT NOT NULL,
+      nome TEXT NOT NULL,
+      mime TEXT NOT NULL DEFAULT 'application/octet-stream',
+      tipo TEXT NOT NULL DEFAULT '',
+      tamanho BIGINT NOT NULL DEFAULT 0,
+      conteudo BYTEA NOT NULL,
+      criado_em TIMESTAMPTZ NOT NULL DEFAULT now(),
+      atualizado_em TIMESTAMPTZ NOT NULL DEFAULT now(),
+      PRIMARY KEY (tenant, memoria, doc_id))`,
+  );
+
   /* Gavetas registradas: permite gaveta vazia (criada à mão) aparecer no mapa
      antes do primeiro documento. */
   await q(
