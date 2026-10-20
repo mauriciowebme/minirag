@@ -1,0 +1,31 @@
+# minirag — banco (Postgres + pgvector). Um só, serve produção e dev.
+#
+# Volume com nome FIXO de propósito: é o mesmo dado que o serviço atual usa
+# (`minirag_data`). Não renomeie — renomear aqui = subir banco vazio.
+services:
+  minirag-db:
+    image: pgvector/pgvector:pg17
+    restart: unless-stopped
+    environment:
+      POSTGRES_USER: ${MINIRAG_DB_USER:-minirag}
+      POSTGRES_PASSWORD: ${MINIRAG_DB_PASSWORD:-minirag}
+      POSTGRES_DB: ${MINIRAG_DB_NAME:-minirag}
+    volumes:
+      - minirag_data:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U ${MINIRAG_DB_USER:-minirag} -d ${MINIRAG_DB_NAME:-minirag}"]
+      interval: 10s
+      timeout: 5s
+      retries: 10
+      start_period: 25s
+    networks:
+      - minirag-rede
+
+volumes:
+  minirag_data:
+    name: minirag_data
+
+networks:
+  minirag-rede:
+    name: minirag-rede
+    driver: bridge

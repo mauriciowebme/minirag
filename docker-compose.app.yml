@@ -1,0 +1,59 @@
+# minirag — aplicação (Node/TS + embedder Python dentro), SEM o banco.
+#
+# Padrão da casa: app e banco em composes separados.
+# ⚠️ O serviço em produção no Dokploy AINDA usa `docker-compose.yml` (app+db
+# juntos). Adotar este arquivo é uma troca de caminho no painel do Dokploy +
+# subir o banco por `docker-compose.db.yml` — ação do dono, não do agente.
+#
+# Traefik: o domínio é configurado na aba Domains do serviço (o container só
+# expõe 8000). Os ports locais mantêm o caminho do IA_GO (127.0.0.1 e tailnet).
+services:
+  minirag-api:
+    build: .
+    restart: always
+    environment:
+      PYTHONUNBUFFERED: "1"
+      MINIRAG_MODEL: ${MINIRAG_MODEL:-nomic-ai/nomic-embed-text-v1.5}
+      MINIRAG_MODEL_DIR: /app/models
+      MINIRAG_DB_HOST: minirag-db
+      MINIRAG_DB_PORT: "5432"
+      MINIRAG_DB_USER: ${MINIRAG_DB_USER:-minirag}
+      MINIRAG_DB_PASSWORD: ${MINIRAG_DB_PASSWORD:-minirag}
+      MINIRAG_DB_NAME: ${MINIRAG_DB_NAME:-minirag}
+      MINIRAG_DB_WAIT_TRIES: ${MINIRAG_DB_WAIT_TRIES:-30}
+      MINIRAG_DB_WAIT_SECONDS: ${MINIRAG_DB_WAIT_SECONDS:-2}
+      MINIRAG_MAX_CHUNK_WORDS: ${MINIRAG_MAX_CHUNK_WORDS:-500}
+      MINIRAG_CHUNK_OVERLAP: ${MINIRAG_CHUNK_OVERLAP:-80}
+      MINIRAG_TOP_K: ${MINIRAG_TOP_K:-5}
+      MINIRAG_MIN_SCORE: ${MINIRAG_MIN_SCORE:-0.55}
+      MINIRAG_MAX_CONTENT_CHARS: ${MINIRAG_MAX_CONTENT_CHARS:-500000}
+      MINIRAG_MAX_QUERY_CHARS: ${MINIRAG_MAX_QUERY_CHARS:-2000}
+      MINIRAG_MAX_CHUNKS_TENANT: ${MINIRAG_MAX_CHUNKS_TENANT:-10000}
+      MINIRAG_DECAY_ATIVO: ${MINIRAG_DECAY_ATIVO:-1}
+      MINIRAG_DECAY_DIAS: ${MINIRAG_DECAY_DIAS:-30}
+      MINIRAG_DECAY_MIN_ACESSOS: ${MINIRAG_DECAY_MIN_ACESSOS:-2}
+      MINIRAG_DECAY_INTERVALO_MINUTOS: ${MINIRAG_DECAY_INTERVALO_MINUTOS:-60}
+      MINIRAG_USERS: ${MINIRAG_USERS:-}
+      MINIRAG_OPERADOR: ${MINIRAG_OPERADOR:-}
+      MINIRAG_CORS_ORIGINS: ${MINIRAG_CORS_ORIGINS:-}
+      MINIRAG_EMBEDDER_MODO: ${MINIRAG_EMBEDDER_MODO:-filho}
+      MINIRAG_EMBEDDER_PORT: ${MINIRAG_EMBEDDER_PORT:-8001}
+    healthcheck:
+      test: ["CMD", "node", "-e",
+             "fetch('http://127.0.0.1:8000/health').then(r=>process.exit(r.ok?0:1)).catch(()=>process.exit(1))"]
+      interval: 15s
+      timeout: 5s
+      retries: 12
+      start_period: 120s
+    expose:
+      - "8000"
+    ports:
+      - "127.0.0.1:8000:8000"
+      - "100.64.0.5:8000:8000"
+    networks:
+      - minirag-rede
+
+networks:
+  minirag-rede:
+    name: minirag-rede
+    driver: bridge
