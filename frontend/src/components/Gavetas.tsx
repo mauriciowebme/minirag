@@ -159,99 +159,98 @@ export function Gavetas({
           : ""}
       </div>
 
-      <div id="gavetasGrid">
+      <div id="gavetasGrid" className="grid gap-3 [grid-template-columns:repeat(auto-fill,minmax(340px,1fr))]">
         {carregando && <p className="dica">carregando…</p>}
         {!carregando && grupos.length === 0 && (
-          <div className="vazio">
-            <div className="tit">Nenhuma gaveta ainda</div>
+          <div className="vazio col-span-full">
+            <div className="tit">Nenhum usuário ainda</div>
             Crie uma nota ou envie um arquivo na aba Arquivos.
           </div>
         )}
         {!carregando &&
           grupos.map(({ tenant, gavetas, docs, qtdGavetas, vazio }) => (
-            <section key={tenant} className="mb-5 last:mb-0">
-              {operador && (
-                <div className="mb-2 flex flex-wrap items-baseline gap-x-2 gap-y-1">
-                  <h3 className="text-[14px] font-semibold text-txt2">👤 {tenant}</h3>
-                  <span className="text-[12px] text-txt3">
-                    {vazio
-                      ? "nenhuma gaveta ainda"
-                      : `${pl(qtdGavetas, "gaveta", "gavetas")} · ${pl(docs, "documento", "documentos")}`}
-                  </span>
-                </div>
-              )}
-              {!operador && dados && totalGavetas > 1 && (
-                <div className="mb-2 text-[12px] text-txt3">{pl(qtdGavetas, "gaveta tua", "gavetas tuas")}</div>
-              )}
-              <div className="grid gap-3 [grid-template-columns:repeat(auto-fill,minmax(260px,1fr))]">
+            <div key={tenant} className="rounded-cartao border border-borda bg-sup">
+              {/* nível 1: o usuário (chave de login) */}
+              <div className="flex flex-wrap items-baseline gap-x-2 gap-y-1 border-b border-borda/70 px-3.5 py-2.5">
+                {operador ? (
+                  <h3 className="text-[13px] font-semibold text-txt2">👤 {tenant}</h3>
+                ) : (
+                  <h3 className="text-[13px] font-semibold text-txt2">As tuas gavetas</h3>
+                )}
+                <span className="text-[12px] text-txt3">
+                  {vazio
+                    ? "nenhuma gaveta ainda"
+                    : `${pl(qtdGavetas, "gaveta", "gavetas")} · ${pl(docs, "documento", "documentos")}`}
+                </span>
+              </div>
+
+              {/* nível 2: as gavetas desse usuário, uma por linha */}
+              <ul className="divide-y divide-borda/60">
                 {gavetas.map((g) => (
-                  <div
-                    key={g.tenant + "|" + g.memoria}
-                    role="button"
-                    tabIndex={0}
-                    className={
-                      "cursor-pointer rounded-cartao border bg-sup p-4 transition-colors hover:border-bordaforte hover:bg-sup2 " +
-                      (vazio ? "border-dashed border-bordaforte" : "border-borda")
-                    }
-                    onClick={() => onAbrir(g.tenant, g.memoria)}
-                    onKeyDown={(e) => e.key === "Enter" && onAbrir(g.tenant, g.memoria)}
-                  >
-                    <div className="mb-2 flex flex-wrap items-center gap-1.5">
-                      <span className="text-[14px] font-semibold" title={g.memoria || "padrão"}>
-                        {ehTecnica(g.memoria) ? "gaveta do perfil" : g.memoria || "padrão"}
-                      </span>
-                      {ehTecnica(g.memoria) && (
-                        <span className="chip" title={g.memoria}>
-                          {curto(g.memoria)}
-                        </span>
+                  <li key={g.tenant + "|" + g.memoria}>
+                    <div
+                      role="button"
+                      tabIndex={0}
+                      className="flex cursor-pointer items-center gap-2 px-3.5 py-2.5 transition-colors hover:bg-sup2 focus-visible:bg-sup2 focus-visible:outline-none"
+                      onClick={() => onAbrir(g.tenant, g.memoria)}
+                      onKeyDown={(e) => e.key === "Enter" && onAbrir(g.tenant, g.memoria)}
+                    >
+                      <div className="min-w-0 flex-1">
+                        <div className="flex flex-wrap items-center gap-1.5">
+                          <span className="truncate text-[13px] font-semibold" title={g.memoria || "padrão"}>
+                            {vazio ? "gaveta padrão" : ehTecnica(g.memoria) ? "gaveta do perfil" : g.memoria || "padrão"}
+                          </span>
+                          {ehTecnica(g.memoria) && !vazio && (
+                            <span className="chip" title={g.memoria}>
+                              {curto(g.memoria)}
+                            </span>
+                          )}
+                        </div>
+                        <div className="mt-0.5 text-[12px] text-txt3">
+                          {vazio ? (
+                            <span className="text-txt3">vazia — clique para enviar o primeiro documento</span>
+                          ) : (
+                            <>
+                              <b className="text-txt2">{g.docs}</b> {g.docs === 1 ? "arquivo" : "arquivos"} ·{" "}
+                              <b className="text-txt2">{g.chunks}</b> {g.chunks === 1 ? "chunk" : "chunks"} ·{" "}
+                              {g.chunks_arquivados ? `${g.chunks_arquivados} arquiv.` : "tudo ativo"} · último{" "}
+                              {fmtData(g.ultimo_ingress)}
+                            </>
+                          )}
+                        </div>
+                      </div>
+
+                      {vazio ? (
+                        <span className="btn btn-primario btn-mini shrink-0">＋ documento</span>
+                      ) : (
+                        <div className="flex shrink-0 gap-1">
+                          <button
+                            className="btn btn-sutil btn-mini"
+                            title="baixar esta gaveta em zip"
+                            onClick={(e) => {
+                              e.stopPropagation();
+                              void exportar(g.tenant, g.memoria);
+                            }}
+                          >
+                            ⬇ zip
+                          </button>
+                          <button
+                            className="btn btn-perigo btn-mini"
+                            title="apagar a gaveta inteira"
+                            onClick={(e) => {
+                              e.stopPropagation();
+                              void apagar(g.tenant, g.memoria, g.docs);
+                            }}
+                          >
+                            apagar
+                          </button>
+                        </div>
                       )}
                     </div>
-                    {vazio ? (
-                      <div className="mb-3 text-[13px] text-txt3">vazia — clique para enviar o primeiro documento</div>
-                    ) : (
-                      <div className="mb-3 flex flex-wrap gap-2.5 text-[13px] text-txt3">
-                        <span>
-                          <b className="text-txt2">{g.docs}</b> {g.docs === 1 ? "arquivo" : "arquivos"}
-                        </span>
-                        <span>
-                          <b className="text-txt2">{g.chunks}</b> chunks
-                        </span>
-                        <span>{g.chunks_arquivados ? `${g.chunks_arquivados} arquiv.` : "tudo ativo"}</span>
-                        <span>último {fmtData(g.ultimo_ingress)}</span>
-                      </div>
-                    )}
-                    {vazio ? (
-                      <div className="flex flex-wrap gap-1.5">
-                        <span className="btn btn-primario btn-mini">＋ enviar documento</span>
-                      </div>
-                    ) : (
-                      <div className="flex flex-wrap gap-1.5">
-                        <button
-                          className="btn btn-sutil btn-mini"
-                          title="baixar esta gaveta em zip"
-                          onClick={(e) => {
-                            e.stopPropagation();
-                            void exportar(g.tenant, g.memoria);
-                          }}
-                        >
-                          ⬇ zip
-                        </button>
-                        <button
-                          className="btn btn-perigo btn-mini"
-                          title="apagar a gaveta inteira"
-                          onClick={(e) => {
-                            e.stopPropagation();
-                            void apagar(g.tenant, g.memoria, g.docs);
-                          }}
-                        >
-                          apagar
-                        </button>
-                      </div>
-                    )}
-                  </div>
+                  </li>
                 ))}
-              </div>
-            </section>
+              </ul>
+            </div>
           ))}
       </div>
     </section>
