@@ -10,6 +10,38 @@ parecidos com a pergunta, com uma nota de 0 a 1.
 
 ---
 
+## v2.7 — menu lateral, Painel, Chat, Configurações e usuários no banco (20/10/2026)
+
+O painel deixou de ser "abas no topo" e virou um sistema com **menu lateral**:
+`Painel · Usuários · Chat · Buscar · Fila · Configurações`. `Arquivos` e `Editor`
+não são itens de menu — são passos do caminho `usuários → gavetas → arquivos → nota`
+(antes dava para cair em "Arquivos" sem gaveta escolhida).
+
+- **Painel (`GET /dashboard`)**: usuários, gavetas, documentos, trechos, fila,
+  buscas/chats do dia, documentos por usuário, saúde (embedder, OCR, provider) e
+  últimos envios — tudo em **uma** chamada. O contador do dia fica em `metricas_dia`.
+- **Chat (`POST /chat`)**: busca os trechos da gaveta e manda ao modelo com a regra
+  "responda só com o que está nos trechos"; devolve `resposta` + `fontes`
+  (`doc_id`, `trecho`, `score`). Histórico em `chat_mensagens` (`GET`/`DELETE /chat`).
+  **Sem provider configurado o Chat responde `409`** e a Busca continua normal.
+- **Provider configurável na tela (`/config/provider`)**: `litellm` (OpenAI
+  compatível), `openai` ou `ollama`. Campos: `base_url`, `modelo`, `temperatura`,
+  `trechos`, `ativo`. A **chave nunca volta em claro** — a API devolve
+  `chave_mascarada` (`••••4f2a`) e `tem_chave`. `POST /config/provider/testar`
+  mede a latência e falha com mensagem legível. Cada usuário tem a sua configuração;
+  o operador pode gravar o padrão de todos (`global: true`, escopo `*`).
+- **Usuários no banco (`/usuarios`)**: tabela `usuarios` (nome, `chave_hash`
+  sha256, `chave_hint`, `papel`, `ativo`). `MINIRAG_USERS`/`MINIRAG_OPERADOR`
+  passam a ser **semente** do boot (entram uma vez, sem sobrescrever). Criar pela
+  tela devolve a chave **uma única vez**; desativar vale na hora; o último operador
+  ativo não pode ser rebaixado/desativado; usuário com documentos não pode ser
+  removido (apague as gavetas antes). Quem não é operador recebe `403`.
+- **Configurações (`GET /config`)**: limites em vigor e política de esquecimento,
+  sem expor segredo.
+- **MCP**: 19 tools — as 15 anteriores + `chat`, `listar_usuarios`,
+  `criar_usuario`, `config_provider`.
+- Versão do produto: **2.7.0**.
+
 ## v2.5 — imagem e PDF escaneado entram por OCR (20/10/2026)
 
 Antes, foto/print (`png`, `jpg`) era recusada e PDF digitalizado respondia `422`.
@@ -93,16 +125,22 @@ duas formas:
 
 ### Nível 1 — Login (quem entra)
 
-A variável de ambiente `MINIRAG_USERS` é uma lista de pares `nome:chave`
-separados por vírgula. Sem uma dessas chaves no cabeçalho `Authorization`,
-nenhum pedido é atendido (401).
+**v2.7:** os usuários vivem na tabela `usuarios` do banco (criados pela tela ou
+pela tool MCP `criar_usuario`); a chave é gravada como **sha256** + os 4 últimos
+caracteres para exibição. Sem uma chave válida de usuário **ativo** no cabeçalho
+`Authorization`, nenhum pedido é atendido (401).
+
+As variáveis `MINIRAG_USERS` / `MINIRAG_OPERADOR` continuam existindo como
+**semente**: no boot cada `nome:chave` é inserido **se ainda não existir** — não
+sobrescreve quem já está no banco (nem reativa quem foi desativado pela tela).
 
 ```
-MINIRAG_USERS=sistema:abc123,operador:def456
+MINIRAG_USERS=sistema:abc123
+MINIRAG_OPERADOR=admin:def456
 ```
 
 - `sistema` — o backend do sistema (uma chave só, atende todas as empresas)
-- `operador` — acesso manual do administrador
+- `admin` — operador: vê tudo, cria/desativa usuários e define o provider global
 
 ### Nível 2 — Gaveta / memória (qual memória usar)
 
@@ -318,6 +356,34 @@ outros logins nem de outras gavetas.
 (esperar a ingestão terminar, senão o worker recriaria os chunks).
 
 ---
+
+### v2.7 — painel, usuários, provider e chat
+
+| rota | quem | o que faz |
+|---|---|---|
+| `GET /dashboard` | qualquer login | números do acervo em uma chamada (usuários, gavetas, documentos, trechos, fila, buscas/chats do dia, por usuário, saúde, últimos envios) |
+| `GET /config` | qualquer login | limites e política de esquecimento (sem segredo) |
+| `GET /usuarios` | operador | lista com papel, ativo, `chave_hint`, gavetas e documentos |
+| `POST /usuarios` | operador | `{nome, papel}` → `201 {nome, papel, chave}` — **a chave aparece só nesta resposta** |
+| `PATCH /usuarios/{nome}` | operador | `{ativo?, papel?}` — não deixa desativar/rebaixar o último operador |
+| `POST /usuarios/{nome}/chave` | operador (qualquer) ou o próprio | gera chave nova e devolve uma vez |
+| `DELETE /usuarios/{nome}` | operador | só sem documentos (`409` se tiver) |
+| `GET/PUT /config/provider` | qualquer login | provider do chat; `global: true` (só operador) grava o padrão de todos. A chave volta **mascarada** |
+| `POST /config/provider/testar` | qualquer login | manda um "teste de conexao" ao modelo e devolve `{ok, ms, modelo}` |
+| `POST /chat` | qualquer login | `{pergunta, memoria}` → `{resposta, fontes[], modelo, ms}`; sem provider → `409` |
+| `GET/DELETE /chat?memoria=` | qualquer login | histórico da conversa / apagar a conversa |
+
+**Exemplo de chat:**
+```json
+POST /chat
+{ "pergunta": "qual o total da nota do fornecedor AC ME?", "memoria": "empresa42" }
+
+200 {
+  "resposta": "O total é R$ 1.234,56, com vencimento em 10/11/2026 [nota-fiscal].",
+  "fontes": [{ "doc_id": "nota-fiscal", "title": "nota-fiscal", "score": 0.78, "trecho": "NOTA FISCAL 4471 ..." }],
+  "modelo": "claude-sonnet-4.5", "provider": "empresa42", "buscou": 1, "ms": 640
+}
+```
 
 ### `POST /decay` — rodar o "esquecimento" agora
 
