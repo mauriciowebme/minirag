@@ -10,6 +10,7 @@
  * ÚLTIMO bloco.
  */
 import { inflateRawSync } from "node:zlib";
+import { execFileSync } from "node:child_process";
 import test from "node:test";
 import assert from "node:assert/strict";
 
@@ -143,7 +144,7 @@ test("minirag v2 — suíte completa", async (t) => {
 
     console.log("-- health e painel");
     const h = await call("GET", "/health");
-    f.check("health 200 + versao 2.0.0", h.status === 200 && h.json?.versao === "2.0.0", h.json);
+    f.check("health 200 + versao 2.7.0", h.status === 200 && h.json?.versao === "2.7.0", h.json);
     f.check("health operador ativo", h.json?.operador === true, h.json);
     f.check("health embedder ok", h.json?.embedder === "ok", h.json);
     const p = await call("GET", "/painel/");
@@ -319,7 +320,7 @@ test("minirag v2 — suíte completa", async (t) => {
     f.fechar("v1.8");
   });
 
-  await t.test("MCP: JSON-RPC stateless com as 15 tools", async () => {
+  await t.test("MCP: JSON-RPC stateless com as 19 tools", async () => {
     const f = fiscal();
     const H = { key: TESTKEY };
     const rpc = (id: unknown, method: string, params?: unknown, key: string | null = TESTKEY) =>
@@ -346,7 +347,10 @@ test("minirag v2 — suíte completa", async (t) => {
     const nomes = (r.json?.result?.tools ?? []).map((x: any) => x.name).sort();
     const ESPERADAS = [
       "archive_doc",
+      "chat",
+      "config_provider",
       "create_gaveta",
+      "criar_usuario",
       "delete_doc",
       "delete_gaveta",
       "edit_doc",
@@ -357,11 +361,12 @@ test("minirag v2 — suíte completa", async (t) => {
       "list_docs",
       "list_gavetas",
       "list_jobs",
+      "listar_usuarios",
       "rename_doc",
       "search",
       "upload_file",
     ].sort();
-    f.check("tools/list tem 15 tools (paridade com a REST)", JSON.stringify(nomes) === JSON.stringify(ESPERADAS), nomes);
+    f.check("tools/list tem 19 tools (paridade com a REST)", JSON.stringify(nomes) === JSON.stringify(ESPERADAS), nomes);
 
     r = await rpc(5, "tools/call", { name: "health" }, null);
     f.check("tools/call sem Bearer -> 401", r.status === 401 && "error" in (r.json ?? {}), r.texto.slice(0, 150));
@@ -980,6 +985,125 @@ test("minirag v2 — suíte completa", async (t) => {
 
     await call("DELETE", `/gavetas/imagens`, { key: TESTKEY });
     f.fechar("imagem/OCR");
+  });
+
+  await t.test("v2.7: painel, usuários, provider e chat", async () => {
+    const f = fiscal();
+    const CONTAINER = process.env.CONTAINER ?? "";
+    const GAV = "suite-v27";
+
+    /* ---- painel e configuração ---- */
+    let r = await call("GET", "/dashboard", { key: OPKEY });
+    f.check("dashboard (operador) 200 com números", r.status === 200 && typeof r.json?.numeros?.usuarios === "number", r.texto.slice(0, 160));
+    f.check("dashboard traz saúde do sistema", typeof r.json?.saude?.embedder === "string", r.json?.saude);
+
+    r = await call("GET", "/dashboard", { key: TESTKEY });
+    f.check("dashboard (usuário comum) escopo = próprio tenant", r.status === 200 && r.json?.escopo === "teste", r.json?.escopo);
+
+    r = await call("GET", "/config", { key: TESTKEY });
+    f.check("config expõe limites sem segredo", r.status === 200 && r.json?.limites?.max_content_chars > 0, r.json?.limites);
+
+    /* ---- usuários: só operador gerencia ---- */
+    r = await call("GET", "/usuarios", { key: TESTKEY });
+    f.check("usuário comum em /usuarios -> 403", r.status === 403, r.status);
+
+    r = await call("GET", "/usuarios", { key: OPKEY });
+    const nomes = (r.json?.usuarios ?? []).map((u: any) => u.nome);
+    f.check("operador lista usuários", r.status === 200 && nomes.includes("teste"), nomes);
+    f.check("listagem não devolve hash nem chave", !/chave_hash/.test(r.texto) && !/"chave":/.test(r.texto), r.texto.slice(0, 120));
+
+    r = await call("POST", "/usuarios", { key: OPKEY, corpo: { nome: "suite-novo", papel: "usuario" } });
+    const chaveNova = r.json?.chave ?? "";
+    f.check("criar usuário devolve chave uma única vez", r.status === 201 && chaveNova.length > 20, r.texto.slice(0, 160));
+
+    r = await call("POST", "/usuarios", { key: OPKEY, corpo: { nome: "suite-novo" } });
+    f.check("criar usuário repetido -> 409", r.status === 409, r.status);
+
+    r = await call("GET", "/gavetas", { key: chaveNova });
+    f.check("usuário novo já autentica (banco, não env)", r.status === 200, r.status);
+
+    r = await call("PATCH", "/usuarios/suite-novo", { key: OPKEY, corpo: { ativo: false } });
+    f.check("desativar usuário", r.status === 200 && r.json?.ativo === false, r.texto.slice(0, 120));
+    r = await call("GET", "/gavetas", { key: chaveNova });
+    f.check("usuário desativado -> 401", r.status === 401, r.status);
+    await call("PATCH", "/usuarios/suite-novo", { key: OPKEY, corpo: { ativo: true } });
+
+    r = await call("GET", "/usuarios", { key: OPKEY });
+    const novo = (r.json?.usuarios ?? []).find((u: any) => u.nome === "suite-novo");
+    f.check("listagem mostra só os 4 últimos da chave", typeof novo?.chave_hint === "string" && novo.chave_hint.length === 4, novo);
+
+    /* ---- provider do chat: chave nunca volta em claro ---- */
+    let provFalso = "";
+    if (CONTAINER) {
+      /* servidor OpenAI-compatível DENTRO do container da api (127.0.0.1:9911) */
+      const codigo = [
+        "const http=require('http');",
+        "const s=http.createServer((req,res)=>{let b='';req.on('data',c=>b+=c);req.on('end',()=>{",
+        "res.setHeader('content-type','application/json');",
+        "res.end(JSON.stringify({choices:[{message:{role:'assistant',content:'O total e R$ 1.234,56 [suite-chat].'}}]}));});});",
+        "s.listen(9911,'127.0.0.1');",
+        "setTimeout(()=>process.exit(0),120000);",
+      ].join("");
+      execFileSync("docker", ["exec", "-d", CONTAINER, "node", "-e", codigo]);
+      provFalso = "http://127.0.0.1:9911/v1";
+      await dormir(1200);
+    }
+
+    r = await call("PUT", "/config/provider", {
+      key: OPKEY,
+      corpo: { tipo: "litellm", base_url: provFalso || "http://127.0.0.1:9911/v1", modelo: "modelo-de-teste", chave: "sk-teste-1234", temperatura: 0.2, trechos: 4, ativo: true, global: true },
+    });
+    f.check("salvar provider global", r.status === 200, r.texto.slice(0, 160));
+    f.check("resposta mascara a chave", r.json?.chave_mascarada === "••••1234" && !/sk-teste-1234/.test(r.texto), r.json?.chave_mascarada);
+
+    r = await call("GET", "/config/provider", { key: TESTKEY });
+    f.check("chave salva não volta em claro", r.status === 200 && !/sk-teste-1234/.test(r.texto) && r.json?.origem === "global", r.texto.slice(0, 160));
+
+    if (provFalso) {
+      r = await call("POST", "/config/provider/testar", { key: OPKEY, corpo: {} });
+      f.check("testar conexão responde ok com latência", r.status === 200 && r.json?.ok === true && r.json?.ms >= 0, r.texto.slice(0, 160));
+
+      /* documento para o chat achar */
+      r = await call("POST", "/ingest", {
+        key: TESTKEY,
+        corpo: { doc_id: "suite-chat", content: "Nota fiscal 4471 do fornecedor AC ME. Total R$ 1.234,56 com vencimento em 10/11/2026.", memoria: GAV },
+      });
+      const jobId = r.json?.job_id;
+      const job = await esperarJob(TESTKEY, jobId);
+      f.check("documento do chat indexado", job.status === "concluido", job);
+
+      r = await call("POST", "/chat", { key: TESTKEY, corpo: { pergunta: "qual o total da nota fiscal do fornecedor AC ME?", memoria: GAV } });
+      f.check("chat responde", r.status === 200 && /1\.234,56/.test(r.json?.resposta ?? ""), r.texto.slice(0, 200));
+      f.check("chat cita fontes com score", (r.json?.fontes ?? []).length >= 1 && typeof r.json?.fontes?.[0]?.score === "number", r.json?.fontes);
+
+      r = await call("GET", `/chat?memoria=${GAV}`, { key: TESTKEY });
+      f.check("histórico guarda pergunta e resposta", r.status === 200 && (r.json?.mensagens ?? []).length === 2, (r.json?.mensagens ?? []).length);
+
+      r = await call("POST", "/mcp", {
+        key: TESTKEY,
+        corpo: { jsonrpc: "2.0", id: 77, method: "tools/call", params: { name: "chat", arguments: { pergunta: "total da nota?", memoria: GAV } } },
+      });
+      const saidaMcp = r.json?.result?.content?.[0]?.text ?? "";
+      f.check("MCP chat espelha a REST", !r.json?.result?.isError && /1\.234,56/.test(saidaMcp), saidaMcp.slice(0, 200));
+
+      r = await call("DELETE", `/chat?memoria=${GAV}`, { key: TESTKEY });
+      f.check("apagar conversa", r.status === 200 && r.json?.apagadas === 4, r.json?.apagadas);
+    }
+
+    /* sem provider o chat recusa com mensagem clara */
+    r = await call("PUT", "/config/provider", {
+      key: OPKEY,
+      corpo: { tipo: "litellm", base_url: "http://127.0.0.1:9911/v1", modelo: "modelo-de-teste", temperatura: 0.2, trechos: 4, ativo: false, global: true },
+    });
+    f.check("provider desligado", r.status === 200, r.texto.slice(0, 120));
+    r = await call("POST", "/chat", { key: TESTKEY, corpo: { pergunta: "qualquer coisa", memoria: GAV } });
+    f.check("chat sem provider -> 409 explicando", r.status === 409 && /provider/i.test(r.json?.detail ?? ""), r.texto.slice(0, 160));
+
+    r = await call("DELETE", "/usuarios/suite-novo", { key: OPKEY });
+    f.check("remover usuário sem documentos", r.status === 200 && r.json?.removido === true, r.texto.slice(0, 120));
+    await call("DELETE", `/gavetas/${GAV}`, { key: TESTKEY });
+
+    f.fechar("v2.7 painel/usuarios/chat");
   });
 
   await t.test("freio de força bruta (último: bloqueia o IP)", async () => {
