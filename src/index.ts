@@ -10,6 +10,7 @@ import { iniciarDecayLoop, pararDecayLoop } from "./decay";
 import { criarApp } from "./app";
 import { initUsuarios } from "./usuarios";
 import { initProvider } from "./provider";
+import { initFerramentas } from "./ferramentas";
 import { initMetricas } from "./dashboard";
 
 let filho: ChildProcess | null = null;
@@ -71,6 +72,7 @@ async function main(): Promise<void> {
   await initDb(embedderDim());
   await initUsuarios(); // v2.7: env semeia, banco manda
   await initProvider();
+  await initFerramentas(); // v2.8: servidores MCP que dão ferramentas ao chat
   await initMetricas();
   log(
     `limites: content<=${CONFIG.maxContentChars} chars, query<=${CONFIG.maxQueryChars} chars, ` +

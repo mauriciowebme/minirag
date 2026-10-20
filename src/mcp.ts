@@ -18,8 +18,28 @@ import {
 } from "./service";
 import { enqueueIngest } from "./ingest";
 import { CONFIG } from "./config";
+import { healthAtual } from "./ferramentas";
 import { criarUsuario, listarUsuarios, exigirOperador } from "./usuarios";
 import { responderChat, salvarProvider, testarProvider, verProvider } from "./provider";
+import {
+  atualizarFerramentas,
+  atualizarServidor,
+  apagarServidor,
+  criarServidor,
+  listarServidores,
+} from "./ferramentas";
+
+/** As ferramentas que o Chat pode chamar: todas do MCP, menos o próprio chat (recursivo). */
+export function toolsParaChat(): Tool[] {
+  return TOOLS.filter((t) => t.name !== "chat");
+}
+
+/** Executa uma ferramenta interna no MESMO processo — é o mesmo caminho do POST /mcp, sem HTTP. */
+export async function chamarToolInterna(name: string, args: Record<string, unknown>, user: Usuario) {
+  if (!TOOLS.some((t) => t.name === name)) throw new Error(`tool desconhecida: ${name}`);
+  const deps: McpDeps = { health: healthAtual, autenticar: () => user };
+  return executarTool(name, args ?? {}, user, deps);
+}
 
 const PROTOCOLOS = ["2025-06-18", "2025-03-10", "2024-11-05"];
 const SERVER_INFO = { name: "minirag", version: CONFIG.versao };
@@ -223,12 +243,12 @@ export const TOOLS: Tool[] = [
   {
     name: "chat",
     description:
-      "Pergunta em linguagem natural sobre os documentos da gaveta. Responde citando as fontes (doc_id + trecho + similaridade). Requer provider configurado (config_provider).",
+      "Pergunta para o chat do minirag. O modelo responde com o provider configurado, as instrucoes do system prompt e as ferramentas ligadas (mcp interno + servidores externos); devolve a resposta e o que foi chamado.",
     inputSchema: {
       type: "object",
       properties: {
         pergunta: { type: "string", description: "a pergunta (max 2000 chars)" },
-        memoria: { type: "string", description: "gaveta (default '')" },
+        memoria: { type: "string", description: "gaveta do historico (default '')" },
         tenant: { type: "string", description: "dono da gaveta (so operador)" },
       },
       required: ["pergunta"],
@@ -265,11 +285,35 @@ export const TOOLS: Tool[] = [
         modelo: { type: "string" },
         chave: { type: "string", description: "omita para manter a chave ja salva" },
         temperatura: { type: "number" },
-        trechos: { type: "integer", description: "quantos trechos enviar ao modelo (1-20)" },
+        system_prompt: { type: "string", description: "instrucoes iniciais do modelo; vazio = nenhuma instrucao" },
+        mcp_interno: { type: "boolean", description: "ligar as ferramentas do proprio minirag no chat" },
+        max_rodadas: { type: "integer", description: "rodadas de ferramenta por pergunta (0-10; default 5)" },
         ativo: { type: "boolean" },
         global: { type: "boolean", description: "gravar como padrao global (so operador)" },
       },
       required: ["acao"],
+    },
+  },
+  {
+    name: "listar_mcp",
+    description:
+      "Servidores MCP externos cadastrados para dar ferramentas ao chat (nome, url, ativo, n de ferramentas). O cabecalho de acesso nunca volta em claro.",
+    inputSchema: { type: "object", properties: {} },
+  },
+  {
+    name: "gerir_mcp",
+    description:
+      "Cuida dos servidores MCP do chat. acao=criar | atualizar | apagar | testar (testar lista as ferramentas). Somente operador.",
+    inputSchema: {
+      type: "object",
+      properties: {
+        acao: { type: "string", enum: ["criar", "atualizar", "apagar", "testar"] },
+        nome: { type: "string", description: "2-32 caracteres, sem '__'" },
+        url: { type: "string", description: "endereco http(s) do servidor MCP" },
+        cabecalho: { type: "string", description: "Authorization: Bearer xxx ou o token cru; omita para manter" },
+        ativo: { type: "boolean" },
+      },
+      required: ["acao", "nome"],
     },
   },
   {
@@ -310,8 +354,9 @@ function initialize(params: Row) {
       "ingest (texto na fila), ingest_status (progresso), list_docs, delete_doc, health, " +
       "upload_file (pdf/docx/xlsx/csv/html/txt/md em base64), get_file (original guardado), " +
       "edit_doc (edita texto e reindexa), rename_doc (renomeia/move/titulo), archive_doc, " +
-      "list_gavetas, create_gaveta, delete_gaveta, list_jobs, chat (pergunta respondida com fontes), " +
-      "listar_usuarios e criar_usuario (operador), config_provider (provider do chat).",
+      "list_gavetas, create_gaveta, delete_gaveta, list_jobs, chat (usa as ferramentas ligadas), " +
+      "listar_usuarios e criar_usuario (operador), config_provider (provider do chat), " +
+      "listar_mcp e gerir_mcp (servidores MCP que dão ferramentas ao chat).",
   };
 }
 
@@ -438,6 +483,17 @@ async function executarTool(
       if (acao === "salvar") return salvarProvider(user, args);
       if (acao === "testar") return testarProvider(user, args);
       throw new Error("acao invalida: use ver | salvar | testar");
+    }
+    case "listar_mcp":
+      return { servidores: await listarServidores() };
+    case "gerir_mcp": {
+      exigirOperador(user);
+      const acao = String(args.acao ?? "");
+      if (acao === "criar") return criarServidor(args);
+      if (acao === "atualizar") return atualizarServidor(String(args.nome ?? ""), args);
+      if (acao === "apagar") return apagarServidor(String(args.nome ?? ""));
+      if (acao === "testar") return atualizarFerramentas(String(args.nome ?? ""), user);
+      throw new Error("acao invalida: use criar | atualizar | apagar | testar");
     }
     case "list_jobs":
       return listJobs(

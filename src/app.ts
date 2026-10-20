@@ -9,6 +9,14 @@ import { embedderDim, embedderDisponivel } from "./embed";
 import { detectarOcr, ocrDisponivel } from "./ocr";
 import { enqueueIngest, IngestBody } from "./ingest";
 import { runDecay } from "./decay";
+import {
+  atualizarFerramentas,
+  atualizarServidor,
+  apagarServidor,
+  criarServidor,
+  definirHealth,
+  listarServidores,
+} from "./ferramentas";
 import { mcpHandler } from "./mcp";
 import { contarUso, configPublica, dadosPainel } from "./dashboard";
 import {
@@ -166,6 +174,7 @@ export function criarApp(): FastifyInstance {
 
   /* ------------------------------------------------------------- básicas */
 
+  definirHealth(health); // ferramenta interna do chat usa o mesmo health da rota
   app.get("/health", async () => health());
 
   app.get("/", async (_req, reply) => reply.code(302).header("location", "/painel/").send());
@@ -529,6 +538,40 @@ export function criarApp(): FastifyInstance {
   app.post("/config/provider/testar", async (req) => {
     const u = usuario(req);
     return testarProvider(u, corpo(req));
+  });
+
+  /* ------------------------------------------------------- servidores MCP */
+
+  app.get("/config/mcp", async (req) => {
+    usuario(req);
+    return { servidores: await listarServidores() };
+  });
+
+  app.post("/config/mcp", async (req) => {
+    const u = usuario(req);
+    exigirOperador(u);
+    return criarServidor(corpo(req));
+  });
+
+  app.patch("/config/mcp/:nome", async (req) => {
+    const u = usuario(req);
+    exigirOperador(u);
+    const s = req.params as Record<string, string>;
+    return atualizarServidor(s.nome, corpo(req));
+  });
+
+  app.delete("/config/mcp/:nome", async (req) => {
+    const u = usuario(req);
+    exigirOperador(u);
+    const s = req.params as Record<string, string>;
+    return apagarServidor(s.nome);
+  });
+
+  app.post("/config/mcp/testar", async (req) => {
+    const u = usuario(req);
+    exigirOperador(u);
+    const b = corpo(req);
+    return atualizarFerramentas(String(b.nome ?? ""), u);
   });
 
   /* ------------------------------------------------------------------ chat */
