@@ -117,7 +117,7 @@ input:focus, textarea:focus, select:focus, button:focus-visible, .aba:focus-visi
 }
 input[type="checkbox"] { height: 16px; width: 16px; accent-color: var(--verde);
   margin: 0; }
-.campo-senha { position: relative; }
+.campo-senha { position: relative; display: block; margin-top: 5px; }
 .campo-senha input { padding-right: 44px; }
 .campo-senha .olho { position: absolute; right: 4px; top: 5px; height: 26px;
   width: 34px; border: 0; background: none; color: var(--txt3); font-size: 15px; }
