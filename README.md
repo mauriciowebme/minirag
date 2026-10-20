@@ -10,6 +10,45 @@ parecidos com a pergunta, com uma nota de 0 a 1.
 
 ---
 
+## v2.8 — Chat sem regra embutida: provider + system prompt + ferramentas MCP (20/10/2026)
+
+O Chat deixou de ser "busca automática na gaveta + resposta com fonte obrigatória".
+Agora são **três peças separadas**, cada uma controlando uma coisa:
+
+| Peça | Controla | Onde |
+|---|---|---|
+| **Provider** | se o Chat existe. Sem provider → `409` e a Busca segue normal | Configurações → Provider do chat |
+| **System prompt** | as instruções iniciais. **Campo vazio = nenhuma instrução** (modelo conversa puro, sem citar fonte) | Configurações → Provider do chat |
+| **MCP** | as ferramentas. Nada ligado = nenhuma ferramenta | Configurações → Ferramentas (MCP) |
+
+- **Nada de regra dentro do código.** A antiga constante `SISTEMA` ("use só os trechos,
+  cite `[documento]`") foi embora junto com a busca automática: quem quer rastreabilidade
+  escreve isso no prompt; quem quer documento liga o MCP interno.
+- **MCP do próprio minirag como ferramenta** (`mcp_interno`): botão na tela. As ferramentas
+  são chamadas **dentro do mesmo processo** (`chamarToolInterna`), com a sessão de quem está
+  logado — mesmo `switch` que serve o `POST /mcp`, sem HTTP e sem segunda autenticação.
+  O isolamento por usuário/gaveta vem de graça. O `chat` fica de fora da lista (seria recursivo).
+- **Servidores MCP externos, quantos o operador quiser**: cadastro por **endereço HTTP**
+  (`initialize` → `tools/list` → `tools/call`), com cabeçalho de acesso guardado no servidor
+  e devolvido **mascarado** (`••••xy98`). A lista vem cacheada em `mcp_servidores.ferramentas`;
+  "atualizar ferramentas" relê o servidor. Nome sem colisão: `drive-prod__buscar`.
+- **Execução direta, sem cartão de confirmação** (decisão do dono). O freio que ficou é o
+  registro: `ferramentas` (servidor, nome, argumentos mascarados, ok, resumo, ms) vai na
+  resposta, no painel embaixo da mensagem e no histórico (`chat_mensagens.ferramentas`).
+- **Trava de loop**: `max_rodadas` (0 a 10, padrão 5). `0` = não oferece ferramenta nenhuma.
+  Ao estourar, a resposta vem com `aviso` ("bateu o limite de N rodadas").
+- **Corte de contexto**: saída de ferramenta é truncada em 4.000 caracteres; base64 longo
+  vira `[arquivo em base64: N caracteres, não mostrei]`.
+- **Segredo não fica no registro**: campos com nome de chave/token/senha viram `••••últimos4`,
+  e texto com forma de chave (`sk-…`, `mr_…`, hash longo) é mascarado no resumo gravado.
+  O **texto que o modelo devolve** não é reescrito — se ele copiar uma chave criada, ela fica
+  na conversa do próprio usuário.
+- **Defeito corrigido**: uma linha própria salva pela metade (URL sem modelo) tampava o padrão
+  global. A ordem agora é **própria completa › global › própria incompleta**.
+- **MCP**: 21 tools — as 19 da v2.7 + `listar_mcp` e `gerir_mcp` (criar/atualizar/apagar/testar
+  servidor; só operador).
+- Versão do produto: **2.8.0**.
+
 ## v2.7 — menu lateral, Painel, Chat, Configurações e usuários no banco (20/10/2026)
 
 O painel deixou de ser "abas no topo" e virou um sistema com **menu lateral**:
@@ -20,13 +59,15 @@ não são itens de menu — são passos do caminho `usuários → gavetas → ar
 - **Painel (`GET /dashboard`)**: usuários, gavetas, documentos, trechos, fila,
   buscas/chats do dia, documentos por usuário, saúde (embedder, OCR, provider) e
   últimos envios — tudo em **uma** chamada. O contador do dia fica em `metricas_dia`.
-- **Chat (`POST /chat`)**: busca os trechos da gaveta e manda ao modelo com a regra
-  "responda só com o que está nos trechos"; devolve `resposta` + `fontes`
-  (`doc_id`, `trecho`, `score`). Histórico em `chat_mensagens` (`GET`/`DELETE /chat`).
-  **Sem provider configurado o Chat responde `409`** e a Busca continua normal.
+- **Chat (`POST /chat`)** na v2.7 buscava os trechos da gaveta e devolvia `fontes`
+  (`doc_id`, `trecho`, `score`). **Na v2.8 isso saiu**: o modelo conversa e pede
+  ferramenta ao MCP; o histórico continua em `chat_mensagens` (`GET`/`DELETE /chat`),
+  agora gravando `ferramentas`. **Sem provider configurado o Chat responde `409`** e a
+  Busca continua normal.
 - **Provider configurável na tela (`/config/provider`)**: `litellm` (OpenAI
   compatível), `openai` ou `ollama`. Campos: `base_url`, `modelo`, `temperatura`,
-  `trechos`, `ativo`. A **chave nunca volta em claro** — a API devolve
+  `system_prompt`, `mcp_interno`, `max_rodadas`, `ativo` (`trechos` era da busca
+  automática da v2.7; saiu de uso na v2.8). A **chave nunca volta em claro** — a API devolve
   `chave_mascarada` (`••••4f2a`) e `tem_chave`. `POST /config/provider/testar`
   mede a latência e falha com mensagem legível. Cada usuário tem a sua configuração;
   o operador pode gravar o padrão de todos (`global: true`, escopo `*`).
@@ -38,8 +79,8 @@ não são itens de menu — são passos do caminho `usuários → gavetas → ar
   removido (apague as gavetas antes). Quem não é operador recebe `403`.
 - **Configurações (`GET /config`)**: limites em vigor e política de esquecimento,
   sem expor segredo.
-- **MCP**: 19 tools — as 15 anteriores + `chat`, `listar_usuarios`,
-  `criar_usuario`, `config_provider`.
+- **MCP**: 19 tools na v2.7 — as 15 anteriores + `chat`, `listar_usuarios`,
+  `criar_usuario`, `config_provider` (21 na v2.8).
 - Versão do produto: **2.7.0**.
 
 ## v2.5 — imagem e PDF escaneado entram por OCR (20/10/2026)
@@ -368,22 +409,34 @@ outros logins nem de outras gavetas.
 | `PATCH /usuarios/{nome}` | operador | `{ativo?, papel?}` — não deixa desativar/rebaixar o último operador |
 | `POST /usuarios/{nome}/chave` | operador (qualquer) ou o próprio | gera chave nova e devolve uma vez |
 | `DELETE /usuarios/{nome}` | operador | só sem documentos (`409` se tiver) |
-| `GET/PUT /config/provider` | qualquer login | provider do chat; `global: true` (só operador) grava o padrão de todos. A chave volta **mascarada** |
+| `GET/PUT /config/provider` | qualquer login | provider do chat (`tipo`, `base_url`, `modelo`, `chave`, `temperatura`, `system_prompt`, `mcp_interno`, `max_rodadas`, `ativo`); `global: true` (só operador) grava o padrão de todos. Chave e cabeçalho voltam **mascarados** |
 | `POST /config/provider/testar` | qualquer login | manda um "teste de conexao" ao modelo e devolve `{ok, ms, modelo}` |
-| `POST /chat` | qualquer login | `{pergunta, memoria}` → `{resposta, fontes[], modelo, ms}`; sem provider → `409` |
-| `GET/DELETE /chat?memoria=` | qualquer login | histórico da conversa / apagar a conversa |
+| `POST /chat` | qualquer login | `{pergunta, memoria}` → `{resposta, ferramentas[], rodadas, modelo, ms, aviso}`; roda as ferramentas do MCP ligado **direto**, sem confirmar; sem provider → `409` |
+| `GET/DELETE /chat?memoria=` | qualquer login | histórico da conversa (com as ferramentas chamadas) / apagar a conversa |
+| `GET /config/mcp` | qualquer login | servidores MCP cadastrados (endereço, ativo, nº de ferramentas, cabeçalho mascarado) |
+| `POST /config/mcp` | operador | `{nome, url, cabecalho?}` — cadastra e já lista as ferramentas do servidor |
+| `PATCH /config/mcp/{nome}` | operador | `{url?, cabecalho?, ativo?}` — campo omitido fica como está |
+| `DELETE /config/mcp/{nome}` | operador | remove o servidor (`404` se não existe) |
+| `POST /config/mcp/testar` | operador | `{nome}` → conversa MCP de verdade e devolve `{ferramentas, nomes[], servidor, ms}` |
 
-**Exemplo de chat:**
+**Exemplo de chat (v2.8 — MCP interno ligado, o modelo pediu a busca):**
 ```json
 POST /chat
 { "pergunta": "qual o total da nota do fornecedor AC ME?", "memoria": "empresa42" }
 
 200 {
-  "resposta": "O total é R$ 1.234,56, com vencimento em 10/11/2026 [nota-fiscal].",
-  "fontes": [{ "doc_id": "nota-fiscal", "title": "nota-fiscal", "score": 0.78, "trecho": "NOTA FISCAL 4471 ..." }],
-  "modelo": "claude-sonnet-4.5", "provider": "empresa42", "buscou": 1, "ms": 640
+  "resposta": "O total é R$ 1.234,56, com vencimento em 10/11/2026.",
+  "ferramentas": [
+    { "servidor": "minirag", "nome": "search", "args": { "query": "nota AC ME total" },
+      "ok": true, "resumo": "[{\"doc_id\":\"nota-fiscal\" …", "ms": 120 }
+  ],
+  "rodadas": 2, "modelo": "claude-sonnet-4.5", "provider": "empresa42",
+  "ferramentas_ligadas": 20, "tem_system_prompt": false, "aviso": null, "ms": 1840
 }
 ```
+
+Sem provider o chat devolve `409`. Com provider e nada de MCP ligado, `ferramentas_ligadas: 0`
+e o modelo responde só com o que sabe (é a "conversa pura" pedida).
 
 ### `POST /decay` — rodar o "esquecimento" agora
 
@@ -602,12 +655,15 @@ IA_GO.
 **Fluxo do cliente MCP:**
 1. `initialize` → servidor devolve `protocolVersion`, `capabilities.tools`, `serverInfo`.
 2. `notifications/initialized` → aceito (202, sem corpo).
-3. `tools/list` → **15 ferramentas**, espelho das rotas REST (argumentos com os mesmos nomes dos corpos):
+3. `tools/list` → **21 ferramentas**, espelho das rotas REST (argumentos com os mesmos nomes dos corpos):
    - **documentos**: `search`, `ingest` (texto), `ingest_status`, `list_docs`, `delete_doc`
    - **arquivo original**: `upload_file` (`nome` + `conteudo_base64`, até 15 MB), `get_file` (devolve o binário em base64)
    - **edição**: `edit_doc` (texto novo + reindexação), `rename_doc` (doc_id/título/mover), `archive_doc`
    - **organização**: `list_gavetas`, `create_gaveta`, `delete_gaveta`
    - **operação**: `list_jobs`, `health`
+   - **chat e configuração**: `chat` (a mesma conversa da tela, com as ferramentas ligadas),
+     `config_provider`, `listar_usuarios`, `criar_usuario` (só operador)
+   - **MCP do chat (v2.8)**: `listar_mcp`, `gerir_mcp` (ação `criar|atualizar|apagar|testar`, só operador)
 4. `tools/call` → `{"name": "search", "arguments": {"query": "...", "memoria": "empresa42"}}` → resposta no formato MCP (`content: [{type: "text", text: "<JSON>"}]`).
 
 **Exemplo (curl):**
@@ -619,6 +675,12 @@ curl -X POST https://minirag.techupsistemas.com/mcp \
 
 Erros de tool viram `result` com `isError: true` (linguagem do MCP); erro
 de auth/protocolo segue o padrão JSON-RPC (`-32001`, `-32601`, `-32700`).
+
+**O minirag também é cliente MCP (v2.8).** As ferramentas acima podem ser emprestadas ao
+próprio Chat: com `mcp_interno` ligado o servidor chama `chamarToolInterna` — o mesmo
+`switch`, no mesmo processo, com a sessão de quem perguntou (sem HTTP, sem segunda chave).
+Servidores de fora entram por endereço em Configurações → Ferramentas (MCP); a chamada sai
+como `nome-do-servidor__ferramenta`.
 O código da camada está em `src/mcp.ts` (~380 linhas; chama as funções de
 negócio direto, sem HTTP interno, sem duplicar regra). Agente que fala MCP
 fecha o ciclo inteiro: sobe o PDF (`upload_file`), espera a fila
