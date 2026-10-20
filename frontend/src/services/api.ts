@@ -63,6 +63,23 @@ export function del<T>(caminho: string): Promise<T> {
   return api<T>(caminho, { method: "DELETE" });
 }
 
+/** Upload multipart (arquivo + campos). O navegador monta o Content-Type com boundary. */
+export async function enviar<T>(caminho: string, form: FormData): Promise<T> {
+  const r = await fetch(caminho, { method: "POST", headers: cabecalhos(false), body: form });
+  if (r.ok) {
+    const ct = r.headers.get("content-type") || "";
+    return (ct.includes("json") ? await r.json() : await r.text()) as T;
+  }
+  let detalhe = `${r.status} ${r.statusText}`;
+  try {
+    const j = (await r.json()) as { detail?: string };
+    if (j.detail) detalhe = j.detail;
+  } catch {
+    /* corpo não-JSON */
+  }
+  throw new ApiErro(r.status, detalhe);
+}
+
 /** Download autenticado (o <a href> não manda o header). */
 export async function baixar(caminho: string, nomeArquivo: string): Promise<void> {
   const r = await fetch(caminho, { headers: cabecalhos(false) });

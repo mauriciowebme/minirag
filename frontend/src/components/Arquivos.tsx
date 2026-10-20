@@ -1,5 +1,5 @@
 import { useCallback, useEffect, useRef, useState } from "react";
-import { baixar, del, get, patch, post, qs } from "../services/api";
+import { baixar, del, enviar, get, patch, qs } from "../services/api";
 import { fmtData, slug } from "../lib/fmt";
 import { useToast } from "./Toast";
 import type { DocItem, DocsResp, Escopo } from "../types";
@@ -25,6 +25,9 @@ export function Arquivos({
   const [nomeNota, setNomeNota] = useState("");
   const [quente, setQuente] = useState(false);
   const inputRef = useRef<HTMLInputElement>(null);
+  /** doc que vai receber a versão nova (input de substituição) */
+  const [substituindo, setSubstituindo] = useState<string | null>(null);
+  const inputVersao = useRef<HTMLInputElement>(null);
   const timer = useRef<number | undefined>(undefined);
   const filtroRef = useRef("");
 
@@ -71,29 +74,47 @@ export function Arquivos({
     timer.current = window.setTimeout(() => void carregar(v.trim(), mostrarArq), 350);
   }
 
-  async function subir(lista: File[]) {
+  async function subir(lista: File[], docAlvo?: string) {
     if (!lista.length) return;
     let ok = 0;
     let falha = 0;
     for (const f of lista) {
+      const alvo = docAlvo ?? "";
       try {
-        const texto = await f.text();
-        const r = await post<{ job_id: number; chunks_total: number }>("/ingest", {
-          doc_id: f.name,
-          title: f.name,
-          content: texto,
-          memoria: escopo.memoria,
-          tenant: operador ? escopo.tenant : undefined,
-        });
+        const form = new FormData();
+        form.append("arquivo", f, f.name);
+        form.append("memoria", escopo.memoria);
+        if (operador) form.append("tenant", escopo.tenant);
+        if (alvo) form.append("doc_id", alvo);
+        const r = await enviar<{
+          doc_id: string;
+          substituiu: boolean;
+          job_id: number;
+          chunks_total: number;
+          tipo: string;
+          editavel_na_tela: boolean;
+        }>("/arquivos", form);
         ok++;
-        toast(`⬆ ${f.name}: na fila (job ${r.job_id}, ${r.chunks_total} chunk[s])`, 2500);
+        const dica = r.editavel_na_tela
+          ? ""
+          : ` · ${r.tipo.toUpperCase()}: para editar, baixe o original, altere e suba de novo`;
+        toast(
+          (r.substituiu
+            ? `♻ ${f.name}: substituiu "${r.doc_id}" — reindexando (job ${r.job_id})`
+            : `⬆ ${f.name} (${r.tipo}): na fila — job ${r.job_id}, ${r.chunks_total} chunk[s]`) + dica,
+          6000,
+        );
       } catch (e) {
         falha++;
-        toast(`⬆ ${f.name}: ${(e as Error).message}`, 5000);
+        toast(`⬆ ${f.name}: ${(e as Error).message}`, 7000);
       }
     }
     if (lista.length > 1) toast(`upload: ${ok} enviado(s), ${falha} com erro`, 5000);
-    void carregar(filtroRef.current, mostrarArq);
+    /* o documento só passa a aparecer quando o worker cria a linha: recarrega
+       agora e mais algumas vezes até a fila andar (senão a gaveta parece vazia) */
+    const recarregar = () => void carregar(filtroRef.current, mostrarArq);
+    recarregar();
+    if (ok) for (const ms of [2500, 6000, 12000]) window.setTimeout(recarregar, ms);
   }
 
   async function exportar() {
@@ -152,14 +173,35 @@ export function Arquivos({
   }
 
   async function baixarDoc(doc: DocItem) {
+    const orig = doc.arquivo;
     try {
-      await baixar(
-        `/documents/${encodeURIComponent(doc.doc_id)}/raw?` + qs({ memoria: escopo.memoria, tenant: escopo.tenant }),
-        slug(doc.doc_id) + ".txt",
-      );
+      if (orig) {
+        await baixar(
+          `/documents/${encodeURIComponent(doc.doc_id)}/arquivo?` +
+            qs({ memoria: escopo.memoria, tenant: escopo.tenant }),
+          orig.nome || `${slug(doc.doc_id)}.${orig.tipo || "bin"}`,
+        );
+      } else {
+        await baixar(
+          `/documents/${encodeURIComponent(doc.doc_id)}/raw?` + qs({ memoria: escopo.memoria, tenant: escopo.tenant }),
+          slug(doc.doc_id) + ".txt",
+        );
+      }
     } catch (e) {
-      toast((e as Error).message);
+      toast((e as Error).message, 6000);
     }
+  }
+
+  /** abre o seletor de arquivo para substituir ESTE documento (mesmo doc_id = substitui) */
+  function pedirVersao(doc: DocItem) {
+    setSubstituindo(doc.doc_id);
+    inputVersao.current?.click();
+  }
+
+  function tamanhoLegivel(n: number): string {
+    if (n < 1024) return `${n} B`;
+    if (n < 1024 * 1024) return `${Math.round(n / 1024)} KB`;
+    return `${(n / 1024 / 1024).toFixed(1)} MB`;
   }
 
   function criarNota() {
@@ -192,19 +234,21 @@ export function Arquivos({
         >
           ＋ nova nota
         </button>
-        <label className="btn" title="enviar um ou vários arquivos">
+        <label className="btn" title="enviar um ou vários arquivos (pdf, docx, xlsx, csv, html, txt, md)">
           ⬆ upload
           <input
             type="file"
             id="arquivoInput"
-            accept=".txt,.md,.markdown,text/plain"
+            accept=".pdf,.docx,.xlsx,.csv,.html,.htm,.txt,.md,.markdown"
             multiple
             hidden
             ref={inputRef}
             onChange={(e) => {
               const lista = Array.from(e.target.files || []);
-              e.target.value = "";
-              void subir(lista);
+              const alvoInput = e.target;
+              void subir(lista).finally(() => {
+                alvoInput.value = "";
+              });
             }}
           />
         </label>
@@ -291,8 +335,30 @@ export function Arquivos({
           void subir(Array.from(e.dataTransfer.files || []));
         }}
       >
-        <b>⬆</b> arraste arquivos .txt/.md aqui — ou clique para escolher
+        <b>⬆</b> arraste pdf, docx, xlsx, csv, html, txt ou md — ou clique para escolher
+        <span className="mt-1 block text-[12px] text-txt3">
+          o arquivo original fica guardado; subir o mesmo nome substitui e reprocessa
+        </span>
       </div>
+
+      <input
+        type="file"
+        id="versaoInput"
+        hidden
+        ref={inputVersao}
+        accept=".pdf,.docx,.xlsx,.csv,.html,.htm,.txt,.md,.markdown"
+        onChange={(e) => {
+          const lista = Array.from(e.target.files || []);
+          const alvo = substituindo;
+          const alvoInput = e.target;
+          setSubstituindo(null);
+          const fim = () => {
+            alvoInput.value = "";
+          };
+          if (alvo) void subir(lista, alvo).finally(fim);
+          else fim();
+        }}
+      />
 
       <table className="tabela" id="arqTabela">
         <thead>
@@ -316,7 +382,9 @@ export function Arquivos({
           {!carregando && docs.length === 0 && (
             <tr>
               <td colSpan={6} className="text-txt3">
-                {filtro.trim() ? "nenhum arquivo com esse filtro" : "gaveta vazia — use nova nota ou arraste arquivos acima"}
+                {filtro.trim()
+                  ? "nenhum arquivo com esse filtro"
+                  : "gaveta vazia — use nova nota, arraste arquivos acima ou marque \"mostrar arquivados\""}
               </td>
             </tr>
           )}
@@ -325,7 +393,15 @@ export function Arquivos({
               const arquivado = doc.chunks_arquivados > 0;
               return (
                 <tr key={doc.doc_id} className={arquivado ? "arquivada" : ""}>
-                  <td>{doc.title || "(sem título)"}</td>
+                  <td>
+                    <div>{doc.title || "(sem título)"}</div>
+                    {doc.arquivo && (
+                      <div className="mt-0.5 text-[12px] text-txt3">
+                        <span className="chip mr-1">{(doc.arquivo.ext || doc.arquivo.tipo).toUpperCase()}</span>
+                        {doc.arquivo.nome} · {tamanhoLegivel(doc.arquivo.tamanho)}
+                      </div>
+                    )}
+                  </td>
                   <td data-rot="doc_id">
                     <span className="tcode">{doc.doc_id}</span>
                   </td>
@@ -338,12 +414,40 @@ export function Arquivos({
                   <td data-rot="atualizado">{fmtData(doc.updated_at)}</td>
                   <td className="acoes">
                     <span className="acoes-linha">
-                      <button className="btn btn-sutil btn-mini" title="abrir no editor" aria-label="abrir no editor" onClick={() => onAbrirEditor(doc.doc_id)}>
-                        abrir
-                      </button>
-                      <button className="btn btn-sutil btn-mini" title="baixar o arquivo original" aria-label="baixar o arquivo original" onClick={() => void baixarDoc(doc)}>
-                        baixar
-                      </button>
+                      {(!doc.arquivo || doc.arquivo.editavel) ? (
+                        <button
+                          className="btn btn-sutil btn-mini"
+                          title="editar o texto na tela e reindexar"
+                          aria-label="abrir no editor"
+                          onClick={() => onAbrirEditor(doc.doc_id)}
+                        >
+                          abrir
+                        </button>
+                      ) : (
+                        <button
+                          className="btn btn-sutil btn-mini"
+                          title="baixar o original, editar na sua máquina e usar 'nova versão'"
+                          aria-label="baixar o arquivo original"
+                          onClick={() => void baixarDoc(doc)}
+                        >
+                          ⬇ original
+                        </button>
+                      )}
+                      {doc.arquivo && (
+                        <button
+                          className="btn btn-sutil btn-mini"
+                          title="subir uma versão nova deste documento (substitui e reprocessa)"
+                          aria-label="subir nova versão"
+                          onClick={() => pedirVersao(doc)}
+                        >
+                          ⬆ versão
+                        </button>
+                      )}
+                      {!doc.arquivo && (
+                        <button className="btn btn-sutil btn-mini" title="baixar o texto" aria-label="baixar o texto" onClick={() => void baixarDoc(doc)}>
+                          baixar
+                        </button>
+                      )}
                       <button
                         className="btn btn-sutil btn-mini"
                         title="copiar o doc_id"

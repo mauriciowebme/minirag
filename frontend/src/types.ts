@@ -22,6 +22,8 @@ export type DocItem = {
   chunks: number;
   updated_at: string | null;
   chunks_arquivados: number;
+  /** arquivo original guardado (pdf/docx/...); null quando o doc nasceu como texto */
+  arquivo: { nome: string; tipo: string; ext?: string; editavel?: boolean; tamanho: number } | null;
 };
 export type DocsResp = { tenant: string; memoria: string; total: number; docs: DocItem[] };
 
