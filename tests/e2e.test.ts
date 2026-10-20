@@ -826,8 +826,8 @@ test("minirag v2 — suíte completa", async (t) => {
     );
     r = await enviar("foto.png", Buffer.from("89504e470d0a1a0a", "hex"), { memoria: "arquivos" });
     f.check(
-      "png -> 422 listando os aceitos",
-      r.status === 422 && /não suportado/.test(r.json?.detail ?? "") && /pdf, docx/.test(r.json?.detail ?? ""),
+      "png quebrado -> 422 'imagem ilegivel' (imagem agora é aceita)",
+      r.status === 422 && /ilegivel|ilegível/.test(r.json?.detail ?? ""),
       `${r.status} ${r.json?.detail}`,
     );
     /* PDF válido, só que sem texto nenhum (só um retângulo) */
@@ -837,8 +837,8 @@ test("minirag v2 — suíte completa", async (t) => {
     );
     r = await enviar("escaneado.pdf", vazio, { memoria: "arquivos" });
     f.check(
-      "pdf sem texto -> 422 'digitalizado'",
-      r.status === 422 && /digitalizado|texto para indexar/.test(r.json?.detail ?? ""),
+      "pdf sem texto e sem nada legível -> 422 explicando",
+      r.status === 422 && /não saiu texto|nao saiu texto|texto para indexar/.test(r.json?.detail ?? ""),
       `${r.status} ${r.json?.detail}`,
     );
 
@@ -861,6 +861,125 @@ test("minirag v2 — suíte completa", async (t) => {
     }
 
     f.fechar("arquivos");
+  });
+
+
+  await t.test("imagem: OCR de print, foto e PDF escaneado", async () => {
+    const f = fiscal();
+    const fs = require("node:fs") as typeof import("node:fs");
+    const nodePath = require("node:path") as typeof import("node:path");
+    const FIX = nodePath.resolve(__dirname, "..", "tests", "fixtures");
+    const nota = fs.readFileSync(nodePath.join(FIX, "ocr-nota.png"));
+    const semTexto = fs.readFileSync(nodePath.join(FIX, "ocr-sem-texto.png"));
+    const escaneado = fs.readFileSync(nodePath.join(FIX, "ocr-escaneado.pdf"));
+    const oitoPaginas = fs.readFileSync(nodePath.join(FIX, "ocr-8paginas.pdf"));
+
+    for (const g of ["imagens"]) await call("DELETE", `/gavetas/${g}`, { key: TESTKEY });
+
+    async function enviar(nome: string, buf: Buffer, campos: Record<string, string> = {}): Promise<Resp> {
+      const form = new FormData();
+      form.append("arquivo", new Blob([new Uint8Array(buf)]), nome);
+      for (const [k, v] of Object.entries(campos)) form.append(k, v);
+      const r = await fetch(BASE + "/arquivos", {
+        method: "POST",
+        headers: { Authorization: "B" + "earer " + TESTKEY },
+        body: form,
+        signal: AbortSignal.timeout(180_000),
+      });
+      const buf2 = Buffer.from(await r.arrayBuffer());
+      const texto = buf2.toString("utf8");
+      let json: any = null;
+      try {
+        json = JSON.parse(texto);
+      } catch {
+        json = null;
+      }
+      return { status: r.status, headers: r.headers, json, buf: buf2, texto };
+    }
+
+    console.log("-- print/foto: OCR entra no índice");
+    let r = await enviar("nota-fiscal.png", nota, { memoria: "imagens" });
+    f.check(
+      "sobe png: 201 + tipo imagem + aviso de OCR",
+      r.status === 201 && r.json?.tipo_detectado === "imagem" && r.json?.lido_por_ocr === true,
+      `${r.status} ${r.json?.detail ?? JSON.stringify(r.json)?.slice(0, 200)}`,
+    );
+    if (Number.isFinite(Number(r.json?.job_id))) await esperarJob(TESTKEY, Number(r.json?.job_id));
+
+    r = await call("POST", "/search", { key: TESTKEY, corpo: { query: "nota fiscal do fornecedor AC ME", memoria: "imagens" } });
+    f.check("busca acha o texto lido da imagem", (r.json?.total ?? 0) > 0, r.json?.items?.[0]?.text?.slice(0, 90));
+
+    r = await call("GET", "/docs?memoria=imagens", { key: TESTKEY });
+    const docImg = (r.json?.docs ?? []).find((d: any) => d.doc_id === "nota-fiscal");
+    f.check(
+      "/docs marca ocr:true e guarda o original",
+      docImg?.arquivo?.ocr === true && docImg?.arquivo?.tamanho === nota.length,
+      docImg?.arquivo,
+    );
+
+    r = await call("GET", "/documents/nota-fiscal/arquivo?memoria=imagens", { key: TESTKEY });
+    f.check(
+      "download da imagem original: bytes idênticos",
+      r.status === 200 && Buffer.compare(r.buf, nota) === 0,
+      `${r.status} ${r.headers.get("content-type")} ${r.buf.length}`,
+    );
+
+    console.log("-- PDF escaneado (sem camada de texto)");
+    r = await enviar("contrato-escaneado.pdf", escaneado, { memoria: "imagens" });
+    f.check(
+      "pdf escaneado: 201 + lido por OCR",
+      r.status === 201 && r.json?.lido_por_ocr === true && Number(r.json?.paginas_ocr) >= 1,
+      `${r.status} ${r.json?.detail ?? JSON.stringify(r.json)?.slice(0, 200)}`,
+    );
+    if (Number.isFinite(Number(r.json?.job_id))) await esperarJob(TESTKEY, Number(r.json?.job_id));
+    r = await call("POST", "/search", { key: TESTKEY, corpo: { query: "total da nota fiscal vencimento", memoria: "imagens" } });
+    f.check("busca acha o texto do PDF escaneado", (r.json?.total ?? 0) > 0, r.json?.total);
+
+    console.log("-- recusas com mensagem clara");
+    r = await enviar("branca.png", semTexto, { memoria: "imagens" });
+    f.check(
+      "imagem sem texto -> 422 explicando",
+      r.status === 422 && /não saiu texto|nao saiu texto/.test(r.json?.detail ?? ""),
+      `${r.status} ${r.json?.detail}`,
+    );
+    r = await enviar("longo.pdf", oitoPaginas, { memoria: "imagens" });
+    f.check(
+      "PDF escaneado com 8 páginas -> 422 com limite",
+      r.status === 422 && /paginas|páginas/.test(r.json?.detail ?? ""),
+      `${r.status} ${r.json?.detail}`,
+    );
+
+    console.log("-- PDF com texto NÃO passa por OCR");
+    const comTexto = Buffer.from("%PDF-1.4\n", "utf8");
+    r = await enviar("quebrado.pdf", comTexto, { memoria: "imagens" });
+    f.check("pdf invalido continua 422", r.status === 422, `${r.status} ${r.json?.detail}`);
+
+    console.log("-- MCP: upload_file aceita imagem");
+    r = await call("POST", "/mcp", {
+      key: TESTKEY,
+      corpo: {
+        jsonrpc: "2.0",
+        id: 991,
+        method: "tools/call",
+        params: {
+          name: "upload_file",
+          arguments: {
+            nome: "print-mcp.png",
+            conteudo_base64: nota.toString("base64"),
+            memoria: "imagens",
+          },
+        },
+      },
+    });
+    const saida = r.json?.result?.content?.[0]?.text ?? "";
+    f.check(
+      "MCP upload_file de imagem: sem erro e com lido_por_ocr",
+      !r.json?.result?.isError && /"lido_por_ocr":\s*true/.test(saida),
+      saida.slice(0, 200),
+    );
+
+    await call("DELETE", `/gavetas/imagens`, { key: TESTKEY });
+    f.fechar("imagem/OCR");
   });
 
   await t.test("freio de força bruta (último: bloqueia o IP)", async () => {
