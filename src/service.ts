@@ -1,6 +1,6 @@
 /** Regras de negócio: busca, documentos, gavetas, jobs, export e delete. */
 import { ZipFile } from "yazl";
-import { CONFIG, Usuario, isOperador, tenantFilter, tenantFor } from "./config";
+import { CONFIG, OPERADOR, USERS, Usuario, isOperador, tenantFilter, tenantFor } from "./config";
 import { q, tx } from "./db";
 import { embedUm } from "./embed";
 import { erro404, erro409, erro422, iso } from "./errors";
@@ -141,8 +141,21 @@ export async function listGavetas(user: Usuario, tenantArg?: string) {
     `SELECT count(*) AS n FROM documents${alvo !== null ? " WHERE tenant = $1" : ""}`,
     params,
   );
+  /* Usuários conhecidos: operador vê todos os configurados (mesmo sem dados),
+     para poder criar documentos neles; login comum vê só o próprio. */
+  const comDados = [...new Set(r.rows.map((g) => g.tenant))];
+  let usuarios: string[];
+  if (isOperador(user)) {
+    const configurados = [...USERS, ...OPERADOR].map(([nome]) => nome);
+    usuarios = [...new Set([...configurados, ...comDados])].sort();
+    if (alvo !== null) usuarios = usuarios.filter((t) => t === alvo);
+  } else {
+    usuarios = [user.tenant];
+  }
+
   return {
     operador: isOperador(user),
+    usuarios,
     gavetas: r.rows.map((g) => ({
       tenant: g.tenant,
       memoria: g.memoria,

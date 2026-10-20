@@ -9,7 +9,12 @@ export type Gaveta = {
   primeiro_ingress: string | null;
   ultimo_ingress: string | null;
 };
-export type GavetasResp = { operador: boolean; gavetas: Gaveta[]; documentos_fonte: number };
+export type GavetasResp = {
+  operador: boolean;
+  usuarios: string[];
+  gavetas: Gaveta[];
+  documentos_fonte: number;
+};
 
 export type DocItem = {
   doc_id: string;

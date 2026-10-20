@@ -193,7 +193,8 @@ export function Editor({
         <h2>
           Editor{" "}
           <span id="edOnde" className="sub2">
-            — {escopo.tenant || "—"} : {escopo.memoria || "(padrão)"} · {idAtual || ""}
+            {escopo.tenant ? `— 👤 ${escopo.tenant} ▸ gaveta ${escopo.memoria || "padrão"}` : "—"}
+            {idAtual ? ` · ${idAtual}` : ""}
           </span>
         </h2>
         <span className="flex-1" />
