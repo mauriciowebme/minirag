@@ -5,7 +5,33 @@ cria uma "digital" numérica do significado de cada um (embedding) e guarda num
 banco Postgres com pgvector. Quando você pergunta, ele devolve os pedaços mais
 parecidos com a pergunta, com uma nota de 0 a 1.
 
-**Stack:** FastAPI + Postgres (pgvector) + nomic-embed-text-v1.5 (sentence-transformers)
+**Stack:** Node 22 + TypeScript (Fastify) + Postgres (pgvector) + embedder Python
+(nomic-embed-text-v1.5 via sentence-transformers), rodando no MESMO container.
+
+---
+
+## v2.0 — aplicação em TypeScript, embedding em Python (20/10/2026)
+
+O serviço foi reescrito em **Node/TypeScript**. O contrato HTTP é o mesmo da
+v1.11 — mesmas rotas, mesmos corpos, mesmos códigos de erro —, então nenhum
+cliente precisou mudar.
+
+```
+app (1 container)
+├─ node  → rotas REST, fila/worker, MCP, painel     (PID 1)
+└─ python → embedder em 127.0.0.1:8001 (filho; só loopback)
+db → Postgres/pgvector (schema idêntico)
+```
+
+**Por que o embedding continua em Python:** o nomic roda em torch/CPU e o
+sentence-transformers é o caminho estável. Mantendo o mesmo código e o mesmo
+modelo assado na imagem, os **vetores são idênticos** aos da v1.x — nada foi
+reindexado e o recall não mudou. O Node nunca fala com o modelo: envia textos
+para `POST /embed` e recebe as strings de vetor já formatadas.
+
+O Node sobe o Python como processo filho, vigia e reinicia se ele cair; se o
+embedder estiver fora, `/health` reporta `embedder: "fora"` e a fila pausa
+(em vez de fingir saúde).
 
 ---
 
@@ -448,8 +474,8 @@ curl -X POST https://minirag.techupsistemas.com/mcp \
 
 Erros de tool viram `result` com `isError: true` (linguagem do MCP); erro
 de auth/protocolo segue o padrão JSON-RPC (`-32001`, `-32601`, `-32700`).
-O código da camada está em `mcp_server.py` (~240 linhas; chama as funções
-do `api.py` direto, sem HTTP interno, sem duplicar regra).
+O código da camada está em `src/mcp.ts` (~250 linhas; chama as funções de
+negócio direto, sem HTTP interno, sem duplicar regra).
 
 ---
 
@@ -539,8 +565,36 @@ docker-compose up -d --build
 
 # 3) Conferir
 docker ps --format '{{.Names}} {{.Status}}' | grep minirag
-curl http://127.0.0.1:8000/health
+curl http://127.0.0.1:8000/health   # {"versao":"2.0.0", "embedder":"ok", ...}
 ```
+
+### Desenvolvimento (fora do Docker)
+
+Node e Python separados, para iterar rápido:
+
+```bash
+npm install
+npm run build           # tsc (servidor) + esbuild (painel/app.ts → app.js)
+
+# terminal 1 — embedder (precisa de python com sentence-transformers + modelo)
+MINIRAG_EMBEDDER_MODO=externo \
+  python3 -m uvicorn embedder.embed_server:app --port 8001
+
+# terminal 2 — aplicação
+MINIRAG_EMBEDDER_MODO=externo MINIRAG_DB_HOST=127.0.0.1 \
+MINIRAG_USERS="teste:chave" node dist/index.js
+```
+
+### Testes
+
+```bash
+# com a stack de teste no ar (porta 8002 no exemplo)
+BASE=http://127.0.0.1:8002 TESTKEY=... OPKEY=... npm test
+```
+
+A suíte (`tests/e2e.test.ts`, ~72 checagens) roda por HTTP: é juiz de
+**contrato**, não de implementação. O último bloco testa o freio de força
+bruta e bloqueia o IP por 5 minutos — por isso ele é o último.
 
 ### Produção (qualquer plataforma Docker)
 
@@ -595,6 +649,11 @@ O minirag roda em qualquer ambiente com Docker. Segue um exemplo prático
 | `MINIRAG_USERS` | `""` | lista `nome:chave` de logins (obrigatório) |
 | `MINIRAG_MODEL` | `nomic-ai/nomic-embed-text-v1.5` | modelo de embedding |
 | `MINIRAG_MODEL_DIR` | `/app/models` | onde o modelo está assado na imagem |
+| `MINIRAG_EMBEDDER_MODO` | `filho` | `filho` = Node sobe o Python; `externo` = já está no ar |
+| `MINIRAG_EMBEDDER_PORT` | `8001` | porta local (loopback) do embedder |
+| `MINIRAG_EMBEDDER_URL` | `http://127.0.0.1:8001` | URL usada pelo Node |
+| `MINIRAG_PYTHON` | `python3` | binário do Python no container |
+| `MINIRAG_WORKER_ATIVO` | `1` | liga o worker da fila (desligue em réplica só-API) |
 | `MINIRAG_DB_HOST` | `minirag-db` | host do Postgres |
 | `MINIRAG_DB_PORT` | `5432` | porta do Postgres |
 | `MINIRAG_DB_USER` | `minirag` | usuário do Postgres |
