@@ -32,7 +32,7 @@ FROM node:22-bookworm-slim AS build
 
 WORKDIR /build
 COPY package.json package-lock.json ./
-RUN npm ci --no-audit --no-fund
+RUN npm ci --no-audit --no-fund --omit=optional
 
 COPY tsconfig.json ./
 COPY src ./src
