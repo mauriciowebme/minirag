@@ -2,7 +2,7 @@
 import fs from "node:fs";
 import path from "node:path";
 import Fastify, { FastifyInstance, FastifyReply, FastifyRequest } from "fastify";
-import { CONFIG, OPERADOR, USERS, tenantFor } from "./config";
+import { CONFIG, tenantFor } from "./config";
 import { HttpError, iso } from "./errors";
 import { authenticate, ipCliente } from "./auth";
 import { embedderDim, embedderDisponivel } from "./embed";
@@ -10,6 +10,25 @@ import { detectarOcr, ocrDisponivel } from "./ocr";
 import { enqueueIngest, IngestBody } from "./ingest";
 import { runDecay } from "./decay";
 import { mcpHandler } from "./mcp";
+import { contarUso, configPublica, dadosPainel } from "./dashboard";
+import {
+  atualizarUsuario,
+  criarUsuario,
+  exigirOperador,
+  listarUsuarios,
+  nomesOperadores,
+  nomesUsuarios,
+  novaChaveUsuario,
+  removerUsuario,
+} from "./usuarios";
+import {
+  historicoChat,
+  limparChat,
+  responderChat,
+  salvarProvider,
+  testarProvider,
+  verProvider,
+} from "./provider";
 import multipart from "@fastify/multipart";
 import { LIMITE_BYTES } from "./conversor";
 import {
@@ -138,8 +157,8 @@ export function criarApp(): FastifyInstance {
   const health = () => ({
     status: "ok",
     dim: embedderDim(),
-    usuarios: USERS.length,
-    operador: Boolean(OPERADOR.length),
+    usuarios: nomesUsuarios().length,
+    operador: nomesOperadores().length > 0,
     versao: CONFIG.versao,
     embedder: embedderDisponivel() ? "ok" : "fora",
     ocr: ocrDisponivel() === null ? "?" : ocrDisponivel() ? "ok" : "fora",
@@ -242,7 +261,9 @@ export function criarApp(): FastifyInstance {
       include_archived: vBool(b.include_archived),
       tenant: b.tenant ?? null,
     };
-    return search(body, u);
+    const r = await search(body, u);
+    if (r.total) void contarUso("buscas");
+    return r;
   });
 
   /* ---------------------------------------------------------------- docs */
@@ -435,6 +456,109 @@ export function criarApp(): FastifyInstance {
       : vInt(b.min_acessos, "min_acessos", 0, 0, 1_000_000);
     const alvo = (await import("./config")).isOperador(u) ? null : u.tenant;
     return runDecay(dias, min, alvo);
+  });
+
+  /* ------------------------------------------------------------- painel */
+
+  /** Números do acervo em uma chamada (o Painel não faz 6 requisições). */
+  app.get("/dashboard", async (req) => {
+    const u = usuario(req);
+    const s = req.query as Record<string, string>;
+    return dadosPainel(u, s.tenant ?? "");
+  });
+
+  /** Limites e esquecimento para a tela de Configurações (sem segredo). */
+  app.get("/config", async (req) => {
+    usuario(req);
+    return configPublica();
+  });
+
+  /* ----------------------------------------------------------- usuários */
+
+  app.get("/usuarios", async (req) => {
+    const u = usuario(req);
+    exigirOperador(u);
+    return { usuarios: await listarUsuarios() };
+  });
+
+  app.post("/usuarios", async (req, reply) => {
+    const u = usuario(req);
+    exigirOperador(u);
+    const b = corpo(req);
+    const r = await criarUsuario(vString(b.nome, "nome", { obrigatorio: true, max: 64 }), b.papel);
+    return reply.code(201).send(r);
+  });
+
+  app.patch("/usuarios/:nome", async (req) => {
+    const u = usuario(req);
+    exigirOperador(u);
+    const p = req.params as Record<string, string>;
+    const b = corpo(req);
+    return atualizarUsuario(p.nome, { ativo: b.ativo, papel: b.papel });
+  });
+
+  /** Gera chave nova: o operador para qualquer um, o comum só para si. */
+  app.post("/usuarios/:nome/chave", async (req) => {
+    const u = usuario(req);
+    const p = req.params as Record<string, string>;
+    const alvo = p.nome.trim().toLowerCase();
+    if (!u.operador && alvo !== u.tenant) throw new HttpError(403, "voce so pode trocar a sua propria chave");
+    return novaChaveUsuario(alvo);
+  });
+
+  app.delete("/usuarios/:nome", async (req) => {
+    const u = usuario(req);
+    exigirOperador(u);
+    const p = req.params as Record<string, string>;
+    return removerUsuario(p.nome);
+  });
+
+  /* ----------------------------------------------------- provider do chat */
+
+  app.get("/config/provider", async (req) => {
+    const u = usuario(req);
+    const s = req.query as Record<string, string>;
+    return verProvider(u, s.tenant ?? "");
+  });
+
+  app.put("/config/provider", async (req) => {
+    const u = usuario(req);
+    return salvarProvider(u, corpo(req));
+  });
+
+  app.post("/config/provider/testar", async (req) => {
+    const u = usuario(req);
+    return testarProvider(u, corpo(req));
+  });
+
+  /* ------------------------------------------------------------------ chat */
+
+  app.post("/chat", async (req) => {
+    const u = usuario(req);
+    const b = corpo(req);
+    const r = await responderChat(u, {
+      pergunta: vString(b.pergunta, "pergunta", { obrigatorio: true, min: 1, max: CONFIG.maxQueryChars }),
+      memoria: vString(b.memoria, "memoria", { max: 128, def: "" }),
+      tenant: b.tenant ?? null,
+    });
+    void contarUso("chats");
+    return r;
+  });
+
+  app.get("/chat", async (req) => {
+    const u = usuario(req);
+    const s = req.query as Record<string, string>;
+    return historicoChat(u, {
+      memoria: s.memoria ?? "",
+      tenant: s.tenant ?? "",
+      limit: s.limit ? Number(s.limit) : 40,
+    });
+  });
+
+  app.delete("/chat", async (req) => {
+    const u = usuario(req);
+    const s = req.query as Record<string, string>;
+    return limparChat(u, { memoria: s.memoria ?? "", tenant: s.tenant ?? "" });
   });
 
   /* ----------------------------------------------------------------- MCP */

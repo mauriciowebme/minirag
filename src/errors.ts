@@ -11,6 +11,7 @@ export class HttpError extends Error {
 
 export const erro400 = (d: string) => new HttpError(400, d);
 export const erro401 = (d: string) => new HttpError(401, d);
+export const erro403 = (d: string) => new HttpError(403, d);
 export const erro404 = (d: string) => new HttpError(404, d);
 export const erro409 = (d: string) => new HttpError(409, d);
 export const erro413 = (d: string) => new HttpError(413, d);

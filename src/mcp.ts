@@ -18,6 +18,8 @@ import {
 } from "./service";
 import { enqueueIngest } from "./ingest";
 import { CONFIG } from "./config";
+import { criarUsuario, listarUsuarios, exigirOperador } from "./usuarios";
+import { responderChat, salvarProvider, testarProvider, verProvider } from "./provider";
 
 const PROTOCOLOS = ["2025-06-18", "2025-03-10", "2024-11-05"];
 const SERVER_INFO = { name: "minirag", version: CONFIG.versao };
@@ -219,6 +221,58 @@ export const TOOLS: Tool[] = [
     },
   },
   {
+    name: "chat",
+    description:
+      "Pergunta em linguagem natural sobre os documentos da gaveta. Responde citando as fontes (doc_id + trecho + similaridade). Requer provider configurado (config_provider).",
+    inputSchema: {
+      type: "object",
+      properties: {
+        pergunta: { type: "string", description: "a pergunta (max 2000 chars)" },
+        memoria: { type: "string", description: "gaveta (default '')" },
+        tenant: { type: "string", description: "dono da gaveta (so operador)" },
+      },
+      required: ["pergunta"],
+    },
+  },
+  {
+    name: "listar_usuarios",
+    description: "Lista os usuarios do servidor (nome, papel, ativo, documentos). Somente operador.",
+    inputSchema: { type: "object", properties: {} },
+  },
+  {
+    name: "criar_usuario",
+    description:
+      "Cria um usuario e devolve a chave em claro UMA UNICA VEZ (guarde na hora). Somente operador.",
+    inputSchema: {
+      type: "object",
+      properties: {
+        nome: { type: "string", description: "2-32 chars: letras sem acento, numeros, . _ -" },
+        papel: { type: "string", enum: ["usuario", "operador"] },
+      },
+      required: ["nome"],
+    },
+  },
+  {
+    name: "config_provider",
+    description:
+      "Provider de linguagem do chat (LiteLLM/OpenAI/Ollama). acao=ver | salvar | testar. A chave nunca volta em claro.",
+    inputSchema: {
+      type: "object",
+      properties: {
+        acao: { type: "string", enum: ["ver", "salvar", "testar"] },
+        tipo: { type: "string", enum: ["litellm", "openai", "ollama"] },
+        base_url: { type: "string", description: "ex.: https://litellm.exemplo.com/v1" },
+        modelo: { type: "string" },
+        chave: { type: "string", description: "omita para manter a chave ja salva" },
+        temperatura: { type: "number" },
+        trechos: { type: "integer", description: "quantos trechos enviar ao modelo (1-20)" },
+        ativo: { type: "boolean" },
+        global: { type: "boolean", description: "gravar como padrao global (so operador)" },
+      },
+      required: ["acao"],
+    },
+  },
+  {
     name: "list_jobs",
     description: "Fila de ingestao com resumo por status (na_fila | processando | concluido | erro | cancelado).",
     inputSchema: {
@@ -256,7 +310,8 @@ function initialize(params: Row) {
       "ingest (texto na fila), ingest_status (progresso), list_docs, delete_doc, health, " +
       "upload_file (pdf/docx/xlsx/csv/html/txt/md em base64), get_file (original guardado), " +
       "edit_doc (edita texto e reindexa), rename_doc (renomeia/move/titulo), archive_doc, " +
-      "list_gavetas, create_gaveta, delete_gaveta, list_jobs.",
+      "list_gavetas, create_gaveta, delete_gaveta, list_jobs, chat (pergunta respondida com fontes), " +
+      "listar_usuarios e criar_usuario (operador), config_provider (provider do chat).",
   };
 }
 
@@ -361,6 +416,29 @@ async function executarTool(
       return criarGaveta(tenantFor(user, args.tenant ?? null), args.memoria);
     case "delete_gaveta":
       return deleteGaveta(args.memoria, args.tenant ?? null, user);
+    case "chat":
+      if (typeof args.pergunta !== "string" || !args.pergunta.trim()) {
+        throw new Error("parametros invalidos: campo obrigatorio: pergunta");
+      }
+      return responderChat(user, {
+        pergunta: args.pergunta,
+        memoria: args.memoria ?? "",
+        tenant: args.tenant ?? null,
+      });
+    case "listar_usuarios":
+      exigirOperador(user);
+      return { usuarios: await listarUsuarios() };
+    case "criar_usuario":
+      exigirOperador(user);
+      if (typeof args.nome !== "string") throw new Error("parametros invalidos: campo obrigatorio: nome");
+      return criarUsuario(args.nome, args.papel);
+    case "config_provider": {
+      const acao = String(args.acao ?? "ver");
+      if (acao === "ver") return verProvider(user, args.tenant ?? null);
+      if (acao === "salvar") return salvarProvider(user, args);
+      if (acao === "testar") return testarProvider(user, args);
+      throw new Error("acao invalida: use ver | salvar | testar");
+    }
     case "list_jobs":
       return listJobs(
         {

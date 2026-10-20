@@ -1,7 +1,8 @@
 /** Autenticação: Bearer, escopo de tenant/operador e freio de força bruta. */
 import crypto from "node:crypto";
-import { CONFIG, OPERADOR, USERS, Usuario, isOperador } from "./config";
+import { CONFIG, Usuario, isOperador } from "./config";
 import { erro401, erro429 } from "./errors";
+import { usuarioPorChave } from "./usuarios";
 
 const falhas = new Map<string, number[]>();
 
@@ -37,19 +38,14 @@ export function authenticate(authorization: string | undefined, ip: string): Usu
   let token = (authorization ?? "").trim();
   if (token.startsWith("Bearer ")) token = token.slice(7);
   token = token.trim();
-  if (!token) throw erro401("falta Authorization: Bearer ***");
+  if (!token) throw erro401("falta o cabecalho de autorizacao (Bearer)");
 
-  for (const [nome, chave] of USERS) {
-    if (iguais(token, chave)) {
-      falhas.delete(ip);
-      return { tenant: nome };
-    }
-  }
-  for (const [nome, chave] of OPERADOR) {
-    if (iguais(token, chave)) {
-      falhas.delete(ip);
-      return { tenant: nome, operador: true };
-    }
+  /* v2.7: usuários vivem no banco (criados pela tela); o env só semeia no boot.
+     `usuarioPorChave` compara sha256 e devolve null para chave/usuário inativo. */
+  const achado = usuarioPorChave(token);
+  if (achado) {
+    falhas.delete(ip);
+    return achado;
   }
   const lista = falhas.get(ip) ?? [];
   lista.push(Date.now() / 1000);

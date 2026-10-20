@@ -1,6 +1,7 @@
 /** Regras de negócio: busca, documentos, gavetas, jobs, export e delete. */
 import { ZipFile } from "yazl";
-import { CONFIG, OPERADOR, USERS, Usuario, isOperador, tenantFilter, tenantFor } from "./config";
+import { CONFIG, Usuario, isOperador, tenantFilter, tenantFor } from "./config";
+import { nomesOperadores, nomesUsuarios } from "./usuarios";
 import { q, tx } from "./db";
 import { embedUm } from "./embed";
 import { erro404, erro409, erro422, iso } from "./errors";
@@ -176,10 +177,11 @@ export async function listGavetas(user: Usuario, tenantArg?: string) {
   let usuarios: string[];
   if (isOperador(user)) {
     /* operador é login global do painel, não usuário: só aparece se tiver documento */
-    const donoOperador = OPERADOR[0]?.[0] ?? "";
-    const configurados = [...USERS.map(([nome]) => nome), donoOperador];
+    /* operadores são logins globais (podem ser vários), não usuários de gaveta */
+    const operadores = new Set(nomesOperadores());
+    const configurados = [...nomesUsuarios(), ...operadores];
     usuarios = [...new Set([...configurados, ...comDados, ...reg.rows.map((g) => g.tenant)])]
-      .filter((t) => t !== donoOperador || comDados.includes(t))
+      .filter((t) => !operadores.has(t) || comDados.includes(t))
       .sort();
     if (alvo !== null) usuarios = usuarios.filter((t) => t === alvo);
   } else {

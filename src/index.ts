@@ -1,13 +1,16 @@
 /** Boot: sobe o embedder (filho), prepara o banco, liga worker/decay e serve. */
 import { spawn, ChildProcess } from "node:child_process";
 import path from "node:path";
-import { CONFIG, USERS, log } from "./config";
+import { CONFIG, log } from "./config";
 import { initDb, pool, waitDb } from "./db";
 import { embedderDim, esperarEmbedder, marcarEmbedder } from "./embed";
 import { detectarOcr } from "./ocr";
 import { pararWorker, workerLoop } from "./ingest";
 import { iniciarDecayLoop, pararDecayLoop } from "./decay";
 import { criarApp } from "./app";
+import { initUsuarios } from "./usuarios";
+import { initProvider } from "./provider";
+import { initMetricas } from "./dashboard";
 
 let filho: ChildProcess | null = null;
 let encerrando = false;
@@ -66,9 +69,9 @@ async function main(): Promise<void> {
     throw new Error("dimensao do embedding desconhecida (embedder fora) — abortando boot");
   }
   await initDb(embedderDim());
-
-  if (!USERS.length) log("AVISO: MINIRAG_USERS vazio — nenhum pedido entra");
-  else log(`${USERS.length} usuario(s) com acesso: ${USERS.map(([n]) => n).join(", ")}`);
+  await initUsuarios(); // v2.7: env semeia, banco manda
+  await initProvider();
+  await initMetricas();
   log(
     `limites: content<=${CONFIG.maxContentChars} chars, query<=${CONFIG.maxQueryChars} chars, ` +
       `${CONFIG.maxChunksTenant} chunks/usuario; decay=${CONFIG.decayAtivo ? "ON" : "OFF"} ` +
