@@ -15,6 +15,11 @@ ENV PYTHONDONTWRITEBYTECODE=1 \
 
 WORKDIR /app
 
+# poppler: rasteriza PDF escaneado (pdftoppm/pdfinfo) para o OCR
+RUN apt-get update \
+    && apt-get install -y --no-install-recommends poppler-utils \
+    && rm -rf /var/lib/apt/lists/*
+
 COPY requirements.txt .
 RUN pip install --no-cache-dir --upgrade pip \
     && pip install --no-cache-dir \
@@ -25,6 +30,13 @@ RUN pip install --no-cache-dir --upgrade pip \
 # (comando em uma linha só: o builder legado do Docker não entende heredoc)
 RUN python -c "from sentence_transformers import SentenceTransformer; m = SentenceTransformer('nomic-ai/nomic-embed-text-v1.5'); m.save('/app/models'); print('model saved, dim =', m.get_embedding_dimension())" \
     && test -f /app/models/config.json
+
+# Asa TAMBÉM os modelos do OCR (PP-OCRv6): a primeira leitura em produção não
+# pode depender de internet. Construir o motor já baixa os modelos.
+COPY embedder ./embedder
+RUN cd /app/embedder \
+    && python -c "import ocr; ocr._motor(); print('motor OCR ok')" \
+    && ls /usr/local/lib/python3.11/site-packages/rapidocr/models/*.onnx
 
 # ---------------------------------------------------------------- estágio 2
 # Build do TypeScript e do painel
@@ -56,6 +68,11 @@ ENV PYTHONUNBUFFERED=1 \
     MINIRAG_EMBEDDER_MODO=filho
 
 WORKDIR /app
+
+# poppler roda o PDF escaneado (o Python do embedder chama pdftoppm)
+RUN apt-get update \
+    && apt-get install -y --no-install-recommends poppler-utils \
+    && rm -rf /var/lib/apt/lists/*
 
 # deps Python + modelo vindos do estágio 1 (mesmas camadas, sem reinstalar)
 COPY --from=py /usr/local/lib/python3.11/site-packages /usr/local/lib/python3.11/site-packages

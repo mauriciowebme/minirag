@@ -107,7 +107,7 @@ export const TOOLS: Tool[] = [
   {
     name: "upload_file",
     description:
-      "Envia um ARQUIVO (pdf, docx, xlsx, csv, html, txt, md) em base64: guarda o original, extrai o texto e enfileira. Mesmo nome na mesma gaveta substitui o anterior.",
+      "Envia um ARQUIVO (pdf, docx, xlsx, csv, html, txt, md ou imagem png/jpg/webp/tiff) em base64: guarda o original, extrai o texto e enfileira. Imagem e PDF escaneado sao lidos por OCR (aviso: OCR erra numero). Mesmo nome na mesma gaveta substitui o anterior.",
     inputSchema: {
       type: "object",
       properties: {

@@ -7,10 +7,11 @@
  */
 import { CONFIG } from "./config";
 import { erro422 } from "./errors";
+import { ocrImagem, ocrPdf } from "./ocr";
 
 export const LIMITE_BYTES = 15 * 1024 * 1024; // 15 MB por arquivo (decisão do dono)
 
-export type Tipo = "texto" | "pdf" | "docx" | "planilha" | "html" | "csv";
+export type Tipo = "texto" | "pdf" | "docx" | "planilha" | "html" | "csv" | "imagem";
 
 export type ArquivoInfo = {
   ext: string; // sem ponto, minúscula
@@ -31,6 +32,12 @@ const MIMES: Record<string, string> = {
   txt: "text/plain",
   md: "text/markdown",
   markdown: "text/markdown",
+  png: "image/png",
+  jpg: "image/jpeg",
+  jpeg: "image/jpeg",
+  webp: "image/webp",
+  tif: "image/tiff",
+  tiff: "image/tiff",
 };
 
 const EXT_POR_MIME: Record<string, string> = {
@@ -43,9 +50,15 @@ const EXT_POR_MIME: Record<string, string> = {
   "text/plain": "txt",
   "text/markdown": "md",
   "text/x-markdown": "md",
+  "image/png": "png",
+  "image/jpeg": "jpg",
+  "image/webp": "webp",
+  "image/tiff": "tiff",
 };
 
-export const LISTA_ACEITOS = "pdf, docx, xlsx, csv, html, txt, md";
+const EXTS_IMAGEM = new Set(["png", "jpg", "jpeg", "webp", "tif", "tiff"]);
+
+export const LISTA_ACEITOS = "pdf, docx, xlsx, csv, html, txt, md, png, jpg, webp, tiff";
 
 /** Extensão do nome (sem ponto, minúscula). */
 export function extensaoDe(nome: string): string {
@@ -62,6 +75,7 @@ export function infoArquivo(nome: string, mimeInformado?: string | null): Arquiv
   const base = { ext, nome: limpo, mime: MIMES[ext] ?? (mime || "application/octet-stream") };
 
   if (ext === "pdf") return { ...base, tipo: "pdf", editavel: false };
+  if (EXTS_IMAGEM.has(ext)) return { ...base, tipo: "imagem", editavel: false };
   if (ext === "docx") return { ...base, tipo: "docx", editavel: false };
   if (ext === "xlsx" || ext === "xlsm") return { ...base, tipo: "planilha", editavel: false };
   if (ext === "csv") return { ...base, tipo: "csv", editavel: true };
@@ -218,13 +232,9 @@ async function pdfParaTexto(buf: Buffer): Promise<string> {
   } catch (e) {
     throw erro422(`PDF ilegível (${(e as Error).message})`);
   }
-  if (texto.length < 20) {
-    throw erro422(
-      "este PDF não tem texto para indexar (parece digitalizado/escaneado). " +
-        "Envie a versão com texto ou rode OCR antes.",
-    );
-  }
-  return texto;
+  /* sem camada de texto (menos de 20 caracteres) = provável digitalização:
+     quem decide tentar OCR é extrairTexto, que sabe se o leitor está lá */
+  return texto.length >= 20 ? texto : "";
 }
 
 async function docxParaTexto(buf: Buffer): Promise<string> {
@@ -296,18 +306,43 @@ async function planilhaParaTexto(buf: Buffer): Promise<string> {
   return partes.join("\n");
 }
 
+export type TextoExtraido = {
+  texto: string;
+  /** true quando o texto veio de OCR (imagem ou PDF escaneado) */
+  ocr: boolean;
+  /** páginas lidas pelo OCR (0 quando não houve OCR) */
+  paginas: number;
+};
+
 /** Texto extraído do arquivo, já normalizado e validado contra os limites. */
-export async function extrairTexto(buf: Buffer, info: ArquivoInfo): Promise<string> {
+export async function extrairTexto(buf: Buffer, info: ArquivoInfo): Promise<TextoExtraido> {
   if (!buf?.length) throw erro422("arquivo vazio");
   if (buf.length > LIMITE_BYTES) {
     throw erro422(`arquivo maior que ${Math.round(LIMITE_BYTES / 1024 / 1024)} MB`);
   }
 
   let texto: string;
+  let ocr = false;
+  let paginas = 0;
   switch (info.tipo) {
-    case "pdf":
-      texto = await pdfParaTexto(buf);
+    case "imagem": {
+      const r = await ocrImagem(buf);
+      texto = normalizar(r.texto);
+      ocr = true;
+      paginas = r.paginas;
       break;
+    }
+    case "pdf": {
+      texto = await pdfParaTexto(buf);
+      if (!texto) {
+        /* PDF digitalizado: rasteriza e lê por página (limite no lado Python) */
+        const r = await ocrPdf(buf);
+        texto = normalizar(r.texto);
+        ocr = true;
+        paginas = r.paginas;
+      }
+      break;
+    }
     case "docx":
       texto = await docxParaTexto(buf);
       break;
@@ -324,12 +359,19 @@ export async function extrairTexto(buf: Buffer, info: ArquivoInfo): Promise<stri
       texto = normalizar(buf.toString("utf8").replace(/^\uFEFF/, ""));
   }
 
-  if (!texto.trim()) throw erro422("não saiu texto deste arquivo (vazio?)");
+  if (!texto.trim()) {
+    throw erro422(
+      info.tipo === "imagem"
+        ? "não saiu texto desta imagem — parece foto sem texto (paisagem, foto de produto). " +
+          "Descreva no nome do arquivo ou use uma nota de texto."
+        : "não saiu texto deste arquivo (vazio?)",
+    );
+  }
   if (texto.length > CONFIG.maxContentChars) {
     throw erro422(
       `texto extraído grande demais: ${texto.length} caracteres ` +
         `(limite ${CONFIG.maxContentChars}). Divida o documento.`,
     );
   }
-  return texto;
+  return { texto, ocr, paginas };
 }

@@ -6,6 +6,7 @@ import { CONFIG, OPERADOR, USERS, tenantFor } from "./config";
 import { HttpError, iso } from "./errors";
 import { authenticate, ipCliente } from "./auth";
 import { embedderDim, embedderDisponivel } from "./embed";
+import { detectarOcr, ocrDisponivel } from "./ocr";
 import { enqueueIngest, IngestBody } from "./ingest";
 import { runDecay } from "./decay";
 import { mcpHandler } from "./mcp";
@@ -141,6 +142,7 @@ export function criarApp(): FastifyInstance {
     operador: Boolean(OPERADOR.length),
     versao: CONFIG.versao,
     embedder: embedderDisponivel() ? "ok" : "fora",
+    ocr: ocrDisponivel() === null ? "?" : ocrDisponivel() ? "ok" : "fora",
   });
 
   /* ------------------------------------------------------------- básicas */

@@ -115,8 +115,8 @@ export async function listDocs(opts: {
     params,
   );
   /* arquivo original (binário) por doc — consulta separada para não pesar o GROUP BY */
-  const arq = await q<{ doc_id: string; nome: string; tipo: string; tamanho: string }>(
-    `SELECT doc_id, nome, tipo, tamanho FROM arquivos WHERE tenant = $1 AND memoria = $2`,
+  const arq = await q<{ doc_id: string; nome: string; tipo: string; tamanho: string; ocr: boolean }>(
+    `SELECT doc_id, nome, tipo, tamanho, coalesce(ocr,false) AS ocr FROM arquivos WHERE tenant = $1 AND memoria = $2`,
     [tenant, memoria],
   );
   const originais = new Map(arq.rows.map((a) => [a.doc_id, a]));
@@ -139,6 +139,7 @@ export async function listDocs(opts: {
               tipo: a.tipo,
               ext: (a.nome.match(/\.([A-Za-z0-9]+)$/)?.[1] ?? a.tipo).toLowerCase(),
               editavel: TIPOS_EDITAVEIS.has(a.tipo),
+              ocr: Boolean(a.ocr),
               tamanho: Number(a.tamanho),
             }
           : null,
@@ -709,16 +710,18 @@ async function salvarArquivoOriginal(p: {
   nome: string;
   mime: string;
   tipo: string;
+  ocr?: boolean;
   conteudo: Buffer;
 }) {
   const r = await q<{ novo: boolean }>(
-    `INSERT INTO arquivos (tenant, memoria, doc_id, nome, mime, tipo, tamanho, conteudo)
-     VALUES ($1,$2,$3,$4,$5,$6,$7,$8)
+    `INSERT INTO arquivos (tenant, memoria, doc_id, nome, mime, tipo, ocr, tamanho, conteudo)
+     VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9)
      ON CONFLICT (tenant, memoria, doc_id) DO UPDATE SET
        nome = EXCLUDED.nome, mime = EXCLUDED.mime, tipo = EXCLUDED.tipo,
+       ocr = EXCLUDED.ocr,
        tamanho = EXCLUDED.tamanho, conteudo = EXCLUDED.conteudo, atualizado_em = now()
      RETURNING (xmax = 0) AS novo`,
-    [p.tenant, p.memoria, p.doc_id, p.nome, p.mime, p.tipo, p.conteudo.length, p.conteudo],
+    [p.tenant, p.memoria, p.doc_id, p.nome, p.mime, p.tipo, Boolean(p.ocr), p.conteudo.length, p.conteudo],
   );
   return { novo: Boolean(r.rows[0]?.novo) };
 }
@@ -743,7 +746,8 @@ export async function uploadArquivo(
   if ((params.conteudo?.length ?? 0) > LIMITE_BYTES) {
     throw erro422(`arquivo maior que ${Math.round(LIMITE_BYTES / 1024 / 1024)} MB`);
   }
-  const texto = await extrairTexto(params.conteudo, info);
+  const extraido = await extrairTexto(params.conteudo, info);
+  const texto = extraido.texto;
 
   const tenant = tenantFor(user, params.tenant);
   const memoria = (params.memoria ?? "").trim();
@@ -768,6 +772,7 @@ export async function uploadArquivo(
     nome: info.nome,
     mime: info.mime,
     tipo: info.tipo,
+    ocr: extraido.ocr,
     conteudo: params.conteudo,
   });
   await q(`INSERT INTO gavetas (tenant, memoria) VALUES ($1,$2) ON CONFLICT DO NOTHING`, [tenant, memoria]);
@@ -780,6 +785,8 @@ export async function uploadArquivo(
     tipo: info.ext,
     tipo_detectado: info.tipo,
     editavel_na_tela: info.editavel,
+    lido_por_ocr: extraido.ocr,
+    paginas_ocr: extraido.paginas,
     tamanho: params.conteudo.length,
     texto_chars: texto.length,
     substituiu,

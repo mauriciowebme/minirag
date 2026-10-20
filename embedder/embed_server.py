@@ -8,11 +8,16 @@ formatadas no mesmo padrao do api.py antigo ("%.7f").
 """
 import os
 import time
-from typing import List
+from typing import List, Optional
 
-from fastapi import FastAPI
+from fastapi import FastAPI, HTTPException
 from pydantic import BaseModel, Field
 from sentence_transformers import SentenceTransformer
+
+try:  # uvicorn importa como pacote (embedder.embed_server)
+    from . import ocr as motor_ocr
+except ImportError:  # execução direta / warmup do build (cwd = embedder/)
+    import ocr as motor_ocr
 
 MODEL_NAME = os.environ.get("MINIRAG_MODEL", "nomic-ai/nomic-embed-text-v1.5")
 MODEL_DIR = os.environ.get("MINIRAG_MODEL_DIR", "/app/models")
@@ -45,9 +50,23 @@ class EmbedBody(BaseModel):
     texts: List[str] = Field(..., min_length=1, max_length=MAX_TEXTS)
 
 
+class OcrBody(BaseModel):
+    """Imagem OU PDF em base64 (um dos dois), com limite de paginas para PDF."""
+
+    imagem_base64: Optional[str] = None
+    pdf_base64: Optional[str] = None
+    paginas_max: Optional[int] = Field(default=None, ge=1, le=40)
+
+
 @app.get("/health")
 def health():
-    return {"status": "ok", "dim": _dim, "modelo": MODEL_NAME}
+    return {
+        "status": "ok",
+        "dim": _dim,
+        "modelo": MODEL_NAME,
+        "ocr": motor_ocr.disponivel(),
+        "ocr_motor": motor_ocr.ENGINE_NOME,
+    }
 
 
 @app.post("/embed")
@@ -63,6 +82,19 @@ def embed(body: EmbedBody):
         "vectors": [vetor_str(v) for v in vecs],
         "ms": int((time.time() - t0) * 1000),
     }
+
+
+@app.post("/ocr")
+def ocr_endpoint(body: OcrBody):
+    """Imagem ou PDF escaneado -> texto. Roda no threadpool (funcao sync)."""
+    try:
+        return motor_ocr.processar(
+            imagem_b64=body.imagem_base64,
+            pdf_b64=body.pdf_base64,
+            paginas_max=body.paginas_max,
+        )
+    except motor_ocr.OcrErro as e:
+        raise HTTPException(status_code=422, detail=str(e))
 
 
 @app.on_event("startup")

@@ -4,6 +4,7 @@ import path from "node:path";
 import { CONFIG, USERS, log } from "./config";
 import { initDb, pool, waitDb } from "./db";
 import { embedderDim, esperarEmbedder, marcarEmbedder } from "./embed";
+import { detectarOcr } from "./ocr";
 import { pararWorker, workerLoop } from "./ingest";
 import { iniciarDecayLoop, pararDecayLoop } from "./decay";
 import { criarApp } from "./app";
@@ -58,6 +59,7 @@ async function main(): Promise<void> {
   subirEmbedder();
   const ok = await esperarEmbedder();
   if (!ok) log("AVISO: embedder nao respondeu no boot; fila pausada ate ele subir");
+  await detectarOcr();
 
   await waitDb();
   if (!embedderDim()) {

@@ -3,3 +3,6 @@ uvicorn[standard]==0.54.0
 psycopg[binary]==3.3.6
 sentence-transformers==6.1.0
 pydantic==2.13.5
+# OCR (imagem e PDF escaneado) — rapidocr nao puxa o engine junto
+rapidocr==3.10.0
+onnxruntime==1.31.0

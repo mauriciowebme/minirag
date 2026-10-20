@@ -133,6 +133,9 @@ export async function initDb(dim: number): Promise<void> {
       atualizado_em TIMESTAMPTZ NOT NULL DEFAULT now(),
       PRIMARY KEY (tenant, memoria, doc_id))`,
   );
+  /* v2.5: o texto deste documento veio de OCR (imagem ou PDF escaneado)?
+     A API e o painel usam para avisar "confira no original". */
+  await q(`ALTER TABLE arquivos ADD COLUMN IF NOT EXISTS ocr BOOLEAN NOT NULL DEFAULT false`);
 
   /* Gavetas registradas: permite gaveta vazia (criada à mão) aparecer no mapa
      antes do primeiro documento. */
