@@ -1,0 +1,1 @@
+{"root":["./src/App.tsx","./src/main.tsx","./src/types.ts","./src/components/Arquivos.tsx","./src/components/Buscar.tsx","./src/components/Editor.tsx","./src/components/Gavetas.tsx","./src/components/Jobs.tsx","./src/components/Login.tsx","./src/components/Toast.tsx","./src/hooks/useSessao.ts","./src/lib/fmt.ts","./src/lib/md.ts","./src/services/api.ts"],"version":"5.9.3"}

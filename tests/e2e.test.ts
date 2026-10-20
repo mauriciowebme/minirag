@@ -147,7 +147,11 @@ test("minirag v2 — suíte completa", async (t) => {
     f.check("health operador ativo", h.json?.operador === true, h.json);
     f.check("health embedder ok", h.json?.embedder === "ok", h.json);
     const p = await call("GET", "/painel/");
-    f.check("painel servido (200 html)", p.status === 200 && p.texto.includes('id="formLogin"'), p.status);
+    f.check(
+      "painel servido (200 html da SPA)",
+      p.status === 200 && p.texto.includes('id="root"') && p.texto.includes("/painel/assets/"),
+      p.status,
+    );
     const raiz = await fetch(BASE + "/", { redirect: "manual" });
     f.check("raiz 302 -> /painel/", raiz.status === 302 && raiz.headers.get("location") === "/painel/", raiz.status);
 

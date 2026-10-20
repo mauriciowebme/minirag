@@ -36,9 +36,14 @@ RUN npm ci --no-audit --no-fund
 
 COPY tsconfig.json ./
 COPY src ./src
-COPY scripts ./scripts
-COPY painel ./painel
 RUN npm run build
+
+# ---------------------------------------------------------------- frontend
+# React + Vite + Tailwind (o painel deixou de ser JS solto)
+COPY frontend/package.json frontend/package-lock.json ./frontend/
+RUN cd frontend && npm ci --no-audit --no-fund
+COPY frontend ./frontend
+RUN cd frontend && npm run build
 
 # ---------------------------------------------------------------- estágio 3
 # Imagem final: Node + Python no MESMO container (2 containers no total)
@@ -64,7 +69,7 @@ COPY --from=build /build/dist ./dist
 COPY --from=build /build/node_modules ./node_modules
 COPY --from=build /build/package.json ./
 COPY embedder ./embedder
-COPY --from=build /build/painel ./painel
+COPY --from=build /build/frontend/dist ./frontend/dist
 
 EXPOSE 8000
 

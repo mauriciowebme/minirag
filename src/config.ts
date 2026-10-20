@@ -64,7 +64,7 @@ export const CONFIG = {
 
   painelDir:
     process.env.MINIRAG_PAINEL_DIR ??
-    require("node:path").resolve(__dirname, "..", "painel"),
+    require("node:path").resolve(__dirname, "..", "frontend", "dist"),
   workerAtivo: bool("MINIRAG_WORKER_ATIVO", true),
 } as const;
 

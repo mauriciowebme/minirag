@@ -370,8 +370,9 @@ Nada do isolamento atual enfraquece: a visibilidade extra vive só na chave
 nova. `/health` passa a reportar `operador: true|false` e `versao`.
 
 ### Painel — `GET /painel`
-Front-end servido pela própria API (pasta `painel/` no repo; HTML+JS puro,
-sem build, sem segundo container, sem CORS extra). Tela de login: nome da
+Front-end servido pela própria API (pasta `frontend/`: **React 18 + Vite +
+Tailwind**, compilado para `frontend/dist` e servido em `/painel/`; sem segundo
+container, sem CORS extra). Tela de login: nome da
 chave + segredo (sessão só em `sessionStorage` — fecha a aba, sumiu). Quem
 loga com chave comum vê só as próprias gavetas; com a operador vê o mapa
 inteiro. Telas: **Gavetas** (mapa + botão decay) → **Arquivos** (lista,
@@ -574,7 +575,8 @@ Node e Python separados, para iterar rápido:
 
 ```bash
 npm install
-npm run build           # tsc (servidor) + esbuild (painel/app.ts → app.js)
+npm run build           # tsc (servidor, src/ → dist/)
+(cd frontend && npm install && npm run build)   # React → frontend/dist
 
 # terminal 1 — embedder (precisa de python com sentence-transformers + modelo)
 MINIRAG_EMBEDDER_MODO=externo \
