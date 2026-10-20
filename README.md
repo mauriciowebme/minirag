@@ -10,6 +10,16 @@ parecidos com a pergunta, com uma nota de 0 a 1.
 
 ---
 
+## v2.8.1 — Regra do escopo: linha própria só vale completa (20/10/2026)
+
+- `provider_config` tem linha por usuário e o padrão global (`*`). **Ambos os lados agora
+  usam a mesma regra**: a linha própria só vale quando tem `base_url` **e** `modelo`.
+  Uma linha salva pela metade (URL sem modelo) **não esconde mais o global** — nem na tela
+  (`GET /config/provider` volta `origem: "global"`, `escopo: "*"`) nem no chat.
+- Motivo: o chat já escolhia assim (`resolverProvider`), mas a tela escolhia `propria ?? global`.
+  Resultado medido: usuário com linha incompleta via "chat desligado / sem modelo" enquanto
+  o global respondia. A suíte tem checagem para os dois lados.
+
 ## v2.8 — Chat sem regra embutida: provider + system prompt + ferramentas MCP (20/10/2026)
 
 O Chat deixou de ser "busca automática na gaveta + resposta com fonte obrigatória".
@@ -47,7 +57,7 @@ Agora são **três peças separadas**, cada uma controlando uma coisa:
   global. A ordem agora é **própria completa › global › própria incompleta**.
 - **MCP**: 21 tools — as 19 da v2.7 + `listar_mcp` e `gerir_mcp` (criar/atualizar/apagar/testar
   servidor; só operador).
-- Versão do produto: **2.8.0**.
+- Versão do produto: **2.8.1**.
 
 ## v2.7 — menu lateral, Painel, Chat, Configurações e usuários no banco (20/10/2026)
 
