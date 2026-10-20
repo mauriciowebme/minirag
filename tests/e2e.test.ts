@@ -566,6 +566,211 @@ test("minirag v2 — suíte completa", async (t) => {
   });
 
   // ÚLTIMO: bloqueia o IP por 5 minutos
+
+  await t.test("arquivos: upload, conversão e substituição por nome", async () => {
+    const f = fiscal();
+
+    /* bloco idempotente: começa e termina com as gavetas de teste vazias
+       (sem isso o 2º `npm test` acha o doc anterior e responde 200 "substituiu") */
+    for (const g of ["arquivos", "arquivos2"]) {
+      await call("DELETE", `/gavetas/${g}`, { key: TESTKEY });
+    }
+
+    /* PDFs reais (fpdf2) — o pdfjs do pdf-parse antigo recusava; aqui é o mesmo
+       caminho que produção usa, então o fixture tem que ser PDF de verdade */
+    const PDF_V1 = Buffer.from(
+      "JVBERi0xLjMKJenr8b8KMSAwIG9iago8PAovQ291bnQgMQovS2lkcyBbMyAwIFJdCi9NZWRpYUJveCBbMCAwIDU5NS4yOCA4NDEuODldCi9UeXBlIC9QYWdlcwo+PgplbmRvYmoKMiAwIG9iago8PAovT3BlbkFjdGlvbiBbMyAwIFIgL0ZpdEggbnVsbF0KL1BhZ2VMYXlvdXQgL09uZUNvbHVtbgovUGFnZXMgMSAwIFIKL1R5cGUgL0NhdGFsb2cKPj4KZW5kb2JqCjMgMCBvYmoKPDwKL0NvbnRlbnRzIDQgMCBSCi9QYXJlbnQgMSAwIFIKL1Jlc291cmNlcyA2IDAgUgovVHlwZSAvUGFnZQo+PgplbmRvYmoKNCAwIG9iago8PAovRmlsdGVyIC9GbGF0ZURlY29kZQovTGVuZ3RoIDE1MQo+PgpzdHJlYW0KeJxVjTEPgjAUhHd/xY26VApBYNXo4Ny4v5SHqbF9pq3w9wVMTNzuLnfflbhuClU3mDZHg/1FQ5eqKGAGnM0SVVrpFk3XqsOc9tieJORIWdAzXpFTJkurSRxHZyUtuufEYZTn6DyHbzfJkCeKrHYwj394U6uuWuE3d+dgHS0DXcLPmAQrHpGDjOsTvbN4ys7Sj/QBlfY7JgplbmRzdHJlYW0KZW5kb2JqCjUgMCBvYmoKPDwKL0Jhc2VGb250IC9IZWx2ZXRpY2EKL0VuY29kaW5nIC9XaW5BbnNpRW5jb2RpbmcKL1N1YnR5cGUgL1R5cGUxCi9UeXBlIC9Gb250Cj4+CmVuZG9iago2IDAgb2JqCjw8Ci9Gb250IDw8L0YxIDUgMCBSPj4KL1Byb2NTZXQgWy9QREYgL1RleHQgL0ltYWdlQiAvSW1hZ2VDIC9JbWFnZUldCj4+CmVuZG9iago3IDAgb2JqCjw8Ci9DcmVhdGlvbkRhdGUgKEQ6MjAyNjEwMjAxNjU4MjFaKQo+PgplbmRvYmoKeHJlZgowIDgKMDAwMDAwMDAwMCA2NTUzNSBmIAowMDAwMDAwMDE1IDAwMDAwIG4gCjAwMDAwMDAxMDIgMDAwMDAgbiAKMDAwMDAwMDIwNSAwMDAwMCBuIAowMDAwMDAwMjg1IDAwMDAwIG4gCjAwMDAwMDA1MDggMDAwMDAgbiAKMDAwMDAwMDYwNSAwMDAwMCBuIAowMDAwMDAwNjkyIDAwMDAwIG4gCnRyYWlsZXIKPDwKL1NpemUgOAovUm9vdCAyIDAgUgovSW5mbyA3IDAgUgovSUQgWzw1RTAzRkVGN0EwQjBFQjg1MDk2NzMwQkQyQ0M5MEE0ND48NUUwM0ZFRjdBMEIwRUI4NTA5NjczMEJEMkNDOTBBNDQ+XQo+PgpzdGFydHhyZWYKNzQ3CiUlRU9GCg==",
+      "base64",
+    );
+    const PDF_V2 = Buffer.from(
+      "JVBERi0xLjMKJenr8b8KMSAwIG9iago8PAovQ291bnQgMQovS2lkcyBbMyAwIFJdCi9NZWRpYUJveCBbMCAwIDU5NS4yOCA4NDEuODldCi9UeXBlIC9QYWdlcwo+PgplbmRvYmoKMiAwIG9iago8PAovT3BlbkFjdGlvbiBbMyAwIFIgL0ZpdEggbnVsbF0KL1BhZ2VMYXlvdXQgL09uZUNvbHVtbgovUGFnZXMgMSAwIFIKL1R5cGUgL0NhdGFsb2cKPj4KZW5kb2JqCjMgMCBvYmoKPDwKL0NvbnRlbnRzIDQgMCBSCi9QYXJlbnQgMSAwIFIKL1Jlc291cmNlcyA2IDAgUgovVHlwZSAvUGFnZQo+PgplbmRvYmoKNCAwIG9iago8PAovRmlsdGVyIC9GbGF0ZURlY29kZQovTGVuZ3RoIDE0MAo+PgpzdHJlYW0KeJxVzMEKgkAUheG9T3GWtbk5iqntLApqFTEvcNEbKJMjzp16/axF0PL8cL4MlySlosQr2VtsTgYmozSFveNoPyk3ZCqUdUXbpXZYNV2v/dOj9aPOrJHdDoxHdMqYOAReVpAZnSArMPkZrYzqaQ07/JtlQXX+NW/CQwwq4HHxMInzOF8Pze/0Boc9LlAKZW5kc3RyZWFtCmVuZG9iago1IDAgb2JqCjw8Ci9CYXNlRm9udCAvSGVsdmV0aWNhCi9FbmNvZGluZyAvV2luQW5zaUVuY29kaW5nCi9TdWJ0eXBlIC9UeXBlMQovVHlwZSAvRm9udAo+PgplbmRvYmoKNiAwIG9iago8PAovRm9udCA8PC9GMSA1IDAgUj4+Ci9Qcm9jU2V0IFsvUERGIC9UZXh0IC9JbWFnZUIgL0ltYWdlQyAvSW1hZ2VJXQo+PgplbmRvYmoKNyAwIG9iago8PAovQ3JlYXRpb25EYXRlIChEOjIwMjYxMDIwMTY1ODIxWikKPj4KZW5kb2JqCnhyZWYKMCA4CjAwMDAwMDAwMDAgNjU1MzUgZiAKMDAwMDAwMDAxNSAwMDAwMCBuIAowMDAwMDAwMTAyIDAwMDAwIG4gCjAwMDAwMDAyMDUgMDAwMDAgbiAKMDAwMDAwMDI4NSAwMDAwMCBuIAowMDAwMDAwNDk3IDAwMDAwIG4gCjAwMDAwMDA1OTQgMDAwMDAgbiAKMDAwMDAwMDY4MSAwMDAwMCBuIAp0cmFpbGVyCjw8Ci9TaXplIDgKL1Jvb3QgMiAwIFIKL0luZm8gNyAwIFIKL0lEIFs8REY0NEI2MUY5RTkzODI5NzlDMTMwMDk4OERFQUREMDE+PERGNDRCNjFGOUU5MzgyOTc5QzEzMDA5ODhERUFERDAxPl0KPj4Kc3RhcnR4cmVmCjczNgolJUVPRgo=",
+      "base64",
+    );
+
+    async function enviar(
+      nome: string,
+      buf: Buffer,
+      campos: Record<string, string> = {},
+      key: string = TESTKEY,
+    ): Promise<Resp> {
+      const form = new FormData();
+      form.append("arquivo", new Blob([new Uint8Array(buf)]), nome);
+      for (const [k, v] of Object.entries(campos)) form.append(k, v);
+      const r = await fetch(BASE + "/arquivos", {
+        method: "POST",
+        headers: { Authorization: "B" + "earer " + key },
+        body: form,
+        signal: AbortSignal.timeout(180_000),
+      });
+      const buf2 = Buffer.from(await r.arrayBuffer());
+      const texto = buf2.toString("utf8");
+      let json: any = null;
+      try {
+        json = JSON.parse(texto);
+      } catch {
+        json = null;
+      }
+      return { status: r.status, headers: r.headers, json, buf: buf2, texto };
+    }
+
+    const pdf1 = PDF_V1;
+
+    console.log("-- upload pdf");
+    let r = await enviar("contrato.pdf", pdf1, { memoria: "arquivos" });
+    f.check(
+      "sobe pdf: 201 + doc_id do nome + tipo",
+      r.status === 201 && r.json?.doc_id === "contrato" && r.json?.tipo === "pdf" && r.json?.substituiu === false,
+      `${r.status} ${r.json?.detail ?? JSON.stringify(r.json)?.slice(0, 160)}`,
+    );
+    const jobPdf = Number(r.json?.job_id);
+    f.check("upload devolve job_id numérico", Number.isFinite(jobPdf) && jobPdf > 0, r.json);
+    if (Number.isFinite(jobPdf) && jobPdf > 0) await esperarJob(TESTKEY, jobPdf);
+
+    r = await call("GET", "/docs?memoria=arquivos", { key: TESTKEY });
+    const docPdf = (r.json?.docs ?? []).find((d: any) => d.doc_id === "contrato");
+    f.check(
+      "original guardado no /docs (nome, tipo, tamanho)",
+      docPdf?.arquivo?.nome === "contrato.pdf" &&
+        docPdf?.arquivo?.tipo === "pdf" &&
+        docPdf?.arquivo?.tamanho === pdf1.length,
+      docPdf?.arquivo,
+    );
+
+    console.log("-- baixar original");
+    r = await call("GET", "/documents/contrato/arquivo?memoria=arquivos", { key: TESTKEY });
+    f.check(
+      "download do original: bytes idênticos + content-type pdf",
+      r.status === 200 &&
+        (r.headers.get("content-type") || "").includes("application/pdf") &&
+        Buffer.compare(r.buf, pdf1) === 0,
+      `${r.status} ${r.headers.get("content-type")} ${r.buf.length}`,
+    );
+
+    console.log("-- editar .md na tela atualiza o original");
+    const md1 = Buffer.from("# agenda\n- reuniao as 9h\n", "utf8");
+    r = await enviar("agenda.md", md1, { memoria: "arquivos" });
+    f.check(
+      "sobe md: 201 + editavel na tela",
+      r.status === 201 && r.json?.editavel_na_tela === true,
+      `${r.status} ${JSON.stringify(r.json)?.slice(0, 120)}`,
+    );
+    if (Number.isFinite(Number(r.json?.job_id))) await esperarJob(TESTKEY, Number(r.json?.job_id));
+    const md2 = "# agenda\n- reuniao mudou para 11h\n- levar contrato\n";
+    r = await call("PUT", "/documents/agenda", {
+      key: TESTKEY,
+      corpo: { content: md2, memoria: "arquivos" },
+    });
+    f.check("edita md na tela: 202", r.status === 202, r.status);
+    if (Number.isFinite(Number(r.json?.job_id))) await esperarJob(TESTKEY, Number(r.json?.job_id));
+    r = await call("GET", "/documents/agenda/arquivo?memoria=arquivos", { key: TESTKEY });
+    f.check(
+      "original do md acompanha a edicao",
+      r.status === 200 && r.buf.toString("utf8") === md2,
+      `${r.status} ${r.buf.length}`,
+    );
+
+    console.log("-- substituir pelo mesmo nome");
+    const pdf2 = PDF_V2;
+    r = await enviar("contrato.pdf", pdf2, { memoria: "arquivos" });
+    f.check(
+      "mesmo nome substitui (200 + substituiu:true)",
+      r.status === 200 && r.json?.substituiu === true && r.json?.doc_id === "contrato",
+      r.json ?? r.texto.slice(0, 150),
+    );
+    if (Number.isFinite(Number(r.json?.job_id))) await esperarJob(TESTKEY, Number(r.json?.job_id));
+
+    r = await call("GET", "/documents/contrato/arquivo?memoria=arquivos", { key: TESTKEY });
+    f.check("original trocado junto", Buffer.compare(r.buf, pdf2) === 0, r.buf.length);
+
+    r = await call("POST", "/search", { key: TESTKEY, corpo: { query: "reajuste anual pelo IPCA", memoria: "arquivos" } });
+    f.check("busca acha o texto da versão nova", (r.json?.total ?? 0) > 0, r.json?.total);
+
+    /* comparação exata: busca semântica não prova ausência (o doc novo fala do mesmo assunto) */
+    r = await call("GET", "/documents/contrato?memoria=arquivos", { key: TESTKEY });
+    const textoFonte = String(r.json?.content ?? "");
+    f.check(
+      "fonte substituída por inteiro (só a versão nova)",
+      textoFonte.includes("IPCA") && !textoFonte.includes("Vigencia de 12 meses"),
+      textoFonte.slice(0, 120),
+    );
+
+    console.log("-- docx e planilha");
+    const docx = Buffer.from(
+      "UEsDBBQAAAAAALCFVF3JTxqwrgEAAK4BAAATAAAAW0NvbnRlbnRfVHlwZXNdLnhtbDw/eG1sIHZlcnNpb249IjEuMCIgZW5jb2Rpbmc9IlVURi04IiBzdGFuZGFsb25lPSJ5ZXMiPz4KPFR5cGVzIHhtbG5zPSJodHRwOi8vc2NoZW1hcy5vcGVueG1sZm9ybWF0cy5vcmcvcGFja2FnZS8yMDA2L2NvbnRlbnQtdHlwZXMiPjxEZWZhdWx0IEV4dGVuc2lvbj0icmVscyIgQ29udGVudFR5cGU9ImFwcGxpY2F0aW9uL3ZuZC5vcGVueG1sZm9ybWF0cy1wYWNrYWdlLnJlbGF0aW9uc2hpcHMreG1sIi8+PERlZmF1bHQgRXh0ZW5zaW9uPSJ4bWwiIENvbnRlbnRUeXBlPSJhcHBsaWNhdGlvbi94bWwiLz48T3ZlcnJpZGUgUGFydE5hbWU9Ii93b3JkL2RvY3VtZW50LnhtbCIgQ29udGVudFR5cGU9ImFwcGxpY2F0aW9uL3ZuZC5vcGVueG1sZm9ybWF0cy1vZmZpY2Vkb2N1bWVudC53b3JkcHJvY2Vzc2luZ21sLmRvY3VtZW50Lm1haW4reG1sIi8+PC9UeXBlcz5QSwMEFAAAAAAAsIVUXbmBRHEqAQAAKgEAAAsAAABfcmVscy8ucmVsczw/eG1sIHZlcnNpb249IjEuMCIgZW5jb2Rpbmc9IlVURi04IiBzdGFuZGFsb25lPSJ5ZXMiPz4KPFJlbGF0aW9uc2hpcHMgeG1sbnM9Imh0dHA6Ly9zY2hlbWFzLm9wZW54bWxmb3JtYXRzLm9yZy9wYWNrYWdlLzIwMDYvcmVsYXRpb25zaGlwcyI+PFJlbGF0aW9uc2hpcCBJZD0icklkMSIgVHlwZT0iaHR0cDovL3NjaGVtYXMub3BlbnhtbGZvcm1hdHMub3JnL29mZmljZURvY3VtZW50LzIwMDYvcmVsYXRpb25zaGlwcy9vZmZpY2VEb2N1bWVudCIgVGFyZ2V0PSJ3b3JkL2RvY3VtZW50LnhtbCIvPjwvUmVsYXRpb25zaGlwcz5QSwMEFAAAAAAAsIVUXdeBXRq9AQAAvQEAABEAAAB3b3JkL2RvY3VtZW50LnhtbDw/eG1sIHZlcnNpb249IjEuMCIgZW5jb2Rpbmc9IlVURi04IiBzdGFuZGFsb25lPSJ5ZXMiPz4KPHc6ZG9jdW1lbnQgeG1sbnM6dz0iaHR0cDovL3NjaGVtYXMub3BlbnhtbGZvcm1hdHMub3JnL3dvcmRwcm9jZXNzaW5nbWwvMjAwNi9tYWluIj48dzpib2R5Pgo8dzpwPjx3OnBQcj48dzpwU3R5bGUgdzp2YWw9IkhlYWRpbmcxIi8+PC93OnBQcj48dzpyPjx3OnQ+UG9saXRpY2EgZGUgcmVlbWJvbHNvPC93OnQ+PC93OnI+PC93OnA+Cjx3OnA+PHc6cj48dzp0PkRlc3Blc2FzIGRlIHZpYWdlbSBzYW8gcmVlbWJvbHNhZGFzIGVtIGF0ZSAzMCBkaWFzIGFwb3MgYSBub3RhIGZpc2NhbC48L3c6dD48L3c6cj48L3c6cD4KPHc6cD48dzpyPjx3OnQ+QWxpbWVudGFjYW86IGxpbWl0ZSBkaWFyaW8gZGUgODAgcmVhaXMuPC93OnQ+PC93OnI+PC93OnA+Cjwvdzpib2R5Pjwvdzpkb2N1bWVudD5QSwECFAMUAAAAAACwhVRdyU8asK4BAACuAQAAEwAAAAAAAAAAAAAAgAEAAAAAW0NvbnRlbnRfVHlwZXNdLnhtbFBLAQIUAxQAAAAAALCFVF25gURxKgEAACoBAAALAAAAAAAAAAAAAACAAd8BAABfcmVscy8ucmVsc1BLAQIUAxQAAAAAALCFVF3XgV0avQEAAL0BAAARAAAAAAAAAAAAAACAATIDAAB3b3JkL2RvY3VtZW50LnhtbFBLBQYAAAAAAwADALkAAAAeBQAAAAA=",
+      "base64",
+    );
+    r = await enviar("politica.docx", docx, { memoria: "arquivos" });
+    f.check(
+      "sobe docx: 201 + tipo docx",
+      r.status === 201 && r.json?.tipo === "docx",
+      `${r.status} ${r.json?.detail ?? JSON.stringify(r.json)?.slice(0, 160)}`,
+    );
+    if (Number.isFinite(Number(r.json?.job_id))) await esperarJob(TESTKEY, Number(r.json?.job_id));
+
+    const ExcelJS = require("exceljs") as any;
+    const wb = new ExcelJS.Workbook();
+    const ws = wb.addWorksheet("Outubro");
+    ws.addRow(["produto", "preco", "estoque"]);
+    ws.addRow(["Caneta azul", 2.5, 120]);
+    ws.addRow(["Caderno 100 folhas", 18.9, 40]);
+    const xlsx: Buffer = Buffer.from(await wb.xlsx.writeBuffer());
+    r = await enviar("precos.xlsx", xlsx, { memoria: "arquivos" });
+    f.check(
+      "sobe xlsx: 201 + tipo planilha",
+      r.status === 201 && r.json?.tipo === "xlsx" && r.json?.tipo_detectado === "planilha",
+      `${r.status} ${r.json?.detail ?? JSON.stringify(r.json)?.slice(0, 160)}`,
+    );
+    if (Number.isFinite(Number(r.json?.job_id))) await esperarJob(TESTKEY, Number(r.json?.job_id));
+
+    r = await call("POST", "/search", { key: TESTKEY, corpo: { query: "caderno 100 folhas preço", memoria: "arquivos" } });
+    f.check("busca acha célula da planilha", (r.json?.total ?? 0) > 0, r.json?.items?.[0]?.text?.slice(0, 80));
+
+    console.log("-- recusas claras");
+    r = await enviar("antigo.xls", Buffer.from("lixo", "utf8"), { memoria: "arquivos" });
+    f.check(
+      "xls antigo -> 422 com orientação",
+      r.status === 422 && /Office antigo/.test(r.json?.detail ?? ""),
+      `${r.status} ${r.json?.detail}`,
+    );
+    r = await enviar("foto.png", Buffer.from("89504e470d0a1a0a", "hex"), { memoria: "arquivos" });
+    f.check(
+      "png -> 422 listando os aceitos",
+      r.status === 422 && /não suportado/.test(r.json?.detail ?? "") && /pdf, docx/.test(r.json?.detail ?? ""),
+      `${r.status} ${r.json?.detail}`,
+    );
+    /* PDF válido, só que sem texto nenhum (só um retângulo) */
+    const vazio = Buffer.from(
+      "JVBERi0xLjQKMSAwIG9iago8PCAvVHlwZSAvQ2F0YWxvZyAvUGFnZXMgMiAwIFIgPj4KZW5kb2JqCjIgMCBvYmoKPDwgL1R5cGUgL1BhZ2VzIC9LaWRzIFszIDAgUl0gL0NvdW50IDEgPj4KZW5kb2JqCjMgMCBvYmoKPDwgL1R5cGUgL1BhZ2UgL1BhcmVudCAyIDAgUiAvTWVkaWFCb3ggWzAgMCA2MTIgNzkyXSAvQ29udGVudHMgNCAwIFIgPj4KZW5kb2JqCjQgMCBvYmoKPDwgL0xlbmd0aCAzMCA+PgpzdHJlYW0KMC4xIDAuMSAwLjEgcmcgNzIgNzIwIDEwMCAxMDAgcmUKZW5kc3RyZWFtCmVuZG9iagp4cmVmCjAgNQowMDAwMDAwMDAwIDY1NTM1IGYgCjAwMDAwMDAwMDkgMDAwMDAgbiAKMDAwMDAwMDA1OCAwMDAwMCBuIAowMDAwMDAwMTE1IDAwMDAwIG4gCjAwMDAwMDAyMDEgMDAwMDAgbiAKdHJhaWxlcgo8PCAvU2l6ZSA1IC9Sb290IDEgMCBSID4+CnN0YXJ0eHJlZgozMDAKJSVFT0YK",
+      "base64",
+    );
+    r = await enviar("escaneado.pdf", vazio, { memoria: "arquivos" });
+    f.check(
+      "pdf sem texto -> 422 'digitalizado'",
+      r.status === 422 && /digitalizado|texto para indexar/.test(r.json?.detail ?? ""),
+      `${r.status} ${r.json?.detail}`,
+    );
+
+    console.log("-- isolamento e remoção");
+    r = await enviar("contrato.pdf", pdf1, { memoria: "arquivos2" });
+    f.check(
+      "mesmo nome em outra gaveta = documento novo",
+      r.status === 201 && r.json?.substituiu === false && r.json?.memoria === "arquivos2",
+      r.json ?? r.texto.slice(0, 120),
+    );
+    if (Number.isFinite(Number(r.json?.job_id))) await esperarJob(TESTKEY, Number(r.json?.job_id));
+
+    r = await call("DELETE", "/docs/contrato?memoria=arquivos", { key: TESTKEY });
+    f.check("apaga documento com original", r.status === 200 && r.json?.arquivo_apagado === true, r.json);
+    r = await call("GET", "/documents/contrato/arquivo?memoria=arquivos", { key: TESTKEY });
+    f.check("original some junto (404)", r.status === 404, r.status);
+
+    for (const g of ["arquivos", "arquivos2"]) {
+      await call("DELETE", `/gavetas/${g}`, { key: TESTKEY });
+    }
+
+    f.fechar("arquivos");
+  });
+
   await t.test("freio de força bruta (último: bloqueia o IP)", async () => {
     const f = fiscal();
     for (let i = 0; i < 10; i++) {
