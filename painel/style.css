@@ -86,6 +86,25 @@ td.num, th.num { text-align: right; }
   pointer-events: none; max-width: 90vw; }
 #toast.ver { opacity: 1; }
 .ok { color: var(--princ); } .ruim { color: var(--perigo); } .meio { color: var(--alerta); }
+
+/* v1.10 — extras */
+.drop { border: 2px dashed var(--borda); border-radius: 12px; padding: 14px;
+  color: var(--sub); text-align: center; font-size: 13px; margin: 6px 0 14px; }
+.drop.hot { border-color: var(--azul); color: var(--azul); background: #101826; }
+.previa { background: #0d1117; border: 1px solid var(--borda); border-radius: 8px;
+  padding: 14px; min-height: 40vh; overflow: auto; line-height: 1.6; }
+.previa h1, .previa h2, .previa h3 { margin: .6em 0 .3em; }
+.previa code { background: #1b2230; padding: 1px 5px; border-radius: 4px; }
+.previa pre { background: #0a0e14; padding: 10px; border-radius: 8px; overflow: auto; }
+.previa a { color: var(--azul); }
+.curto { width: 70px; }
+.gaveta .acoesG { display: flex; gap: 6px; margin-top: 10px;
+  border-top: 1px solid var(--borda); padding-top: 8px; }
+.gaveta .acoesG button { font-size: 12px; padding: 3px 8px; }
+label.linterna { display: inline-flex; gap: 6px; align-items: center;
+  margin: 0; color: var(--sub); }
+.upload { cursor: pointer; }
+td .tcode { font-size: 12px; color: var(--sub); }
 @media (max-width: 640px) {
   header { position: static; }
   thead { display: none; }

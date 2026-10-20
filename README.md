@@ -225,13 +225,20 @@ Authorization: Bearer ***
 ```
 
 `include_archived` (default `false`): `true` inclui documentos arquivados pelo
-decay na contagem (`chunks_arquivados`).
+decay na contagem (`chunks_arquivados`). Paginação e filtro (v1.10):
+
+| query | efeito |
+|---|---|
+| `q=texto` | filtra por título OU `doc_id` (ILIKE, sem acento não resolve acento) |
+| `limit=50&offset=0` | página; `limit=0` (default) = tudo, teto de 2000 |
+| resposta | ganhou `total` = quantos docs batem no filtro (independe da página) |
 
 **Response (200):**
 ```json
 {
   "tenant": "sistema",
   "memoria": "empresa42",
+  "total": 1,
   "docs": [
     {
       "doc_id": "regras-reuniao",
@@ -352,6 +359,47 @@ tenant×operador, **injeção de tenant ignorada para chave comum**, decay por
 doc com discriminador anti-meia-noite, revive inteiro, jobs agregados, delete
 com fonte. `test_mcp.py` segue 17/17 (tools MCP corrigidas para chamar a REST
 **por nome** — assinaturas mudaram).
+
+---
+
+## v1.10 — conforto de uso: organizar arquivos sem sair do painel (20/10/2026)
+
+Rotas novas (todas com o mesmo login; `?tenant=` só vale para a chave operador):
+
+| rota | o que faz |
+|---|---|
+| `PATCH /documents/{doc_id}?memoria=` | corpo `{novo_doc_id?, destino_memoria?, title?}` — renomeia, **move de gaveta** e/ou troca título. É UPDATE de metadados (chunks + fonte na mesma transação): **instantâneo, sem reembedding**. Move jobs `na_fila` junto. `409` se já existe doc com esse id no destino; `409` se o doc está `processando` |
+| `PATCH /documents/{doc_id}/arquivado?memoria=` | corpo `{arquivado: true|false}` — arquiva/revive o documento inteiro **manualmente** (sem depender do decay nem de buscar). Resposta: `chunks_afetados` |
+| `GET /gavetas/{memoria}/export.zip` | backup da gaveta: `.zip` com um `.txt` por documento (conteúdo original) + `manifest.json` (tenant, memória, data, lista). `404` se a gaveta não tem fonte guardada |
+| `DELETE /gavetas/{memoria}` | apaga a gaveta INTEIRA (chunks + fontes + jobs `na_fila` cancelados). `409` se há job `processando`; `404` se já estava vazia |
+| `POST /jobs/{id}/cancel` | cancela job `na_fila`; `409` em qualquer outro status |
+| `POST /jobs/{id}/retry` | reenfileira job `erro` ou `cancelado` (zera progresso e erro) |
+| `GET /docs?q=&limit=&offset=` | filtro por título/doc_id + paginação (ver acima) |
+
+**Freio de força bruta no login** (v1.10): `MINIRAG_LOGIN_MAX_FALHAS` (default
+10) falhas de chave por IP dentro de `MINIRAG_LOGIN_JANELA_SEG` (default 300 s)
+→ todas as tentativas daquele IP recebem `429` até a janela passar, inclusive
+com chave certa. Um login bem-sucedido zera o contador do IP. O IP vem de
+`X-Forwarded-For` (primeiro valor) ou do socket.
+
+**Painel v1.10** (mesma rota `/painel`, sem build):
+- Arquivos: **nova nota em branco** (form inline), **upload múltiplo** e
+  **arrastar-e-soltar**, **filtrar** por título/doc_id, **mostrar arquivados**,
+  contador `total`, **exportar zip**, **apagar gaveta** (confirmação dupla),
+  por linha: abrir, baixar, copiar `doc_id`, arquivar/reviver, apagar.
+- Editor: contador de palavras, **prévia markdown**, **renomear / mover** de
+  gaveta, e aviso de **edição não salva** ao fechar a aba ou sair (`beforeunload`).
+- Buscar: `k` ajustável, **score mínimo** (slider), incluir arquivados, e dica
+  explícita quando 0 resultados (em vez de parecer defeito).
+- Fila: **cancelar** e **retentar** por linha.
+- Sessão com **prazo de 12 h** no `sessionStorage`; assets versionados
+  (`?v=`) para deploy novo não cair em cache velho.
+
+**Testes:** `test_v110.py` (26 checagens) — renomear/mover/título, arquivar e
+reviver manual, colisão 409, filtro+paginação, zip válido (manifest e
+conteúdo), cancelar/retentar job, apagar gaveta (e 404 na segunda), e o freio
+de força bruta (11ª tentativa = 429, inclusive com a chave boa). Roda por
+último: ele bloqueia o IP de teste por 5 min.
 
 ---
 
@@ -544,6 +592,9 @@ O minirag roda em qualquer ambiente com Docker. Segue um exemplo prático
 | `MINIRAG_DECAY_MIN_ACESSOS` | `2` | usado N+ vezes nunca é arquivado |
 | `MINIRAG_DECAY_INTERVALO_MINUTOS` | `60` | de quanto em quanto o loop roda |
 | `MINIRAG_CORS_ORIGINS` | `""` | origens de navegador que podem chamar; em uso servidor-para-servidor pode ficar vazio |
+| `MINIRAG_OPERADOR` | `""` | login com escopo total (`nome:chave`), vê todas as gavetas |
+| `MINIRAG_LOGIN_MAX_FALHAS` | `10` | falhas de chave por IP antes de bloquear (429) |
+| `MINIRAG_LOGIN_JANELA_SEG` | `300` | janela (segundos) do freio de força bruta |
 
 ---
 

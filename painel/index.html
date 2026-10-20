@@ -4,7 +4,7 @@
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
 <title>Minirag — Painel</title>
-<link rel="stylesheet" href="style.css?v=1910c">
+<link rel="stylesheet" href="style.css?v=2000">
 </head>
 <body class="fora">
 <header>
@@ -12,10 +12,11 @@
   <nav id="nav" hidden>
     <button data-view="gavetas" class="aba ativa">Gavetas</button>
     <button data-view="arquivos" class="aba">Arquivos</button>
+    <button data-view="editor" class="aba" id="abaEditor" hidden>Editor</button>
     <button data-view="buscar" class="aba">Buscar</button>
     <button data-view="jobs" class="aba">Fila</button>
-    <button data-view="editor" class="aba" id="abaEditor" hidden>Editor</button>
     <span class="userbox"><span id="quo"></span>
+      <span id="ver" class="chip"></span>
       <button id="btnSair" class="linterna">sair</button></span>
   </nav>
 </header>
@@ -32,7 +33,8 @@
       <label>Segredo<input id="loginKey" type="password" autocomplete="current-password" placeholder="xxxxxxxx"></label>
       <div class="linha-botoes"><button id="btnEntrar" class="primario">Entrar</button>
       <span id="loginErro" class="erro"></span></div>
-      <p class="miudo">O segredo fica só nesta aba do navegador (sessão), nunca em disco.</p>
+      <p class="miudo">O segredo fica só nesta aba (12h ou até fechar).
+        Chave errada repetida demais é bloqueada pelo servidor.</p>
     </div>
   </section>
 
@@ -41,7 +43,8 @@
     <div class="linha-botoes">
       <h2>Mapa da memória</h2>
       <span class="esp"></span>
-      <button id="btnDecay" title="arquiva documentos pouco usados">rodar decay agora</button>
+      <button id="btnAtualizarGav">atualizar</button>
+      <button id="btnDecay" title="arquiva documentos pouco usados">rodar decay</button>
     </div>
     <div id="gavetasInfo" class="dica"></div>
     <div id="gavetasGrid" class="grade"></div>
@@ -52,10 +55,27 @@
     <div class="linha-botoes">
       <h2>Arquivos <span id="arqOnde" class="sub2"></span></h2>
       <span class="esp"></span>
-      <label class="upload linterna">⬆ upload (.txt/.md)
-        <input type="file" id="arquivoInput" accept=".txt,.md,.markdown,text/plain" hidden></label>
+      <button id="btnNovaNota" class="primario">＋ nova nota</button>
+      <label class="upload linterna">⬆ upload
+        <input type="file" id="arquivoInput" accept=".txt,.md,.markdown,text/plain" multiple hidden></label>
+      <button id="btnExport" class="linterna">⬇ exportar zip</button>
+      <button id="btnApagarGaveta" class="linterna apagar">apagar gaveta</button>
     </div>
-    <div id="arqInfo" class="dica"></div>
+    <div class="linha-botoes">
+      <input id="arqFiltro" class="cresce" placeholder="filtrar por título ou doc_id...">
+      <label class="linterna"><input type="checkbox" id="arqMostrarArq"> mostrar arquivados</label>
+      <span id="arqTotal" class="dica"></span>
+    </div>
+    <div id="novaNotaBox" class="cartao" hidden>
+      <div class="linha-botoes">
+        <label>nome da nova nota (doc_id)<input id="novaNotaNome" placeholder="ex.: decisoes-2026"></label>
+        <button id="btnCriarNota" class="primario">criar</button>
+        <button id="btnCancelarNota" class="linterna">cancelar</button>
+      </div>
+      <p class="miudo">Cria vazia na gaveta atual; o texto é indexado ao salvar.
+        A gaveta precisa existir (ou use upload, que cria).</p>
+    </div>
+    <div id="dropzone" class="drop">solte arquivos .txt/.md aqui para subir</div>
     <table id="arqTabela">
       <thead><tr><th>título</th><th>doc_id</th><th class="num">chunks</th>
         <th class="num">arquiv.</th><th>atualizado</th><th></th></tr></thead>
@@ -70,12 +90,25 @@
       <span class="esp"></span>
       <span id="edStatus" class="dica"></span>
       <button id="btnSalvar" class="primario">salvar &amp; reindexar</button>
+      <button id="btnPreview" class="linterna">prévia markdown</button>
+      <button id="btnRenomear" class="linterna">renomear / mover</button>
       <button id="btnCancelarEd" class="linterna">fechar</button>
+    </div>
+    <div id="edRenameBox" class="cartao" hidden>
+      <div class="linha-botoes">
+        <label>novo doc_id<input id="edNovoId" placeholder="deixe vazio p/ manter"></label>
+        <label>gaveta destino<input id="edNovaGaveta" placeholder="vazio = manter"></label>
+        <button id="btnAplicarRename" class="primario">aplicar</button>
+        <button id="btnFecharRename" class="linterna">cancelar</button>
+      </div>
+      <p class="miudo">Renomear/mover é instantâneo (sem reembedding). Gaveta
+        nova é criada; id já existente no destino dá erro 409.</p>
     </div>
     <label>título<input id="edTitulo"></label>
     <textarea id="edConteudo" spellcheck="false" placeholder="conteúdo do arquivo..."></textarea>
-    <p class="miudo">Salvar manda para a fila: a busca continua respondendo a versão
-      antiga até o reembedding terminar (~6 s por chunk em CPU).</p>
+    <div id="edPreview" class="previa" hidden></div>
+    <p class="miudo"><span id="edConta">0 palavras</span> · salvar manda para a
+      fila e a busca segue com a versão antiga até o reembedding terminar.</p>
   </section>
 
   <!-- BUSCAR -->
@@ -84,6 +117,12 @@
     <div class="linha-botoes">
       <input id="busQuery" class="cresce" placeholder="pergunta em linguagem natural...">
       <button id="btnBuscar" class="primario">buscar</button>
+    </div>
+    <div class="linha-botoes">
+      <label class="linterna">k <input type="number" id="busK" value="8" min="1" max="50" class="curto"></label>
+      <label class="linterna">score mínimo
+        <input type="range" id="busScore" min="0" max="1" step="0.05" value="0.55">
+        <output id="busScoreOut">0.55</output></label>
       <label class="linterna"><input type="checkbox" id="busArq"> incluir arquivados
         (achar revive o documento)</label>
     </div>
@@ -104,13 +143,13 @@
     <div id="jobsInfo" class="dica"></div>
     <table id="jobsTabela">
       <thead><tr><th>job</th><th>tenant</th><th>gaveta</th><th>doc_id</th>
-        <th>status</th><th class="num">progresso</th><th>erro</th></tr></thead>
+        <th>status</th><th class="num">progresso</th><th>erro</th><th></th></tr></thead>
       <tbody></tbody>
     </table>
   </section>
 </main>
 
 <div id="toast"></div>
-<script src="app.js?v=1910c"></script>
+<script src="app.js?v=2000"></script>
 </body>
 </html>

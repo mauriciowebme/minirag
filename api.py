@@ -44,7 +44,7 @@ Endpoints:
                     pode mirar outro tenant no campo "tenant" do corpo.
   GET  /ingest/{job_id} -> status do job (na_fila|processando|concluido|erro)
   POST /search   -> le apenas a (login, memoria) do chamador; ?include_archived
-  GET  /docs     -> lista apenas a (login, memoria); ?memoria=...; ?include_archived
+  GET  /docs     -> lista (login, memoria); ?memoria ?include_archived ?q ?limit ?offset
   DELETE /docs/{doc_id} -> apaga o doc (chunks + documents + jobs na fila)
   GET  /gavetas  -> mapa tenant x memoria x docs/chunks (tenant: so o seu;
                     operador: tudo, ou ?tenant=<nome>)
@@ -52,6 +52,12 @@ Endpoints:
   GET  /documents/{doc_id}       -> conteudo original do arquivo (fonte da verdade)
   GET  /documents/{doc_id}/raw   -> download com Content-Disposition
   PUT  /documents/{doc_id}       -> EDICAO: grava novo conteudo e reindexa (fila)
+  PATCH /documents/{doc_id}      -> renomear/mover de gaveta/trocar titulo (sem reembed)
+  PATCH /documents/{doc_id}/arquivado -> arquivar/reviver manualmente
+  GET  /gavetas/{memoria}/export.zip -> backup da gaveta (zip com as fontes)
+  DELETE /gavetas/{memoria}      -> apaga a gaveta inteira (chunks+fontes+pendentes)
+  POST /jobs/{id}/cancel         -> cancela job na_fila
+  POST /jobs/{id}/retry          -> reenfileira job erro/cancelado
   POST /decay    -> arquivamento AGORA, no escopo de quem chama (operador: global)
   POST /mcp      -> servidor MCP (JSON-RPC 2.0, streamable HTTP stateless) —
                     mesma auth Bearer; tools: health/search/ingest/
@@ -66,10 +72,13 @@ processamento; se o container reiniciar no meio, o job volta pra fila
 """
 import asyncio
 import hmac
+import io
 import json
 import os
 import re
+import threading
 import time
+import zipfile
 from contextlib import asynccontextmanager
 from dataclasses import dataclass
 from typing import Optional
@@ -455,12 +464,52 @@ def run_decay(dias: Optional[int] = None, min_acessos: Optional[int] = None,
 
 
 # --------------------------------------------------------------- auth ----
+def _ip_cliente(request: Request) -> str:
+    xff = request.headers.get("x-forwarded-for", "")
+    if xff:
+        return xff.split(",")[0].strip()
+    return request.client.host if request.client else "?"
+
+
+_FALHAS_LOGIN = {}          # ip -> [timestamps de 401]
+_RL_LOCK = threading.Lock()
+_RL_MAX = int(os.environ.get("MINIRAG_LOGIN_MAX_FALHAS", "10"))
+_RL_JANELA = int(os.environ.get("MINIRAG_LOGIN_JANELA_SEG", "300"))
+
+
+def _login_bloqueado(ip: str) -> int:
+    """Quantos segundos faltam de bloqueio (0 = liberado). v1.10"""
+    agora = time.time()
+    with _RL_LOCK:
+        lst = [t for t in _FALHAS_LOGIN.get(ip, []) if agora - t < _RL_JANELA]
+        _FALHAS_LOGIN[ip] = lst
+        if len(lst) >= _RL_MAX:
+            return int(_RL_JANELA - (agora - lst[0])) + 1
+    return 0
+
+
+def _login_falhou(ip: str) -> None:
+    with _RL_LOCK:
+        _FALHAS_LOGIN.setdefault(ip, []).append(time.time())
+
+
+def _login_ok(ip: str) -> None:
+    with _RL_LOCK:
+        _FALHAS_LOGIN.pop(ip, None)
+
+
 def authenticate(request: Request):
     """Nivel 1: quem esta logando. A memoria (nivel 2) vem no corpo do pedido.
 
     v1.8: chaves de MINIRAG_OPERADOR ganham escopo 'operador' (veem tudo);
     chaves de MINIRAG_USERS permanecem tenant puro (o proprio, sempre).
+    v1.10: freio de forca bruta — N falhas de chave por IP em X segundos = 429.
     """
+    ip = _ip_cliente(request)
+    espera = _login_bloqueado(ip)
+    if espera:
+        raise HTTPException(429, "muitas tentativas de chave; tente de novo em %ds"
+                            % espera)
     authz = request.headers.get("Authorization", "")
     token = authz[len("Bearer "):] if authz.startswith("Bearer ") else authz
     token = token.strip()
@@ -468,10 +517,13 @@ def authenticate(request: Request):
         raise HTTPException(401, "falta Authorization: Bearer ***")
     for name, key in USERS:
         if hmac.compare_digest(token, key):
+            _login_ok(ip)
             return {"tenant": name}
     for name, key in OPERADOR:
         if hmac.compare_digest(token, key):
+            _login_ok(ip)
             return {"tenant": name, "operador": True}
+    _login_falhou(ip)
     raise HTTPException(401, "chave nao habilitada")
 
 
@@ -511,7 +563,7 @@ async def lifespan(app: "FastAPI"):
 # docs_url=None: o Swagger do FastAPI mora em /docs, que colidiria com o
 # nosso GET /docs (listagem de documentos do tenant). Serviço interno,
 # entao desligamos a UI de docs do framework.
-app = FastAPI(title="Minirag", version="1.9.0", lifespan=lifespan,
+app = FastAPI(title="Minirag", version="1.10.0", lifespan=lifespan,
               docs_url=None, redoc_url=None)
 app.add_middleware(
     CORSMiddleware,
@@ -539,7 +591,7 @@ if os.path.isdir(PAINEL_DIR):
 @app.get("/health")
 def health():
     return {"status": "ok", "dim": MODEL_DIM, "usuarios": len(USERS),
-            "operador": bool(OPERADOR), "versao": "1.9.0"}
+            "operador": bool(OPERADOR), "versao": "1.10.0"}
 
 
 @app.get("/", include_in_schema=False)
@@ -799,25 +851,45 @@ def search(body: SearchBody, user: dict = Depends(authenticate)):
 # ---------------------------------------------------------- docs -----------
 @app.get("/docs")
 def list_docs(memoria: str = "", include_archived: bool = False,
-              tenant: str = "", user: dict = Depends(authenticate)):
+              tenant: str = "", q: str = "", limit: int = 0, offset: int = 0,
+              user: dict = Depends(authenticate)):
+    """Lista documentos. v1.10: ?q= (título/doc_id), ?limit/&offset, e total.
+
+    limit=0 = tudo (compatível com o comportamento antigo).
+    """
     memoria = memoria.strip()
     tenant = tenant_for(user, tenant)
-    where = "tenant = %s AND memoria = %s"
+    conds = ["tenant = %s", "memoria = %s"]
+    params = [tenant, memoria]
     if not include_archived:
-        where += " AND archived_at IS NULL"
+        conds.append("archived_at IS NULL")
+    if q.strip():
+        conds.append("(coalesce(title,'') ILIKE %s OR doc_id ILIKE %s)")
+        like = "%" + q.strip() + "%"
+        params += [like, like]
+    where = " AND ".join(conds)
+    lim = max(0, min(int(limit), 2000))
+    paginacao = ""
+    if lim:
+        paginacao = " LIMIT %d OFFSET %d" % (lim, max(0, int(offset)))
     with connect() as conn:
         with conn.cursor() as cur:
+            cur.execute(
+                "SELECT count(*) FROM (SELECT doc_id FROM chunks WHERE " + where +
+                " GROUP BY doc_id) t", tuple(params))
+            total = cur.fetchone()[0]
             cur.execute(
                 "SELECT doc_id, coalesce(max(title), ''), count(*), max(ingested_at), "
                 "count(*) FILTER (WHERE archived_at IS NOT NULL) "
                 f"FROM chunks WHERE {where} "
-                "GROUP BY doc_id ORDER BY max(ingested_at) DESC",
-                (tenant, memoria),
+                "GROUP BY doc_id ORDER BY max(ingested_at) DESC" + paginacao,
+                tuple(params),
             )
             rows = cur.fetchall()
     return {
         "tenant": tenant,
         "memoria": memoria,
+        "total": total,
         "docs": [
             {
                 "doc_id": r[0],
@@ -972,7 +1044,7 @@ class EditBody(BaseModel):
     tenant: Optional[str] = None
 
 
-@app.put("/documents/{doc_id}")
+@app.put("/documents/{doc_id}", status_code=202)
 def put_document(doc_id: str, body: EditBody,
                  user: dict = Depends(authenticate)):
     """EDICAO do arquivo: grava conteudo novo e REINDEXA (volta pra fila).
@@ -997,7 +1069,242 @@ def put_document(doc_id: str, body: EditBody,
     r = enqueue_ingest(ing, t)
     r["doc_id"] = doc_id
     r["mensagem"] = "edicao na fila; reindexando — versao antiga no ar ate concluir"
-    return Response(status_code=202, content=json.dumps(r, ensure_ascii=False))
+    return r
+
+
+class PatchDocBody(BaseModel):
+    """v1.10: renomear/mover/título de um documento existente (sem reembedding)."""
+    title: Optional[str] = None
+    novo_doc_id: Optional[str] = Field(default=None, max_length=200)
+    destino_memoria: Optional[str] = Field(default=None, max_length=128)
+    tenant: Optional[str] = None
+
+
+@app.patch("/documents/{doc_id}")
+def patch_document(doc_id: str, body: PatchDocBody, memoria: str = "",
+                   user: dict = Depends(authenticate)):
+    """Renomeia o doc_id e/ou move de gaveta e/ou troca o título.
+
+    É UPDATE de metadados (chunks + fonte juntos, mesma transação) — NÃO
+    gera embedding, é instantâneo. Job 'processando' deste doc = 409.
+    """
+    t = tenant_for(user, body.tenant)
+    memoria = memoria.strip()
+    dest = (body.destino_memoria or memoria).strip()
+    novo = (body.novo_doc_id or "").strip() or doc_id
+    if len(novo) > 200 or not novo:
+        raise HTTPException(422, "novo_doc_id invalido")
+    with connect() as conn:
+        with conn.cursor() as cur:
+            cur.execute(
+                "SELECT count(*) FROM ingest_jobs WHERE tenant=%s AND memoria=%s "
+                "AND doc_id=%s AND status='processando'", (t, memoria, doc_id))
+            if cur.fetchone()[0]:
+                raise HTTPException(409, "documento em processamento; aguarde o job")
+            cur.execute(
+                "SELECT coalesce(title,''), content, size_bytes FROM documents "
+                "WHERE tenant=%s AND memoria=%s AND doc_id=%s", (t, memoria, doc_id))
+            fonte = cur.fetchone()
+            cur.execute(
+                "SELECT count(*) FROM chunks WHERE tenant=%s AND memoria=%s AND doc_id=%s",
+                (t, memoria, doc_id))
+            if not fonte and not cur.fetchone()[0]:
+                raise HTTPException(404, "documento nao existe nesta memoria")
+            novo_titulo = (body.title if body.title is not None
+                           else (fonte[0] if fonte else None))
+            if novo == doc_id and dest == memoria:
+                # só título
+                cur.execute(
+                    "UPDATE documents SET title=%s, atualizado_em=now() "
+                    "WHERE tenant=%s AND memoria=%s AND doc_id=%s",
+                    (novo_titulo, t, memoria, doc_id))
+                cur.execute(
+                    "UPDATE chunks SET title=%s WHERE tenant=%s AND memoria=%s "
+                    "AND doc_id=%s", (novo_titulo, t, memoria, doc_id))
+                return {"doc_id": doc_id, "memoria": memoria, "titulo": novo_titulo,
+                        "movido": False, "renomeado": False}
+            # colisão no destino?
+            cur.execute(
+                "SELECT count(*) FROM chunks WHERE tenant=%s AND memoria=%s "
+                "AND doc_id=%s", (t, dest, novo))
+            col_chunks = cur.fetchone()[0]
+            cur.execute(
+                "SELECT count(*) FROM documents WHERE tenant=%s AND memoria=%s "
+                "AND doc_id=%s", (t, dest, novo))
+            col_fonte = cur.fetchone()[0]
+            if col_chunks or col_fonte:
+                raise HTTPException(409, "ja existe documento '%s' nessa gaveta" % novo)
+            # move/renomeia: índice + jobs pendentes + fonte (na mesma transação)
+            cur.execute(
+                "UPDATE chunks SET doc_id=%s, memoria=%s, title=%s "
+                "WHERE tenant=%s AND memoria=%s AND doc_id=%s",
+                (novo, dest, novo_titulo, t, memoria, doc_id))
+            cur.execute(
+                "UPDATE ingest_jobs SET doc_id=%s, memoria=%s "
+                "WHERE tenant=%s AND memoria=%s AND doc_id=%s AND status='na_fila'",
+                (novo, dest, t, memoria, doc_id))
+            if fonte:
+                content, size = fonte[1], fonte[2]
+            else:
+                cur.execute(
+                    "SELECT string_agg(body, ' ' ORDER BY id), "
+                    "coalesce(sum(octet_length(body)),0) FROM chunks "
+                    "WHERE tenant=%s AND memoria=%s AND doc_id=%s",
+                    (t, dest, novo))
+                content, size = cur.fetchone()
+            cur.execute(
+                "DELETE FROM documents WHERE tenant=%s AND memoria=%s AND doc_id=%s",
+                (t, memoria, doc_id))
+            cur.execute(
+                "INSERT INTO documents (tenant, memoria, doc_id, title, content, "
+                "size_bytes, origem) VALUES (%s,%s,%s,%s,%s,%s,'direto')",
+                (t, dest, novo, novo_titulo, content, size))
+    return {"doc_id": novo, "memoria": dest, "titulo": novo_titulo,
+            "movido": dest != memoria, "renomeado": novo != doc_id}
+
+
+class ArquivadoBody(BaseModel):
+    arquivado: bool
+    tenant: Optional[str] = None
+
+
+@app.patch("/documents/{doc_id}/arquivado")
+def patch_arquivado(doc_id: str, body: ArquivadoBody, memoria: str = "",
+                    user: dict = Depends(authenticate)):
+    """v1.10: arquivar/reviver MANUALMENTE o documento inteiro (sem busca)."""
+    t = tenant_for(user, body.tenant)
+    memoria = memoria.strip()
+    with connect() as conn:
+        with conn.cursor() as cur:
+            cur.execute(
+                "SELECT count(*) FROM chunks WHERE tenant=%s AND memoria=%s "
+                "AND doc_id=%s", (t, memoria, doc_id))
+            if not cur.fetchone()[0]:
+                raise HTTPException(404, "documento nao existe nesta memoria")
+            if body.arquivado:
+                cur.execute(
+                    "UPDATE chunks SET archived_at=COALESCE(archived_at, now()) "
+                    "WHERE tenant=%s AND memoria=%s AND doc_id=%s "
+                    "AND archived_at IS NULL", (t, memoria, doc_id))
+            else:
+                cur.execute(
+                    "UPDATE chunks SET archived_at=NULL "
+                    "WHERE tenant=%s AND memoria=%s AND doc_id=%s "
+                    "AND archived_at IS NOT NULL", (t, memoria, doc_id))
+            n = cur.rowcount
+    return {"doc_id": doc_id, "arquivado": body.arquivado, "chunks_afetados": n}
+
+
+@app.get("/gavetas/{memoria}/export.zip")
+def export_gaveta(memoria: str, tenant: str = "",
+                  user: dict = Depends(authenticate)):
+    """v1.10: backup da gaveta — um .zip com todos os arquivos originais."""
+    t = tenant_for(user, tenant)
+    memoria = memoria.strip()
+    with connect() as conn:
+        with conn.cursor() as cur:
+            cur.execute(
+                "SELECT doc_id, coalesce(title,''), content FROM documents "
+                "WHERE tenant=%s AND memoria=%s ORDER BY doc_id", (t, memoria))
+            rows = cur.fetchall()
+    if not rows:
+        raise HTTPException(404, "gaveta vazia ou sem fontes guardadas")
+    buf = io.BytesIO()
+    manifest = {"tenant": t, "memoria": memoria, "gerado_em": time.strftime(
+        "%Y-%m-%dT%H:%M:%SZ", time.gmtime()), "docs": []}
+    with zipfile.ZipFile(buf, "w", zipfile.ZIP_DEFLATED) as z:
+        usados = set()
+        for doc_id, title, content in rows:
+            nome = re.sub(r"[^A-Za-z0-9._-]", "_", doc_id)[:80] or "doc"
+            base = nome
+            i = 2
+            while nome + ".txt" in usados:
+                nome = "%s_%d" % (base, i)
+                i += 1
+            usados.add(nome + ".txt")
+            z.writestr(nome + ".txt", content)
+            manifest["docs"].append({"doc_id": doc_id, "title": title,
+                                     "arquivo": nome + ".txt"})
+        z.writestr("manifest.json", json.dumps(manifest, ensure_ascii=False,
+                                               indent=2))
+    nome_zip = re.sub(r"[^A-Za-z0-9._-]", "_", memoria or "gaveta")[:60] or "gaveta"
+    return Response(
+        content=buf.getvalue(), media_type="application/zip",
+        headers={"Content-Disposition": 'attachment; filename="%s.zip"' % nome_zip},
+    )
+
+
+@app.delete("/gavetas/{memoria}")
+def delete_gaveta(memoria: str, tenant: str = "",
+                  user: dict = Depends(authenticate)):
+    """v1.10: apaga a gaveta INTEIRA (chunks + fontes + jobs pendentes).
+
+    Mesmas travas do delete de doc: job 'processando' na gaveta = 409.
+    """
+    t = tenant_for(user, tenant)
+    memoria = memoria.strip()
+    with connect() as conn:
+        with conn.cursor() as cur:
+            cur.execute(
+                "SELECT count(*) FROM ingest_jobs WHERE tenant=%s AND memoria=%s "
+                "AND status='processando'", (t, memoria))
+            if cur.fetchone()[0]:
+                raise HTTPException(409, "ha job processando nesta gaveta")
+            cur.execute(
+                "UPDATE ingest_jobs SET status='cancelado', finalizado_em=now() "
+                "WHERE tenant=%s AND memoria=%s AND status='na_fila'", (t, memoria))
+            cancelados = cur.rowcount
+            cur.execute("DELETE FROM chunks WHERE tenant=%s AND memoria=%s",
+                        (t, memoria))
+            chunks = cur.rowcount
+            cur.execute("DELETE FROM documents WHERE tenant=%s AND memoria=%s",
+                        (t, memoria))
+            fontes = cur.rowcount
+    if not chunks and not fontes:
+        raise HTTPException(404, "gaveta vazia ou inexistente")
+    return {"tenant": t, "memoria": memoria, "chunks_apagados": chunks,
+            "fontes_apagadas": fontes, "jobs_cancelados": cancelados}
+
+
+@app.post("/jobs/{job_id}/cancel")
+def cancel_job(job_id: int, tenant: str = "",
+               user: dict = Depends(authenticate)):
+    alvo = tenant_filter(user, tenant)
+    filtro = " AND tenant=%s" if alvo is not None else ""
+    params = (job_id, alvo) if alvo is not None else (job_id,)
+    with connect() as conn:
+        with conn.cursor() as cur:
+            cur.execute(
+                "UPDATE ingest_jobs SET status='cancelado', finalizado_em=now() "
+                "WHERE id=%s AND status='na_fila'" + filtro, params)
+            if cur.rowcount:
+                return {"job_id": job_id, "status": "cancelado"}
+            cur.execute("SELECT status FROM ingest_jobs WHERE id=%s" + filtro, params)
+            r = cur.fetchone()
+    if not r:
+        raise HTTPException(404, "job nao existe (ou e de outro usuario)")
+    raise HTTPException(409, "job esta '%s' — so cancela quem esta na_fila" % r[0])
+
+
+@app.post("/jobs/{job_id}/retry")
+def retry_job(job_id: int, tenant: str = "",
+              user: dict = Depends(authenticate)):
+    alvo = tenant_filter(user, tenant)
+    filtro = " AND tenant=%s" if alvo is not None else ""
+    params = (job_id, alvo) if alvo is not None else (job_id,)
+    with connect() as conn:
+        with conn.cursor() as cur:
+            cur.execute(
+                "UPDATE ingest_jobs SET status='na_fila', chunks_feitos=0, erro=NULL, "
+                "finalizado_em=NULL WHERE id=%s AND status IN ('erro','cancelado')"
+                + filtro, params)
+            if cur.rowcount:
+                return {"job_id": job_id, "status": "na_fila"}
+            cur.execute("SELECT status FROM ingest_jobs WHERE id=%s" + filtro, params)
+            r = cur.fetchone()
+    if not r:
+        raise HTTPException(404, "job nao existe (ou e de outro usuario)")
+    raise HTTPException(409, "job esta '%s' — so retenta erro ou cancelado" % r[0])
 
 
 # ---------------------------------------------------------- decay ----------
