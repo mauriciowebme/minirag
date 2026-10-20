@@ -69,10 +69,34 @@ export function Gavetas({ operador, tenant, usuario, onAbrirUsuario, onVoltar, o
   const [novaAberta, setNovaAberta] = useState(false);
   const [novoNome, setNovoNome] = useState("");
   const [criando, setCriando] = useState(false);
+  /* v2.7: criar usuário pela tela — a chave aparece UMA vez */
+  const [modalUsuario, setModalUsuario] = useState(false);
+  const [novoUsuarioNome, setNovoUsuarioNome] = useState("");
+  const [novoUsuarioPapel, setNovoUsuarioPapel] = useState<"usuario" | "operador">("usuario");
+  const [chaveGerada, setChaveGerada] = useState<{ nome: string; chave: string } | null>(null);
 
   /* operador começa escolhendo o usuário; quem entra com login comum já vê as suas gavetas */
   const modoUsuarios = operador && usuario === null;
   const alvo = operador ? usuario ?? "" : tenant;
+
+  async function criarUsuario() {
+    const nome = novoUsuarioNome.trim().toLowerCase();
+    if (!/^[a-z0-9][a-z0-9._-]{1,31}$/.test(nome)) {
+      toast("nome inválido: 2-32 caracteres, sem acento nem espaço");
+      return;
+    }
+    setCriando(true);
+    try {
+      const r = await post<{ nome: string; chave: string }>("/usuarios", { nome, papel: novoUsuarioPapel });
+      setChaveGerada({ nome: r.nome, chave: r.chave });
+      await carregar();
+      toast(`usuário ${r.nome} criado`);
+    } catch (e) {
+      toast("criar: " + (e as Error).message);
+    } finally {
+      setCriando(false);
+    }
+  }
 
   const carregar = useCallback(async () => {
     setCarregando(true);
@@ -221,6 +245,18 @@ export function Gavetas({ operador, tenant, usuario, onAbrirUsuario, onVoltar, o
         <div className="barra">
           <h2>Usuários</h2>
           <span className="flex-1" />
+          <button
+            id="btnNovoUsuario"
+            className="btn btn-primario"
+            onClick={() => {
+              setNovoUsuarioNome("");
+              setNovoUsuarioPapel("usuario");
+              setChaveGerada(null);
+              setModalUsuario(true);
+            }}
+          >
+            ＋ novo usuário
+          </button>
           <button id="btnAtualizarGav" className="btn btn-sutil" title="recarregar a lista" onClick={() => void carregar()}>
             <span aria-hidden="true">⟳</span>
             atualizar
@@ -314,6 +350,79 @@ export function Gavetas({ operador, tenant, usuario, onAbrirUsuario, onVoltar, o
             </div>
           )}
         </div>
+
+        {modalUsuario && (
+          <div className="veu" role="dialog" aria-modal="true" aria-label="novo usuário" onClick={() => setModalUsuario(false)}>
+            <div className="modal" onClick={(e) => e.stopPropagation()}>
+              <h3>◆ {chaveGerada ? "Usuário criado" : "Novo usuário"}</h3>
+              {chaveGerada ? (
+                <div className="flex flex-col gap-3 p-4">
+                  <p className="m-0 text-[13px] text-txt2">
+                    <b>{chaveGerada.nome}</b> já pode usar o painel. Entregue esta chave:
+                  </p>
+                  <div className="mono select-all break-all rounded-lg border border-borda bg-sup2 p-2 text-[13px]" id="chaveGerada">
+                    {chaveGerada.chave}
+                  </div>
+                  <p className="m-0 text-[12px] text-txt3">ela não aparece de novo — se perder, gere outra em Conta e chave.</p>
+                  <div className="flex justify-end gap-2">
+                    <button
+                      className="btn"
+                      onClick={() => {
+                        void navigator.clipboard?.writeText(chaveGerada.chave);
+                        toast("chave copiada");
+                      }}
+                    >
+                      copiar
+                    </button>
+                    <button className="btn btn-primario" onClick={() => setModalUsuario(false)}>
+                      fechar
+                    </button>
+                  </div>
+                </div>
+              ) : (
+                <>
+                  <div className="flex flex-col gap-3 p-4">
+                    <label className="rotulo m-0">
+                      nome do usuário
+                      <input
+                        id="novoUsuarioNome"
+                        className="campo mt-1"
+                        placeholder="ex.: financeiro"
+                        value={novoUsuarioNome}
+                        autoFocus
+                        onChange={(e) => setNovoUsuarioNome(e.target.value)}
+                        onKeyDown={(e) => e.key === "Enter" && void criarUsuario()}
+                      />
+                    </label>
+                    <label className="rotulo m-0">
+                      papel
+                      <select
+                        id="novoUsuarioPapel"
+                        className="campo mt-1"
+                        value={novoUsuarioPapel}
+                        onChange={(e) => setNovoUsuarioPapel(e.target.value as "usuario" | "operador")}
+                      >
+                        <option value="usuario">usuário</option>
+                        <option value="operador">operador (vê tudo)</option>
+                      </select>
+                    </label>
+                    <div className="aviso">
+                      <span>A chave é gerada pelo sistema e aparece <b>uma única vez</b>, logo depois de criar.</span>
+                    </div>
+                  </div>
+                  <div className="flex justify-end gap-2 border-t border-borda p-3">
+                    <button className="btn" onClick={() => setModalUsuario(false)}>
+                      cancelar
+                    </button>
+                    <button id="btnCriarUsuario" className="btn btn-primario" disabled={criando} onClick={() => void criarUsuario()}>
+                      {criando ? "criando…" : "criar usuário"}
+                    </button>
+                  </div>
+                </>
+              )}
+            </div>
+          </div>
+        )}
       </section>
     );
   }

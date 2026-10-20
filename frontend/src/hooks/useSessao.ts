@@ -92,6 +92,14 @@ export function useSessao() {
     setErro(msg);
   }, []);
 
+  /** v2.7: quando o painel gera chave nova, a sessão passa a usar a nova. */
+  const trocarChave = useCallback((nova: string) => {
+    definirChave(nova);
+    sessionStorage.setItem("mr_key", nova);
+    sessionStorage.setItem("mr_ts", String(Date.now()));
+    setSessao((s) => ({ ...s, chave: nova }));
+  }, []);
+
   const escopo = useCallback(
     (tenant: string, memoria: string) => {
       setSessao((s) => {
@@ -104,7 +112,7 @@ export function useSessao() {
     [],
   );
 
-  return { sessao, logado: !!sessao.chave, restaurando, erro, setErro, entrar, sair, escopo, restaurar } as const;
+  return { sessao, logado: !!sessao.chave, restaurando, erro, setErro, entrar, sair, escopo, restaurar, trocarChave } as const;
 }
 
 export type SessaoApi = ReturnType<typeof useSessao>;

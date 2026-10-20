@@ -89,4 +89,95 @@ export type DecayResp = {
 export type HealthResp = { status?: string; versao?: string; operador?: boolean; embedder?: string };
 
 export type Escopo = { tenant: string; memoria: string };
-export type Vista = "gavetas" | "arquivos" | "editor" | "buscar" | "jobs";
+/** telas de TOPO do menu lateral; "arquivos" e "editor" são passos do caminho */
+export type Vista =
+  | "painel"
+  | "gavetas"
+  | "chat"
+  | "buscar"
+  | "jobs"
+  | "config"
+  | "arquivos"
+  | "editor";
+
+export type DashboardResp = {
+  versao: string;
+  escopo: string;
+  numeros: {
+    usuarios: number;
+    operadores: number;
+    gavetas: number;
+    documentos: number;
+    chunks: number;
+    chunks_arquivados: number;
+    buscas_hoje: number;
+    chats_hoje: number;
+  };
+  fila: Record<string, number>;
+  buscas_hoje: number;
+  chats_hoje: number;
+  por_usuario: { tenant: string; documentos: number; chunks: number; ultimo: string | null }[];
+  ultimos: {
+    tenant: string;
+    memoria: string;
+    doc_id: string;
+    nome: string;
+    tipo: string;
+    ext: string;
+    ocr: boolean;
+    quando: string;
+  }[];
+  saude: { embedder: string; ocr: string; dim: number; provider: string };
+};
+
+export type UsuarioItem = {
+  nome: string;
+  papel: "usuario" | "operador";
+  ativo: boolean;
+  chave_hint: string;
+  criado_em: string;
+  origem_env: boolean;
+  gavetas: number;
+  documentos: number;
+  ultimo: string | null;
+};
+export type UsuariosResp = { usuarios: UsuarioItem[] };
+export type NovoUsuarioResp = { nome: string; papel: string; chave: string; aviso: string };
+
+export type ProviderResp = {
+  configurado: boolean;
+  escopo: string | null;
+  origem: "propria" | "global" | null;
+  tem_global: boolean;
+  tipo: "litellm" | "openai" | "ollama";
+  base_url: string;
+  modelo: string;
+  temperatura: number;
+  trechos: number;
+  ativo: boolean;
+  tem_chave: boolean;
+  chave_mascarada: string;
+  atualizado_em: string | null;
+};
+
+export type ChatFontes = { doc_id: string; title: string; score: number; trecho: string };
+export type ChatResp = {
+  resposta: string;
+  fontes: ChatFontes[];
+  modelo: string;
+  provider: string;
+  buscou: number;
+  ms: number;
+};
+export type ChatHistorico = {
+  tenant: string;
+  memoria: string;
+  mensagens: { id: number; papel: "user" | "assistant"; texto: string; fontes: ChatFontes[]; quando: string }[];
+};
+
+export type ConfigResp = {
+  versao: string;
+  limites: Record<string, number>;
+  esquecimento: { ativo: boolean; dias: number; min_acessos: number; intervalo_minutos: number };
+  modelo_embedding: string;
+};

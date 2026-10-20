@@ -207,8 +207,8 @@ export function Editor({
         <button id="btnRenomear" className="btn btn-sutil" disabled={!idAtual} onClick={() => setRenomear((v) => !v)}>
           renomear/mover
         </button>
-        <button id="btnCancelarEd" className="btn btn-sutil" title="fechar o editor (Esc)" onClick={fechar}>
-          fechar
+        <button id="btnCancelarEd" className="btn btn-sutil" title="voltar para os arquivos desta gaveta (Esc)" onClick={fechar}>
+          ← arquivos
         </button>
         <button
           id="btnSalvar"

@@ -267,3 +267,157 @@
     display: none;
   }
 }
+
+/* ---------------------------------------------------------------- v2.7: menu lateral, painel, chat */
+@layer components {
+  .nav-item {
+    @apply flex w-full items-center gap-2.5 rounded-[9px] px-2.5 py-[9px] text-left
+      text-[13.5px] text-txt2 transition-colors hover:bg-sup2 hover:text-txt
+      focus-visible:outline-none focus-visible:ring-[3px] focus-visible:ring-[color:var(--azul-suave)];
+  }
+  .nav-item-on {
+    @apply bg-sup3 font-[550] text-txt;
+    box-shadow: inset 2px 0 0 #3fb950;
+  }
+  .mono {
+    @apply font-mono text-[12px] text-txt2;
+  }
+  .chip-verde {
+    @apply border-[rgba(63,185,80,.35)] bg-[color:var(--verde-suave)] text-verde;
+  }
+  .chip-azul {
+    @apply border-[rgba(108,182,255,.35)] bg-[color:var(--azul-suave)] text-azul;
+  }
+  .chip-ambar {
+    @apply border-[rgba(210,153,34,.35)] bg-[rgba(210,153,34,.12)] text-amarelo;
+  }
+
+  /* painel */
+  .grade-kpi {
+    @apply grid gap-2.5;
+    grid-template-columns: repeat(6, minmax(0, 1fr));
+  }
+  .kpi {
+    @apply rounded-cartao border border-borda bg-sup px-3 py-2.5;
+  }
+  .kpi-rot {
+    @apply text-[11px] text-txt3;
+  }
+  .kpi-val {
+    @apply mt-0.5 text-[22px] font-semibold leading-tight tracking-[-0.4px];
+  }
+  .kpi-pe {
+    @apply mt-0.5 text-[11px] text-txt3;
+  }
+  .grade-2 {
+    @apply grid gap-3.5;
+    grid-template-columns: 1.35fr 1fr;
+  }
+  .linha-barra {
+    @apply mb-2 flex items-center gap-2.5 text-[13px];
+  }
+  .linha-barra .nome {
+    @apply w-[92px] truncate text-txt2;
+  }
+  .linha-barra .trilho {
+    @apply h-2 flex-1 overflow-hidden rounded-full bg-sup3;
+  }
+  .linha-barra .fill {
+    @apply block h-full rounded-full;
+    background: linear-gradient(90deg, #2f7d3c, #3fb950);
+  }
+  .linha-barra .n {
+    @apply w-8 text-right tabular-nums text-txt3;
+  }
+  .saude {
+    @apply flex flex-col gap-2 text-[13px] text-txt2;
+  }
+  .saude .it {
+    @apply flex items-center gap-2;
+  }
+  .saude .it .v {
+    @apply ml-auto text-txt;
+  }
+  .dot {
+    @apply inline-block h-2 w-2 flex-none rounded-full bg-verde;
+    box-shadow: 0 0 0 3px rgba(63,185,80,.14);
+  }
+  .dot.ruim {
+    @apply bg-vermelho;
+    box-shadow: 0 0 0 3px rgba(248,81,73,.14);
+  }
+  .dot.cinza {
+    @apply bg-txt3;
+    box-shadow: none;
+  }
+  .borda-topo {
+    @apply border-t border-borda pt-2;
+  }
+  .it-linha {
+    @apply flex items-center justify-between gap-3 border-b border-borda/60 pb-2 text-[13px];
+  }
+
+  /* chat */
+  .msg {
+    @apply mb-3 max-w-[80%] whitespace-pre-wrap rounded-[12px] px-3 py-2.5 text-[14px] leading-relaxed;
+  }
+  .msg-eu {
+    @apply ml-auto border border-bordaforte bg-sup3;
+  }
+  .msg-ia {
+    @apply border border-borda bg-sup2;
+  }
+  .fontes {
+    @apply mt-2 flex flex-col gap-1;
+  }
+  .fonte {
+    @apply border-l-2 border-borda pl-2 text-[12px] text-txt3;
+  }
+  .fonte b {
+    @apply font-medium text-azul;
+  }
+
+  /* configurações */
+  .grade-cfg {
+    @apply grid gap-3.5;
+    grid-template-columns: 190px minmax(0, 1fr);
+  }
+  .cfg-nav {
+    @apply flex flex-col gap-0.5 self-start;
+  }
+  .cfg-item {
+    @apply rounded-lg px-2.5 py-2 text-left text-[13px] text-txt2 hover:bg-sup2 hover:text-txt;
+  }
+  .cfg-item-on {
+    @apply bg-sup3 text-txt;
+  }
+
+  /* avisos e modal */
+  .aviso {
+    @apply flex flex-wrap items-center gap-2 rounded-[10px] border border-borda
+      bg-sup2 px-3 py-2.5 text-[12.5px] text-txt2;
+  }
+  .veu {
+    @apply fixed inset-0 z-40 grid place-items-center bg-black/70 p-4;
+  }
+  .modal {
+    @apply w-full max-w-[430px] overflow-hidden rounded-cartao border border-bordaforte bg-sup shadow-painel;
+  }
+  .modal h3 {
+    @apply border-b border-borda px-4 py-3 text-[14px] font-semibold;
+  }
+}
+@media (max-width: 900px) {
+  .grade-kpi {
+    grid-template-columns: repeat(3, minmax(0, 1fr));
+  }
+  .grade-2,
+  .grade-cfg {
+    grid-template-columns: 1fr;
+  }
+}
+@media (max-width: 560px) {
+  .grade-kpi {
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+  }
+}

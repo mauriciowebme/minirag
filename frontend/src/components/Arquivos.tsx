@@ -9,11 +9,14 @@ export function Arquivos({
   operador,
   onAbrirEditor,
   onEscopoVazio,
+  onVoltar,
 }: {
   escopo: Escopo;
   operador: boolean;
   onAbrirEditor: (docId: string | null, novoNome?: string) => void;
   onEscopoVazio: () => void;
+  /** volta um nível: para as gavetas deste usuário */
+  onVoltar: () => void;
 }) {
   const { toast } = useToast();
   const [docs, setDocs] = useState<DocItem[]>([]);
@@ -221,6 +224,14 @@ export function Arquivos({
   return (
     <section>
       <div className="barra">
+        <button
+          id="btnVoltarGavetas"
+          className="btn btn-sutil btn-mini"
+          title="voltar para as gavetas deste usuário"
+          onClick={onVoltar}
+        >
+          ← gavetas
+        </button>
         <h2>
           Arquivos{" "}
           <span id="arqOnde" className="sub2">
