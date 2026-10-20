@@ -77,7 +77,7 @@ from typing import Optional
 import psycopg
 from fastapi import Depends, FastAPI, HTTPException, Request
 from fastapi.middleware.cors import CORSMiddleware
-from fastapi.responses import Response
+from fastapi.responses import RedirectResponse, Response
 from fastapi.staticfiles import StaticFiles
 from pydantic import BaseModel, Field
 from sentence_transformers import SentenceTransformer
@@ -540,6 +540,14 @@ if os.path.isdir(PAINEL_DIR):
 def health():
     return {"status": "ok", "dim": MODEL_DIM, "usuarios": len(USERS),
             "operador": bool(OPERADOR), "versao": "1.9.0"}
+
+
+@app.get("/", include_in_schema=False)
+def raiz():
+    """Atalho: quem clica no dominio puro cai direto no painel (mesma app,
+    sem Path no Traefik — regra do host fica limpa e as rotas de API seguem).
+    """
+    return RedirectResponse(url="/painel/", status_code=302)
 
 
 # ---------------------------------------------------------- ingest ---------
