@@ -20,6 +20,7 @@ const ABAS: { id: Vista; rotulo: string }[] = [
 export default function App() {
   const sessao = useSessao();
   const [vista, setVista] = useState<Vista>("gavetas");
+  const [usuarioAberto, setUsuarioAberto] = useState<string | null>(null);
   const [docAberto, setDocAberto] = useState<string | null>(null);
   const [novoNome, setNovoNome] = useState<string | null>(null);
   const [versao, setVersao] = useState("");
@@ -33,6 +34,7 @@ export default function App() {
 
   useEffect(() => {
     if (!sessao.logado) return;
+    setUsuarioAberto(null);
     setVista("gavetas");
     get<HealthResp>("/health")
       .then((h) => setVersao(h.versao || "?"))
@@ -114,6 +116,16 @@ export default function App() {
         {vista === "gavetas" && (
           <Gavetas
             operador={operador}
+            tenant={tenant}
+            usuario={usuarioAberto}
+            onAbrirUsuario={(t) => {
+              setUsuarioAberto(t);
+              setVista("gavetas");
+            }}
+            onVoltar={() => {
+              setUsuarioAberto(null);
+              setVista("gavetas");
+            }}
             onAbrir={(t, m) => {
               sessao.escopo(t, m);
               setVista("arquivos");
@@ -128,6 +140,11 @@ export default function App() {
             operador={operador}
             onAbrirEditor={(docId, nomeNovo) => abrirEditor(docId, nomeNovo ?? null)}
             onEscopoVazio={() => {
+              if (operador && usuarioAberto) {
+                setVista("gavetas");
+                return;
+              }
+              setUsuarioAberto(null);
               sessao.escopo(nome, "");
               setVista("gavetas");
             }}

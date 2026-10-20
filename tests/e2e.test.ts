@@ -212,6 +212,19 @@ test("minirag v2 — suíte completa", async (t) => {
         gop.json.gavetas.some((x: any) => x.tenant === "teste"),
       gop.json?.operador,
     );
+    f.check(
+      "operador nao aparece como usuario na lista",
+      Array.isArray(gop.json?.usuarios) && !gop.json.usuarios.includes("operador"),
+      gop.json?.usuarios,
+    );
+    f.check(
+      "todo usuario tem a gaveta padrao no mapa",
+      (gop.json?.usuarios ?? []).every((t: string) =>
+        (gop.json?.gavetas ?? []).some((g: any) => g.tenant === t && g.memoria === ""),
+      ),
+      gop.json?.gavetas?.length,
+    );
+
     const ingop = await call("POST", "/ingest", {
       key: OPKEY,
       corpo: { doc_id: "nota_op", content: "ping", memoria: "", tenant: "teste" },

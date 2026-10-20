@@ -21,7 +21,8 @@ function curto(m: string): string {
 
 type Ordem = "nome" | "docs" | "recente";
 
-const PAGINA = 9; // painéis por página
+const PAGINA = 9; // usuários por página
+const PAGINA_GAVETAS = 20; // gavetas por página dentro do usuário
 
 function cmpH(a: Gaveta, b: Gaveta): number {
   return (a.memoria || "").localeCompare(b.memoria || "");
@@ -47,19 +48,31 @@ const GAVETA_VAZIA: Gaveta = {
   ultimo_ingress: null,
 };
 
-export function Gavetas({
-  operador,
-  onAbrir,
-}: {
+type Props = {
   operador: boolean;
+  /** tenant do login (usado pelo usuário comum) */
+  tenant: string;
+  /** usuário aberto pelo operador (null = lista de usuários) */
+  usuario: string | null;
+  onAbrirUsuario: (tenant: string) => void;
+  onVoltar: () => void;
   onAbrir: (tenant: string, memoria: string) => void;
-}) {
+};
+
+export function Gavetas({ operador, tenant, usuario, onAbrirUsuario, onVoltar, onAbrir }: Props) {
   const { toast } = useToast();
   const [dados, setDados] = useState<GavetasResp | null>(null);
   const [carregando, setCarregando] = useState(true);
   const [filtro, setFiltro] = useState("");
   const [ordem, setOrdem] = useState<Ordem>("nome");
   const [todos, setTodos] = useState(false);
+  const [novaAberta, setNovaAberta] = useState(false);
+  const [novoNome, setNovoNome] = useState("");
+  const [criando, setCriando] = useState(false);
+
+  /* operador começa escolhendo o usuário; quem entra com login comum já vê as suas gavetas */
+  const modoUsuarios = operador && usuario === null;
+  const alvo = operador ? usuario ?? "" : tenant;
 
   const carregar = useCallback(async () => {
     setCarregando(true);
@@ -77,8 +90,7 @@ export function Gavetas({
     void carregar();
   }, [carregar]);
 
-  /* nível 1 (usuário) → nível 2 (gavetas dele).
-     Usuário sem dado aparece com a gaveta padrão vazia, para poder receber documento. */
+  /* filtra/ordena as gavetas do usuário; gaveta vazia continua aparecendo (para receber documento) */
   const grupos = useMemo(() => {
     const mapa = new Map<string, Gaveta[]>();
     for (const t of dados?.usuarios ?? []) if (!mapa.has(t)) mapa.set(t, []);
@@ -90,37 +102,55 @@ export function Gavetas({
 
     const f = filtro.trim().toLowerCase();
     return [...mapa.entries()]
-      .map(([tenant, gavetas]) => {
+      .map(([t, gavetas]) => {
         const ordenadas = [...gavetas].sort((a, b) => ordemGaveta(a, b, ordem));
-        const vazio = !ordenadas.some((g) => g.docs > 0 || g.chunks > 0);
         return {
-          tenant,
-          vazio,
+          tenant: t,
+          vazio: !ordenadas.some((g) => g.docs > 0 || g.chunks > 0),
           qtdGavetas: ordenadas.length,
-          gavetas: ordenadas.length ? ordenadas : [{ ...GAVETA_VAZIA, tenant }],
+          gavetas: ordenadas.length ? ordenadas : [{ ...GAVETA_VAZIA, tenant: t }],
           docs: ordenadas.reduce((s, g) => s + g.docs, 0),
-          ultimo: ordenadas.reduce((m, g) => (g.ultimo_ingress ?? "") > m ? (g.ultimo_ingress ?? "") : m, ""),
+          ultimo: ordenadas.reduce((m, g) => ((g.ultimo_ingress ?? "") > m ? g.ultimo_ingress ?? "" : m), ""),
         };
       })
-      .filter(({ tenant, gavetas }) => {
+      .filter((linha) => {
         if (!f) return true;
-        if (tenant.toLowerCase().includes(f)) return true;
-        return gavetas.some((g) => (g.memoria || "padrão").toLowerCase().includes(f));
+        if (!modoUsuarios && linha.tenant !== alvo) return false;
+        if (linha.tenant.toLowerCase().includes(f)) return true;
+        return linha.gavetas.some((g) => (g.memoria || "padrão").toLowerCase().includes(f));
       })
       .sort((a, b) => {
         if (ordem === "docs") return b.docs - a.docs || a.tenant.localeCompare(b.tenant);
         if (ordem === "recente") return b.ultimo.localeCompare(a.ultimo) || a.tenant.localeCompare(b.tenant);
         return a.tenant.localeCompare(b.tenant);
       });
-  }, [dados, filtro, ordem]);
+  }, [dados, filtro, ordem, modoUsuarios, alvo]);
 
-  const visiveis = todos ? grupos : grupos.slice(0, PAGINA);
-  const restantes = grupos.length - visiveis.length;
+  const doUsuario = useMemo(() => {
+    const achado = grupos.find((g) => g.tenant === alvo);
+    if (achado) return achado;
+    return {
+      tenant: alvo,
+      vazio: true,
+      qtdGavetas: 0,
+      gavetas: [{ ...GAVETA_VAZIA, tenant: alvo }],
+      docs: 0,
+      ultimo: "",
+    };
+  }, [grupos, alvo]);
 
-  async function exportar(tenant: string, memoria: string) {
+  const visiveis = modoUsuarios && !todos ? grupos.slice(0, PAGINA) : grupos;
+  const restantesUsuarios = modoUsuarios && !todos ? grupos.length - visiveis.length : 0;
+  const gavetasVisiveis = modoUsuarios ? [] : todos ? doUsuario.gavetas : doUsuario.gavetas.slice(0, PAGINA_GAVETAS);
+  const restantesGavetas = modoUsuarios ? 0 : doUsuario.gavetas.length - gavetasVisiveis.length;
+
+
+  const totalDocs = dados?.documentos_fonte ?? 0;
+
+  async function exportar(t: string, memoria: string) {
     try {
       await baixar(
-        `/gavetas/${encodeURIComponent(memoria)}/export.zip?${qs({ tenant: operador ? tenant : undefined })}`,
+        `/gavetas/${encodeURIComponent(memoria)}/export.zip?${qs({ tenant: operador ? t : undefined })}`,
         slug(memoria || "gaveta") + ".zip",
       );
       toast("zip gerado ✓");
@@ -129,13 +159,13 @@ export function Gavetas({
     }
   }
 
-  async function apagar(tenant: string, memoria: string, docs: number) {
-    const rotulo = (operador ? `${tenant} ▸ ` : "") + (memoria || "padrão");
+  async function apagar(t: string, memoria: string, docs: number) {
+    const rotulo = (operador ? `${t} ▸ ` : "") + (memoria || "padrão");
     if (!confirm(`APAGAR a gaveta ${rotulo} inteira (${docs} arquivo(s), chunks, fontes e jobs na fila)?`)) return;
     if (!confirm("Tem certeza? Isso NÃO tem como desfazer no painel.")) return;
     try {
       const r = await del<{ chunks_apagados: number; fontes_apagadas: number }>(
-        `/gavetas/${encodeURIComponent(memoria)}?${qs({ tenant: operador ? tenant : undefined })}`,
+        `/gavetas/${encodeURIComponent(memoria)}?${qs({ tenant: operador ? t : undefined })}`,
       );
       toast(`gaveta apagada: ${r.chunks_apagados} chunks, ${r.fontes_apagadas} fontes`);
       void carregar();
@@ -144,31 +174,31 @@ export function Gavetas({
     }
   }
 
-  async function criarGavetaNova(tenant: string) {
-    const nome = prompt(
-      operador
-        ? `Nome da nova gaveta de ${tenant}:\n(ex.: vendas, suporte, contratos)`
-        : "Nome da nova gaveta:\n(ex.: vendas, suporte, contratos)",
-    );
-    if (nome === null) return;
-    const memoria = nome.trim();
+  /* criação de gaveta sem prompt do navegador: campo na própria tela */
+  async function criarGaveta(t: string) {
+    const memoria = novoNome.trim();
     if (!memoria) {
-      toast("nome vazio — gaveta não criada");
+      toast("digite o nome da gaveta");
       return;
     }
+    setCriando(true);
     try {
-      await post("/gavetas", { memoria, tenant: operador ? tenant : undefined });
+      await post("/gavetas", { memoria, tenant: operador ? t : undefined });
       toast(`gaveta "${memoria}" criada`);
+      setNovaAberta(false);
+      setNovoNome("");
       void carregar();
     } catch (e) {
       toast("não deu para criar: " + (e as Error).message);
+    } finally {
+      setCriando(false);
     }
   }
 
   async function arquivarEsquecidos() {
-    const alvo = operador ? "todas as gavetas" : "a tua gaveta";
+    const escopoNome = operador ? "todas as gavetas" : "a tua gaveta";
     const ok = confirm(
-      `Arquivar os documentos sem uso há 30 dias ou mais em ${alvo}?\n\n` +
+      `Arquivar os documentos sem uso há 30 dias ou mais em ${escopoNome}?\n\n` +
         "Nada é apagado: eles só saem da busca e podem ser revividos depois.",
     );
     if (!ok) return;
@@ -184,13 +214,120 @@ export function Gavetas({
     }
   }
 
-  const totalGavetas = dados?.gavetas.length ?? 0;
-  const totalDocs = dados?.documentos_fonte ?? 0;
+  /* ------------------------------------------------ nível 1: usuários */
+  if (modoUsuarios) {
+    return (
+      <section>
+        <div className="barra">
+          <h2>Usuários</h2>
+          <span className="flex-1" />
+          <button id="btnAtualizarGav" className="btn btn-sutil" title="recarregar a lista" onClick={() => void carregar()}>
+            <span aria-hidden="true">⟳</span>
+            atualizar
+          </button>
+          <button
+            id="btnDecay"
+            className="btn"
+            title="arquiva (sem apagar) os documentos sem uso há 30 dias ou mais — padrão, ajustável"
+            onClick={() => void arquivarEsquecidos()}
+          >
+            arquivar esquecidos
+          </button>
+        </div>
 
+        <div className="faixa">
+          <input
+            id="gavFiltro"
+            className="campo max-w-[260px]"
+            placeholder="filtrar por usuário…"
+            value={filtro}
+            onChange={(e) => setFiltro(e.target.value)}
+          />
+          <label className="flex items-center gap-2 text-[13px] text-txt2">
+            ordenar por
+            <select id="gavOrdem" className="campo max-w-[190px]" value={ordem} onChange={(e) => setOrdem(e.target.value as Ordem)}>
+              <option value="nome">nome (A-Z)</option>
+              <option value="docs">mais documentos</option>
+              <option value="recente">mais recente</option>
+            </select>
+          </label>
+          {filtro && (
+            <button className="btn btn-sutil btn-mini" onClick={() => setFiltro("")}>
+              limpar filtro
+            </button>
+          )}
+        </div>
+
+        <div id="gavetasInfo" className="dica">
+          {dados
+            ? `${pl(grupos.length, "usuário", "usuários")} · ${pl(totalDocs, "documento", "documentos")}` +
+              (filtro ? ` · filtro: ${grupos.length} de ${(dados?.usuarios ?? []).length}` : "") +
+              " · clique num usuário para ver as gavetas dele"
+            : ""}
+        </div>
+
+        <div id="gavetasGrid" className="grid gap-3 [grid-template-columns:repeat(auto-fill,minmax(260px,1fr))]">
+          {carregando && <p className="dica">carregando…</p>}
+          {!carregando && grupos.length === 0 && (
+            <div className="vazio col-span-full">
+              <div className="tit">Nenhum usuário ainda</div>
+              Crie uma nota ou envie um arquivo na aba Arquivos.
+            </div>
+          )}
+          {!carregando &&
+            visiveis.map(({ tenant: t, docs, qtdGavetas, vazio, ultimo }) => (
+              <div
+                key={t}
+                id={`usuario-${slug(t)}`}
+                role="button"
+                tabIndex={0}
+                className="cursor-pointer rounded-cartao border border-borda bg-sup px-3.5 py-3 transition-colors hover:bg-sup2 focus-visible:bg-sup2 focus-visible:outline-none"
+                onClick={() => onAbrirUsuario(t)}
+                onKeyDown={(e) => (e.key === "Enter" || e.key === " ") && onAbrirUsuario(t)}
+              >
+                <div className="flex items-baseline gap-2">
+                  <h3 className="truncate text-[14px] font-semibold">👤 {t}</h3>
+                  <span className="ml-auto text-[16px] text-txt3" aria-hidden="true">
+                    ›
+                  </span>
+                </div>
+                <div className="mt-1 text-[12px] text-txt3">
+                  {vazio ? (
+                    "nenhuma gaveta ainda"
+                  ) : (
+                    <>
+                      <b className="text-txt2">{pl(qtdGavetas, "gaveta", "gavetas")}</b> ·{" "}
+                      {pl(docs, "documento", "documentos")}
+                    </>
+                  )}
+                </div>
+                <div className="mt-0.5 text-[12px] text-txt3">
+                  {vazio ? "clique para abrir e enviar o primeiro documento" : `último documento ${fmtData(ultimo)}`}
+                </div>
+              </div>
+            ))}
+          {!carregando && restantesUsuarios > 0 && (
+            <div className="col-span-full flex justify-center pt-1">
+              <button id="gavMais" className="btn" onClick={() => setTodos(true)}>
+                mostrar mais {restantesUsuarios} usuário(s)
+              </button>
+            </div>
+          )}
+        </div>
+      </section>
+    );
+  }
+
+  /* ------------------------------------------------ nível 2: gavetas do usuário */
   return (
     <section>
       <div className="barra">
-        <h2>{operador ? "Usuários e gavetas" : "As tuas gavetas"}</h2>
+        {operador && (
+          <button id="btnVoltarUsuarios" className="btn btn-sutil btn-mini" title="voltar para a lista de usuários" onClick={onVoltar}>
+            ← usuários
+          </button>
+        )}
+        <h2>{operador ? `👤 ${alvo}` : "As tuas gavetas"}</h2>
         <span className="flex-1" />
         <button id="btnAtualizarGav" className="btn btn-sutil" title="recarregar a lista" onClick={() => void carregar()}>
           <span aria-hidden="true">⟳</span>
@@ -210,18 +347,13 @@ export function Gavetas({
         <input
           id="gavFiltro"
           className="campo max-w-[260px]"
-          placeholder="filtrar por usuário ou gaveta…"
+          placeholder="filtrar gaveta…"
           value={filtro}
           onChange={(e) => setFiltro(e.target.value)}
         />
         <label className="flex items-center gap-2 text-[13px] text-txt2">
           ordenar por
-          <select
-            id="gavOrdem"
-            className="campo max-w-[190px]"
-            value={ordem}
-            onChange={(e) => setOrdem(e.target.value as Ordem)}
-          >
+          <select id="gavOrdem" className="campo max-w-[190px]" value={ordem} onChange={(e) => setOrdem(e.target.value as Ordem)}>
             <option value="nome">nome (A-Z)</option>
             <option value="docs">mais documentos</option>
             <option value="recente">mais recente</option>
@@ -232,135 +364,148 @@ export function Gavetas({
             limpar filtro
           </button>
         )}
+        <span className="flex-1" />
+        <button
+          id="btnNovaGaveta"
+          className="btn btn-sutil btn-mini"
+          title="criar uma gaveta nova neste usuário"
+          onClick={() => {
+            setNovoNome("");
+            setNovaAberta(true);
+          }}
+        >
+          ＋ gaveta
+        </button>
       </div>
 
       <div id="gavetasInfo" className="dica">
         {dados
-          ? (operador ? `${pl(grupos.length, "usuário", "usuários")} · ` : "") +
-            `${
-              totalGavetas === 0 ? "nenhuma gaveta com documento" : `${pl(totalGavetas, "gaveta", "gavetas")} com documento`
-            } · ${pl(totalDocs, "documento", "documentos")} com fonte guardada` +
-            (filtro ? ` · filtro: ${grupos.length} de ${(dados?.usuarios ?? []).length} usuário(s)` : "") +
-            (grupos.length ? " · clique numa gaveta para ver os documentos" : "")
+          ? doUsuario.vazio
+            ? "nenhuma gaveta com documento ainda · clique na gaveta para enviar o primeiro"
+            : `${pl(doUsuario.qtdGavetas, "gaveta", "gavetas")} · ${pl(doUsuario.docs, "documento", "documentos")} · clique numa gaveta para ver os arquivos`
           : ""}
       </div>
 
-      <div id="gavetasGrid" className="grid gap-3 [grid-template-columns:repeat(auto-fill,minmax(340px,1fr))]">
+      <div id="gavetasGrid">
         {carregando && <p className="dica">carregando…</p>}
-        {!carregando && grupos.length === 0 && (
-          <div className="vazio col-span-full">
-            <div className="tit">Nenhum usuário ainda</div>
-            Crie uma nota ou envie um arquivo na aba Arquivos.
-          </div>
+        {novaAberta && !modoUsuarios && (
+          <form
+            id="formNovaGaveta"
+            className="mb-2 flex flex-wrap items-center gap-2 rounded-cartao border border-borda bg-sup px-3.5 py-3"
+            onSubmit={(e) => {
+              e.preventDefault();
+              void criarGaveta(alvo);
+            }}
+          >
+            <label htmlFor="gavNovaNome" className="text-[13px] text-txt2">
+              nome da nova gaveta
+            </label>
+            <input
+              id="gavNovaNome"
+              className="campo max-w-[220px]"
+              autoFocus
+              value={novoNome}
+              placeholder="vendas, suporte, contratos…"
+              onChange={(e) => setNovoNome(e.target.value)}
+            />
+            <button id="gavNovaCriar" type="submit" className="btn btn-primario btn-mini" disabled={criando}>
+              {criando ? "criando…" : "criar"}
+            </button>
+            <button
+              type="button"
+              className="btn btn-sutil btn-mini"
+              onClick={() => {
+                setNovaAberta(false);
+                setNovoNome("");
+              }}
+            >
+              cancelar
+            </button>
+          </form>
         )}
-        {!carregando &&
-          visiveis.map(({ tenant, gavetas, docs, qtdGavetas, vazio }) => (
-            <div key={tenant} className="rounded-cartao border border-borda bg-sup">
-              {/* nível 1: o usuário (chave de login) */}
-              <div className="flex flex-wrap items-baseline gap-x-2 gap-y-1 border-b border-borda/70 px-3.5 py-2.5">
-                {operador ? (
-                  <h3 className="text-[13px] font-semibold text-txt2">👤 {tenant}</h3>
-                ) : (
-                  <h3 className="text-[13px] font-semibold text-txt2">As tuas gavetas</h3>
-                )}
-                <span className="text-[12px] text-txt3">
-                  {vazio
-                    ? "nenhuma gaveta com documento ainda"
-                    : `${pl(qtdGavetas, "gaveta", "gavetas")} · ${pl(docs, "documento", "documentos")}`}
-                </span>
-                <button
-                  className="btn btn-sutil btn-mini ml-auto"
-                  title="criar uma gaveta nova neste usuário"
-                  onClick={() => void criarGavetaNova(tenant)}
+        {!carregando && (
+          <ul className="divide-y divide-borda/60 overflow-hidden rounded-cartao border border-borda bg-sup">
+            {gavetasVisiveis.map((g) => (
+              <li key={g.tenant + "|" + g.memoria}>
+                <div
+                  role="button"
+                  tabIndex={0}
+                  className="flex cursor-pointer items-center gap-2 px-3.5 py-3 transition-colors hover:bg-sup2 focus-visible:bg-sup2 focus-visible:outline-none"
+                  onClick={() => onAbrir(g.tenant, g.memoria)}
+                  onKeyDown={(e) => e.key === "Enter" && onAbrir(g.tenant, g.memoria)}
                 >
-                  ＋ gaveta
-                </button>
-              </div>
-
-              {/* nível 2: as gavetas desse usuário, uma por linha */}
-              <ul className="divide-y divide-borda/60">
-                {gavetas.map((g) => (
-                  <li key={g.tenant + "|" + g.memoria}>
-                    <div
-                      role="button"
-                      tabIndex={0}
-                      className="flex cursor-pointer items-center gap-2 px-3.5 py-2.5 transition-colors hover:bg-sup2 focus-visible:bg-sup2 focus-visible:outline-none"
-                      onClick={() => onAbrir(g.tenant, g.memoria)}
-                      onKeyDown={(e) => e.key === "Enter" && onAbrir(g.tenant, g.memoria)}
-                    >
-                      <div className="min-w-0 flex-1">
-                        <div className="flex flex-wrap items-center gap-1.5">
-                          <span className="truncate text-[13px] font-semibold" title={g.memoria || "padrão"}>
-                            {ehTecnica(g.memoria) ? "gaveta do perfil" : g.memoria || "padrão"}
-                          </span>
-                          {ehTecnica(g.memoria) && (
-                            <span className="chip" title={g.memoria}>
-                              {curto(g.memoria)}
-                            </span>
-                          )}
-                        </div>
-                        <div className="mt-0.5 text-[12px] text-txt3">
-                          {g.docs === 0 && g.chunks === 0 ? (
-                            <span className="text-txt3">vazia — clique para enviar o primeiro documento</span>
-                          ) : (
-                            <>
-                              <b className="text-txt2">{g.docs}</b> {g.docs === 1 ? "arquivo" : "arquivos"} ·{" "}
-                              <b className="text-txt2">{g.chunks}</b> {g.chunks === 1 ? "chunk" : "chunks"} ·{" "}
-                              {g.chunks_arquivados ? `${g.chunks_arquivados} arquiv.` : "tudo ativo"} · último{" "}
-                              {fmtData(g.ultimo_ingress)}
-                            </>
-                          )}
-                        </div>
-                      </div>
-
-                      {g.docs === 0 && g.chunks === 0 ? (
-                        <div className="flex shrink-0 items-center gap-1">
-                          <span className="btn btn-primario btn-mini">＋ documento</span>
-                          <button
-                            className="btn btn-perigo btn-mini"
-                            title="apagar esta gaveta (está vazia)"
-                            onClick={(e) => {
-                              e.stopPropagation();
-                              void apagar(g.tenant, g.memoria, g.docs);
-                            }}
-                          >
-                            apagar
-                          </button>
-                        </div>
-                      ) : (
-                        <div className="flex shrink-0 gap-1">
-                          <button
-                            className="btn btn-sutil btn-mini"
-                            title="baixar esta gaveta em zip"
-                            onClick={(e) => {
-                              e.stopPropagation();
-                              void exportar(g.tenant, g.memoria);
-                            }}
-                          >
-                            ⬇ zip
-                          </button>
-                          <button
-                            className="btn btn-perigo btn-mini"
-                            title="apagar a gaveta inteira"
-                            onClick={(e) => {
-                              e.stopPropagation();
-                              void apagar(g.tenant, g.memoria, g.docs);
-                            }}
-                          >
-                            apagar
-                          </button>
-                        </div>
+                  <div className="min-w-0 flex-1">
+                    <div className="flex flex-wrap items-center gap-1.5">
+                      <span className="truncate text-[13px] font-semibold" title={g.memoria || "padrão"}>
+                        {ehTecnica(g.memoria) ? "gaveta do perfil" : g.memoria || "padrão"}
+                      </span>
+                      {ehTecnica(g.memoria) && (
+                        <span className="chip" title={g.memoria}>
+                          {curto(g.memoria)}
+                        </span>
                       )}
                     </div>
-                  </li>
-                ))}
-              </ul>
-            </div>
-          ))}
-        {!carregando && restantes > 0 && (
-          <div className="col-span-full flex justify-center pt-1">
+                    <div className="mt-0.5 text-[12px] text-txt3">
+                      {g.docs === 0 && g.chunks === 0 ? (
+                        <span className="text-txt3">vazia — clique para enviar o primeiro documento</span>
+                      ) : (
+                        <>
+                          <b className="text-txt2">{g.docs}</b> {g.docs === 1 ? "arquivo" : "arquivos"} ·{" "}
+                          <b className="text-txt2">{g.chunks}</b> {g.chunks === 1 ? "chunk" : "chunks"} ·{" "}
+                          {g.chunks_arquivados ? `${g.chunks_arquivados} arquiv.` : "tudo ativo"} · último{" "}
+                          {fmtData(g.ultimo_ingress)}
+                        </>
+                      )}
+                    </div>
+                  </div>
+
+                  {g.docs === 0 && g.chunks === 0 ? (
+                    <div className="flex shrink-0 items-center gap-1">
+                      <span className="btn btn-primario btn-mini">＋ documento</span>
+                      <button
+                        className="btn btn-perigo btn-mini"
+                        title="apagar esta gaveta (está vazia)"
+                        onClick={(e) => {
+                          e.stopPropagation();
+                          void apagar(g.tenant, g.memoria, g.docs);
+                        }}
+                      >
+                        apagar
+                      </button>
+                    </div>
+                  ) : (
+                    <div className="flex shrink-0 gap-1">
+                      <button
+                        className="btn btn-sutil btn-mini"
+                        title="baixar esta gaveta em zip"
+                        onClick={(e) => {
+                          e.stopPropagation();
+                          void exportar(g.tenant, g.memoria);
+                        }}
+                      >
+                        ⬇ zip
+                      </button>
+                      <button
+                        className="btn btn-perigo btn-mini"
+                        title="apagar a gaveta inteira"
+                        onClick={(e) => {
+                          e.stopPropagation();
+                          void apagar(g.tenant, g.memoria, g.docs);
+                        }}
+                      >
+                        apagar
+                      </button>
+                    </div>
+                  )}
+                </div>
+              </li>
+            ))}
+          </ul>
+        )}
+        {!carregando && restantesGavetas > 0 && (
+          <div className="flex justify-center pt-2">
             <button id="gavMais" className="btn" onClick={() => setTodos(true)}>
-              mostrar mais {restantes} usuário(s)
+              mostrar mais {restantesGavetas} gaveta(s)
             </button>
           </div>
         )}

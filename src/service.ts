@@ -151,8 +151,12 @@ export async function listGavetas(user: Usuario, tenantArg?: string) {
   const comDados = [...new Set(r.rows.map((g) => g.tenant))];
   let usuarios: string[];
   if (isOperador(user)) {
-    const configurados = [...USERS, ...OPERADOR].map(([nome]) => nome);
-    usuarios = [...new Set([...configurados, ...comDados, ...reg.rows.map((g) => g.tenant)])].sort();
+    /* operador é login global do painel, não usuário: só aparece se tiver documento */
+    const donoOperador = OPERADOR[0]?.[0] ?? "";
+    const configurados = [...USERS.map(([nome]) => nome), donoOperador];
+    usuarios = [...new Set([...configurados, ...comDados, ...reg.rows.map((g) => g.tenant)])]
+      .filter((t) => t !== donoOperador || comDados.includes(t))
+      .sort();
     if (alvo !== null) usuarios = usuarios.filter((t) => t === alvo);
   } else {
     usuarios = [user.tenant];
