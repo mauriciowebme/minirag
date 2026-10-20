@@ -1,11 +1,11 @@
 import { useCallback, useEffect, useRef, useState } from "react";
 import { del, get, post, qs } from "../services/api";
 import { useToast } from "./Toast";
-import type { ChatHistorico, ChatResp, GavetasResp, ProviderResp } from "../types";
+import type { ChamadaFerramenta, ChatHistorico, ChatResp, GavetasResp, ProviderResp } from "../types";
 
-type Msg = { papel: "user" | "assistant"; texto: string; fontes: ChatResp["fontes"]; id?: number };
+type Msg = { papel: "user" | "assistant"; texto: string; ferramentas: ChamadaFerramenta[]; aviso?: string | null; id?: number };
 
-/** Chat: pergunta sobre os documentos da gaveta; resposta cita documento + trecho. */
+/** Chat: conversa com o provider; as ferramentas vêm do MCP ligado e ficam registradas na mensagem. */
 export function Chat({
   escopo,
   operador,
@@ -51,7 +51,7 @@ export function Chat({
   const carregarHistorico = useCallback(async () => {
     try {
       const h = await get<ChatHistorico>("/chat?" + qs({ memoria, ...tenantParams }));
-      setMsgs(h.mensagens.map((m) => ({ id: m.id, papel: m.papel, texto: m.texto, fontes: m.fontes ?? [] })));
+      setMsgs(h.mensagens.map((m) => ({ id: m.id, papel: m.papel, texto: m.texto, ferramentas: m.ferramentas ?? [] })));
     } catch (e) {
       toast("histórico: " + (e as Error).message);
     }
@@ -70,15 +70,15 @@ export function Chat({
     const texto = pergunta.trim();
     if (!texto || enviando) return;
     setPergunta("");
-    setMsgs((m) => [...m, { papel: "user", texto, fontes: [] }]);
+    setMsgs((m) => [...m, { papel: "user", texto, ferramentas: [] }]);
     setEnviando(true);
     try {
       const r = await post<ChatResp>("/chat", { pergunta: texto, memoria, ...tenantParams });
-      setMsgs((m) => [...m, { papel: "assistant", texto: r.resposta, fontes: r.fontes }]);
+      setMsgs((m) => [...m, { papel: "assistant", texto: r.resposta, ferramentas: r.ferramentas ?? [], aviso: r.aviso }]);
       setProvider((p) => (p ? { ...p, configurado: true } : p));
     } catch (e) {
       const err = e as Error;
-      setMsgs((m) => [...m, { papel: "assistant", texto: "não consegui responder: " + err.message, fontes: [] }]);
+      setMsgs((m) => [...m, { papel: "assistant", texto: "não consegui responder: " + err.message, ferramentas: [] }]);
       if (err.message.includes("provider")) setProvider((p) => (p ? { ...p, configurado: false } : p));
     } finally {
       setEnviando(false);
@@ -97,12 +97,13 @@ export function Chat({
   }
 
   const semProvider = provider && !provider.configurado;
+  const semFerramenta = provider && provider.configurado && !provider.mcp_interno;
 
   return (
     <section className="flex flex-col gap-3" id="telaChat">
       <div className="barra">
         <h2>
-          Chat <span className="sub2">— conversa com os documentos</span>
+          Chat <span className="sub2">— conversa com o modelo e as ferramentas do MCP</span>
         </h2>
         <span className="flex-1" />
         <label className="sub2 flex items-center gap-2">
@@ -133,21 +134,29 @@ export function Chat({
         <div className="flex-1 overflow-auto p-4" id="chatMsgs">
           {msgs.length === 0 && !enviando && (
             <p className="dica">
-              pergunte alguma coisa sobre os documentos desta gaveta — ex.: “qual o valor total da nota fiscal?”
+              {semFerramenta
+                ? "nenhuma ferramenta ligada — o modelo responde só com o que sabe (ligue MCP em Configurações → Ferramentas)"
+                : "pergunte o que quiser; o que ele chamar de ferramenta aparece registrado embaixo da resposta"}
             </p>
           )}
           {msgs.map((m, i) => (
             <div key={m.id ?? i} className={"msg " + (m.papel === "user" ? "msg-eu" : "msg-ia")}>
               {m.texto}
-              {m.fontes.length > 0 && (
-                <div className="fontes">
-                  {m.fontes.map((f) => (
-                    <div className="fonte" key={f.doc_id}>
-                      <b>{f.doc_id}</b> · similaridade {f.score.toFixed(2)}
+              {m.ferramentas.length > 0 && (
+                <details className="fontes" open={false}>
+                  <summary className="fonte">
+                    ferramentas chamadas · {m.ferramentas.length} ({m.ferramentas.map((f) => (f.servidor === "minirag" ? "" : f.servidor + "·") + f.nome).join(", ")})
+                  </summary>
+                  {m.ferramentas.map((f, j) => (
+                    <div className="fonte" key={j}>
+                      <b>{f.servidor === "minirag" ? "minirag" : f.servidor} · {f.nome}</b> {f.ok ? "✓" : "✕"} · {f.ms} ms
+                      <div className="mono break-all">{JSON.stringify(f.args)}</div>
+                      <div className="sub2 break-all">{f.resumo}</div>
                     </div>
                   ))}
-                </div>
+                </details>
               )}
+              {m.aviso && <div className="sub2 mt-1">aviso: {m.aviso}</div>}
             </div>
           ))}
           {enviando && <div className="msg msg-ia">pensando…</div>}
@@ -157,7 +166,7 @@ export function Chat({
           <input
             id="chatPergunta"
             className="campo flex-1"
-            placeholder="pergunte sobre os documentos desta gaveta…"
+            placeholder="pergunte qualquer coisa…"
             value={pergunta}
             onChange={(e) => setPergunta(e.target.value)}
             onKeyDown={(e) => {
@@ -174,9 +183,11 @@ export function Chat({
       </div>
 
       {provider && provider.configurado && (
-        <p className="dica m-0">
+        <p className="dica m-0" id="chatRodape">
           modelo <span className="mono">{provider.modelo}</span> · provider {provider.origem === "global" ? "global" : "seu"}
-          {provider.chave_mascarada ? ` · chave ${provider.chave_mascarada}` : ""}
+          {provider.chave_mascarada ? ` · chave ${provider.chave_mascarada}` : ""} ·{" "}
+          {provider.tem_system_prompt ? "com instruções do modelo" : "sem instruções (conversa pura)"} ·{" "}
+          {provider.mcp_interno ? "MCP do minirag ligado" : "MCP do minirag desligado"} · até {provider.max_rodadas} rodada(s)
         </p>
       )}
     </section>

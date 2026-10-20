@@ -1,11 +1,18 @@
 import { useCallback, useEffect, useState } from "react";
-import { get, post, put, qs } from "../services/api";
+import { del, get, patch, post, put, qs } from "../services/api";
 import { useToast } from "./Toast";
-import type { ConfigResp, HealthResp, ProviderResp } from "../types";
+import type {
+  ConfigResp,
+  HealthResp,
+  ProviderResp,
+  ServidorMcp,
+  ServidoresResp,
+  TesteMcpResp,
+} from "../types";
 
-type Aba = "provider" | "conta" | "limites" | "esquecimento" | "sistema";
+type Aba = "provider" | "ferramentas" | "conta" | "limites" | "esquecimento" | "sistema";
 
-/** Configurações: provider do chat, conta, limites, esquecimento e sistema. */
+/** Configurações: provider do chat, ferramentas (MCP), conta, limites, esquecimento e sistema. */
 export function Config({
   nome,
   operador,
@@ -25,7 +32,7 @@ export function Config({
     <section className="flex flex-col gap-3" id="telaConfig">
       <div className="barra">
         <h2>
-          Configurações <span className="sub2">— provider do chat, conta e limites</span>
+          Configurações <span className="sub2">— provider, ferramentas e conta</span>
         </h2>
       </div>
       <div className="grade-cfg">
@@ -33,6 +40,7 @@ export function Config({
           {(
             [
               ["provider", "Provider do chat"],
+              ["ferramentas", "Ferramentas (MCP)"],
               ["conta", "Conta e chave"],
               ["limites", "Limites"],
               ["esquecimento", "Esquecimento"],
@@ -46,6 +54,7 @@ export function Config({
         </nav>
         <div className="min-w-0 flex-1">
           {aba === "provider" && <Provider operador={operador} tenant={tenant} onIrPainel={onIrPainel} />}
+          {aba === "ferramentas" && <Ferramentas operador={operador} tenant={tenant} />}
           {aba === "conta" && <Conta nome={nome} operador={operador} onChaveNova={onChaveNova} />}
           {aba === "limites" && <Limites />}
           {aba === "esquecimento" && <Esquecimento />}
@@ -66,7 +75,8 @@ function Provider({ operador, tenant, onIrPainel }: { operador: boolean; tenant:
   const [modelo, setModelo] = useState("");
   const [chave, setChave] = useState("");
   const [temperatura, setTemperatura] = useState("0.2");
-  const [trechos, setTrechos] = useState("6");
+  const [prompt, setPrompt] = useState("");
+  const [rodadas, setRodadas] = useState("5");
   const [ativo, setAtivo] = useState(false);
   const [global, setGlobal] = useState(false);
   const [teste, setTeste] = useState<{ ok: boolean; msg: string } | null>(null);
@@ -80,7 +90,8 @@ function Provider({ operador, tenant, onIrPainel }: { operador: boolean; tenant:
       setBaseUrl(r.base_url);
       setModelo(r.modelo);
       setTemperatura(String(r.temperatura));
-      setTrechos(String(r.trechos));
+      setPrompt(r.system_prompt ?? "");
+      setRodadas(String(r.max_rodadas));
       setAtivo(r.configurado || r.ativo);
       setChave("");
     } catch (e) {
@@ -98,7 +109,8 @@ function Provider({ operador, tenant, onIrPainel }: { operador: boolean; tenant:
       base_url: baseUrl,
       modelo,
       temperatura: Number(temperatura),
-      trechos: Number(trechos),
+      system_prompt: prompt,
+      max_rodadas: Number(rodadas),
       ativo,
       global,
       ...(chave ? { chave } : {}),
@@ -136,7 +148,7 @@ function Provider({ operador, tenant, onIrPainel }: { operador: boolean; tenant:
   return (
     <div className="cartao">
       <h2 className="mb-3 text-[13px] font-semibold text-txt2">
-        Provider do chat <span className="sub2">— usado nas respostas do Chat</span>
+        Provider do chat <span className="sub2">— é o único pré-requisito do Chat</span>
       </h2>
       <div className="flex max-w-[620px] flex-col gap-3" id="formProvider">
         <div className="grade-2 !gap-3">
@@ -171,14 +183,30 @@ function Provider({ operador, tenant, onIrPainel }: { operador: boolean; tenant:
           />
           <span className="dica mt-1 block">guardada no servidor; a tela só vê os 4 últimos caracteres</span>
         </label>
+        <label className="rotulo m-0">
+          instruções do modelo (system prompt)
+          <textarea
+            id="provPrompt"
+            className="campo mt-1"
+            rows={5}
+            value={prompt}
+            placeholder="ex.: você é meu assistente de notas fiscais; responda curto, em tabela, citando o documento."
+            onChange={(e) => setPrompt(e.target.value)}
+          />
+          <span className="dica mt-1 block" id="provPromptDica">
+            vazio = nenhuma instrução (o modelo conversa puro, sem citar fonte). Não há regra embutida pelo sistema.
+            {p?.tem_system_prompt ? ` · em uso: ${prompt.length} caracteres` : ""}
+          </span>
+        </label>
         <div className="grade-2 !gap-3">
           <label className="rotulo m-0">
             temperatura
             <input className="campo mt-1" value={temperatura} onChange={(e) => setTemperatura(e.target.value)} />
           </label>
           <label className="rotulo m-0">
-            trechos enviados ao modelo
-            <input className="campo mt-1" value={trechos} onChange={(e) => setTrechos(e.target.value)} />
+            rodadas de ferramenta
+            <input id="provRodadas" className="campo mt-1" value={rodadas} onChange={(e) => setRodadas(e.target.value)} />
+            <span className="dica mt-1 block">0 = nunca chamar ferramenta (0 a 10)</span>
           </label>
         </div>
         <div className="flex flex-wrap items-center gap-3 border-t border-borda pt-3">
@@ -213,6 +241,256 @@ function Provider({ operador, tenant, onIrPainel }: { operador: boolean; tenant:
           <button className="btn btn-sutil self-start" onClick={onIrPainel}>
             ver no painel
           </button>
+        )}
+      </div>
+    </div>
+  );
+}
+
+/* ---------------------------------------------------------- ferramentas */
+
+function Ferramentas({ operador, tenant }: { operador: boolean; tenant: string }) {
+  const { toast } = useToast();
+  const [p, setP] = useState<ProviderResp | null>(null);
+  const [servidores, setServidores] = useState<ServidorMcp[]>([]);
+  const [novo, setNovo] = useState({ nome: "", url: "", cabecalho: "" });
+  const [mostrarNovo, setMostrarNovo] = useState(false);
+  const [rodando, setRodando] = useState<string | null>(null);
+  const [resultado, setResultado] = useState<TesteMcpResp | null>(null);
+
+  const carregar = useCallback(async () => {
+    try {
+      setP(await get<ProviderResp>("/config/provider" + (operador && tenant ? "?" + qs({ tenant }) : "")));
+    } catch {
+      setP(null);
+    }
+    try {
+      setServidores((await get<ServidoresResp>("/config/mcp")).servidores);
+    } catch (e) {
+      toast("servidores MCP: " + (e as Error).message);
+    }
+  }, [operador, tenant, toast]);
+
+  useEffect(() => {
+    void carregar();
+  }, [carregar]);
+
+  /** o botão fica na config do provider — grava só este campo, preservando o resto */
+  async function ligarInterno(valor: boolean) {
+    if (!p) return;
+    setRodando("interno");
+    try {
+      const r = await put<ProviderResp>("/config/provider", {
+        tipo: p.tipo,
+        base_url: p.base_url,
+        modelo: p.modelo,
+        temperatura: p.temperatura,
+        system_prompt: p.system_prompt,
+        max_rodadas: p.max_rodadas,
+        ativo: p.ativo,
+        global: operador && p.origem === "global",
+        mcp_interno: valor,
+      });
+      setP(r);
+      toast(valor ? "ferramentas do minirag ligadas no chat" : "ferramentas do minirag desligadas");
+    } catch (e) {
+      toast("mcp interno: " + (e as Error).message);
+    } finally {
+      setRodando(null);
+    }
+  }
+
+  async function adicionar() {
+    setRodando("novo");
+    try {
+      await post<ServidorMcp>("/config/mcp", novo);
+      setNovo({ nome: "", url: "", cabecalho: "" });
+      setMostrarNovo(false);
+      toast("servidor MCP cadastrado");
+      await carregar();
+    } catch (e) {
+      toast("cadastrar: " + (e as Error).message);
+    } finally {
+      setRodando(null);
+    }
+  }
+
+  async function testar(nome: string) {
+    setRodando(nome);
+    setResultado(null);
+    try {
+      const r = await post<TesteMcpResp>("/config/mcp/testar", { nome });
+      setResultado(r);
+      toast(`${r.ferramentas} ferramenta(s) em ${r.nome} · ${r.ms} ms`);
+      await carregar();
+    } catch (e) {
+      toast("testar: " + (e as Error).message);
+    } finally {
+      setRodando(null);
+    }
+  }
+
+  async function alternar(s: ServidorMcp) {
+    setRodando(s.nome);
+    try {
+      await patch<ServidorMcp>(`/config/mcp/${encodeURIComponent(s.nome)}`, { ativo: !s.ativo });
+      await carregar();
+    } catch (e) {
+      toast("ligar/desligar: " + (e as Error).message);
+    } finally {
+      setRodando(null);
+    }
+  }
+
+  async function apagar(s: ServidorMcp) {
+    if (!confirm(`tirar o servidor MCP '${s.nome}'? o chat perde as ${s.ferramentas} ferramenta(s) dele.`)) return;
+    setRodando(s.nome);
+    try {
+      await del(`/config/mcp/${encodeURIComponent(s.nome)}`);
+      toast("servidor removido");
+      await carregar();
+    } catch (e) {
+      toast("remover: " + (e as Error).message);
+    } finally {
+      setRodando(null);
+    }
+  }
+
+  return (
+    <div className="flex flex-col gap-3">
+      <div className="cartao">
+        <h2 className="mb-1 text-[13px] font-semibold text-txt2">MCP do próprio minirag</h2>
+        <p className="dica mt-0 mb-3">
+          ligado, o chat pode chamar as ferramentas deste servidor (buscar, listar, criar gaveta, ver documentos…).
+          As ferramentas <b>executam direto</b>, sem pedir confirmação — o que foi chamado fica registrado embaixo da resposta.
+        </p>
+        <label className="check">
+          <input
+            id="mcpInterno"
+            type="checkbox"
+            checked={Boolean(p?.mcp_interno)}
+            disabled={!p || rodando === "interno"}
+            onChange={(e) => void ligarInterno(e.target.checked)}
+          />
+          dar as ferramentas do minirag ao chat
+        </label>
+        {p?.mcp_interno && <p className="dica mt-2 mb-0" id="mcpInternoAviso">Sem nenhuma ferramenta ligada, o modelo só conversa com o que sabe.</p>}
+      </div>
+
+      <div className="cartao">
+        <h2 className="mb-1 text-[13px] font-semibold text-txt2">Servidores MCP externos</h2>
+        <p className="dica mt-0 mb-3">
+          cada servidor empresta as ferramentas dele ao chat, pelo endereço HTTP (protocolo MCP). O cabeçalho de acesso fica
+          guardado no servidor e nunca volta em claro. {operador ? "" : "Só o operador cadastra."}
+        </p>
+        <table className="tabela" id="listaMcp">
+          <thead>
+            <tr>
+              <th>servidor</th>
+              <th>endereço</th>
+              <th>ferramentas</th>
+              <th>acesso</th>
+              <th>estado</th>
+              <th></th>
+            </tr>
+          </thead>
+          <tbody>
+            {servidores.length === 0 && (
+              <tr>
+                <td colSpan={6} className="dica">
+                  nenhum servidor cadastrado
+                </td>
+              </tr>
+            )}
+            {servidores.map((s) => (
+              <tr key={s.nome} id={"mcp-" + s.nome}>
+                <td>
+                  <b className="mono">{s.nome}</b>
+                </td>
+                <td className="mono break-all">{s.url}</td>
+                <td>
+                  <b>{s.ferramentas}</b>
+                  {s.nomes.length > 0 && (
+                    <span className="sub2 mono block break-all">
+                      {s.nomes.slice(0, 3).join(", ")}
+                      {s.nomes.length > 3 ? ` +${s.nomes.length - 3}` : ""}
+                    </span>
+                  )}
+                  {s.ferramentas === 0 && <span className="sub2 block">nenhuma listada ainda</span>}
+                </td>
+                <td className="mono">{s.tem_cabecalho ? s.cabecalho_mascarado : "sem cabeçalho"}</td>
+                <td>
+                  {s.ativo ? (
+                    <span className="chip chip-verde">ligado</span>
+                  ) : (
+                    <span className="chip">desligado</span>
+                  )}
+                  {s.erro ? <span className="sub2 block">último erro: {s.erro.slice(0, 60)}</span> : null}
+                </td>
+                <td className="text-right">
+                  {operador && (
+                    <>
+                      <button className="btn btn-mini" disabled={rodando === s.nome} onClick={() => void testar(s.nome)}>
+                        atualizar ferramentas
+                      </button>
+                      <button className="btn btn-mini ml-1" disabled={rodando === s.nome} onClick={() => void alternar(s)}>
+                        {s.ativo ? "desligar" : "ligar"}
+                      </button>
+                      <button className="btn btn-mini ml-1" disabled={rodando === s.nome} onClick={() => void apagar(s)}>
+                        apagar
+                      </button>
+                    </>
+                  )}
+                </td>
+              </tr>
+            ))}
+          </tbody>
+        </table>
+
+        {resultado && (
+          <p className="text-[13px] text-verde mt-2 mb-0" id="mcpTesteResultado">
+            ✓ {resultado.nome} respondeu em {resultado.ms} ms · {resultado.ferramentas} ferramenta(s):{" "}
+            <span className="mono">{resultado.nomes.slice(0, 8).join(", ")}</span>
+            {resultado.nomes.length > 8 ? "…" : ""}
+          </p>
+        )}
+
+        {operador && !mostrarNovo && (
+          <button id="btnNovoMcp" className="btn mt-3 self-start" onClick={() => setMostrarNovo(true)}>
+            + adicionar servidor MCP
+          </button>
+        )}
+        {operador && mostrarNovo && (
+          <div className="mt-3 flex max-w-[560px] flex-col gap-3 border-t border-borda pt-3" id="formNovoMcp">
+            <label className="rotulo m-0">
+              nome (aparece na frente de cada ferramenta: nome__buscar)
+              <input id="mcpNome" className="campo mt-1" value={novo.nome} placeholder="ex.: drive-prod" onChange={(e) => setNovo({ ...novo, nome: e.target.value })} />
+            </label>
+            <label className="rotulo m-0">
+              endereço HTTP do servidor MCP
+              <input id="mcpUrl" className="campo mt-1 mono" value={novo.url} placeholder="https://mcp.exemplo.com/mcp" onChange={(e) => setNovo({ ...novo, url: e.target.value })} />
+            </label>
+            <label className="rotulo m-0">
+              cabeçalho de acesso (opcional)
+              <input
+                id="mcpCabecalho"
+                type="password"
+                autoComplete="new-password"
+                className="campo mt-1 mono"
+                value={novo.cabecalho}
+                placeholder="Authorization: Bearer xxx ou só o token"
+                onChange={(e) => setNovo({ ...novo, cabecalho: e.target.value })}
+              />
+            </label>
+            <div className="flex gap-2">
+              <button id="mcpAdicionar" className="btn btn-primario" disabled={rodando === "novo" || !novo.nome || !novo.url} onClick={() => void adicionar()}>
+                cadastrar e listar ferramentas
+              </button>
+              <button className="btn btn-sutil" onClick={() => setMostrarNovo(false)}>
+                cancelar
+              </button>
+            </div>
+          </div>
         )}
       </div>
     </div>
@@ -309,7 +587,7 @@ function Limites() {
           <tr><td>Trechos por busca (padrão)</td><td><b>{l.top_k}</b></td></tr>
           <tr><td>Similaridade mínima</td><td><b>{l.min_score}</b></td></tr>
           <tr><td>Pedaço do documento</td><td><b>{l.chunk_palavras}</b> palavras ({l.chunk_sobreposicao} de sobreposição)</td></tr>
-          <tr><td>Páginas por PDF escaneado</td><td><b>{l.ocr_paginas_max}</b></td></tr>
+          <tr><td>Páginas por PDF escaneado</td><td><b>{l.ocr_paginas_max}</b> páginas</td></tr>
         </tbody>
       </table>
       <p className="dica mt-3 mb-0">estes números vêm do ambiente do servidor; para mudar, ajuste as variáveis e o operador redeploya</p>

@@ -153,26 +153,70 @@ export type ProviderResp = {
   base_url: string;
   modelo: string;
   temperatura: number;
-  trechos: number;
+  system_prompt: string;
+  tem_system_prompt: boolean;
+  mcp_interno: boolean;
+  max_rodadas: number;
   ativo: boolean;
   tem_chave: boolean;
   chave_mascarada: string;
   atualizado_em: string | null;
 };
 
-export type ChatFontes = { doc_id: string; title: string; score: number; trecho: string };
+/** O que o Chat chamou de ferramenta (registrado na tela e no histórico). */
+export type ChamadaFerramenta = {
+  servidor: string;
+  nome: string;
+  args: Record<string, unknown>;
+  ok: boolean;
+  resumo: string;
+  ms: number;
+};
+
 export type ChatResp = {
   resposta: string;
-  fontes: ChatFontes[];
+  ferramentas: ChamadaFerramenta[];
+  rodadas: number;
   modelo: string;
   provider: string;
-  buscou: number;
+  mcp_interno: boolean;
+  ferramentas_ligadas: number;
+  servidores: { interno: boolean; externos: number };
+  tem_system_prompt: boolean;
   ms: number;
+  aviso: string | null;
 };
 export type ChatHistorico = {
   tenant: string;
   memoria: string;
-  mensagens: { id: number; papel: "user" | "assistant"; texto: string; fontes: ChatFontes[]; quando: string }[];
+  mensagens: {
+    id: number;
+    papel: "user" | "assistant";
+    texto: string;
+    ferramentas: ChamadaFerramenta[];
+    quando: string;
+  }[];
+};
+
+export type ServidorMcp = {
+  nome: string;
+  url: string;
+  ativo: boolean;
+  tem_cabecalho: boolean;
+  cabecalho_mascarado: string;
+  ferramentas: number;
+  nomes: string[];
+  erro: string | null;
+  atualizado_em: string;
+};
+export type ServidoresResp = { servidores: ServidorMcp[] };
+export type TesteMcpResp = {
+  nome: string;
+  url: string;
+  ferramentas: number;
+  nomes: string[];
+  servidor: string | null;
+  ms: number;
 };
 
 export type ConfigResp = {
