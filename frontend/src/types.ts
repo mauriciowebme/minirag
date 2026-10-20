@@ -23,7 +23,15 @@ export type DocItem = {
   updated_at: string | null;
   chunks_arquivados: number;
   /** arquivo original guardado (pdf/docx/...); null quando o doc nasceu como texto */
-  arquivo: { nome: string; tipo: string; ext?: string; editavel?: boolean; tamanho: number } | null;
+  arquivo: {
+    nome: string;
+    tipo: string;
+    ext?: string;
+    editavel?: boolean;
+    /** texto veio de OCR (imagem ou PDF escaneado) — confira no original */
+    ocr?: boolean;
+    tamanho: number;
+  } | null;
 };
 export type DocsResp = { tenant: string; memoria: string; total: number; docs: DocItem[] };
 

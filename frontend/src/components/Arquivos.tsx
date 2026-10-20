@@ -93,11 +93,15 @@ export function Arquivos({
           chunks_total: number;
           tipo: string;
           editavel_na_tela: boolean;
+          lido_por_ocr?: boolean;
+          paginas_ocr?: number;
         }>("/arquivos", form);
         ok++;
-        const dica = r.editavel_na_tela
-          ? ""
-          : ` · ${r.tipo.toUpperCase()}: para editar, baixe o original, altere e suba de novo`;
+        const dica = r.lido_por_ocr
+          ? ` · 🔍 lido por OCR (${r.paginas_ocr ?? 1} pág.) — confira no original`
+          : r.editavel_na_tela
+            ? ""
+            : ` · ${r.tipo.toUpperCase()}: para editar, baixe o original, altere e suba de novo`;
         toast(
           (r.substituiu
             ? `♻ ${f.name}: substituiu "${r.doc_id}" — reindexando (job ${r.job_id})`
@@ -234,12 +238,12 @@ export function Arquivos({
         >
           ＋ nova nota
         </button>
-        <label className="btn" title="enviar um ou vários arquivos (pdf, docx, xlsx, csv, html, txt, md)">
+        <label className="btn" title="enviar um ou vários arquivos (pdf, docx, xlsx, csv, html, txt, md, imagem)">
           ⬆ upload
           <input
             type="file"
             id="arquivoInput"
-            accept=".pdf,.docx,.xlsx,.csv,.html,.htm,.txt,.md,.markdown"
+            accept=".pdf,.docx,.xlsx,.csv,.html,.htm,.txt,.md,.markdown,.png,.jpg,.jpeg,.webp,.tif,.tiff"
             multiple
             hidden
             ref={inputRef}
@@ -335,7 +339,7 @@ export function Arquivos({
           void subir(Array.from(e.dataTransfer.files || []));
         }}
       >
-        <b>⬆</b> arraste pdf, docx, xlsx, csv, html, txt ou md — ou clique para escolher
+        <b>⬆</b> arraste pdf, docx, xlsx, csv, html, txt, md ou imagem (png/jpg) — ou clique para escolher
         <span className="mt-1 block text-[12px] text-txt3">
           o arquivo original fica guardado; subir o mesmo nome substitui e reprocessa
         </span>
@@ -346,7 +350,7 @@ export function Arquivos({
         id="versaoInput"
         hidden
         ref={inputVersao}
-        accept=".pdf,.docx,.xlsx,.csv,.html,.htm,.txt,.md,.markdown"
+        accept=".pdf,.docx,.xlsx,.csv,.html,.htm,.txt,.md,.markdown,.png,.jpg,.jpeg,.webp,.tif,.tiff"
         onChange={(e) => {
           const lista = Array.from(e.target.files || []);
           const alvo = substituindo;
@@ -398,6 +402,11 @@ export function Arquivos({
                     {doc.arquivo && (
                       <div className="mt-0.5 text-[12px] text-txt3">
                         <span className="chip mr-1">{(doc.arquivo.ext || doc.arquivo.tipo).toUpperCase()}</span>
+                        {doc.arquivo.ocr && (
+                          <span className="chip mr-1" title="o texto foi lido da imagem por OCR — confira no original">
+                            OCR
+                          </span>
+                        )}
                         {doc.arquivo.nome} · {tamanhoLegivel(doc.arquivo.tamanho)}
                       </div>
                     )}
