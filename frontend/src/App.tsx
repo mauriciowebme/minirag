@@ -9,6 +9,7 @@ import { Jobs } from "./components/Jobs";
 import { get } from "./services/api";
 import type { HealthResp, Vista } from "./types";
 
+/* o primeiro nível do operador é a lista de usuários; de um login comum é a sua gaveta */
 const ABAS: { id: Vista; rotulo: string }[] = [
   { id: "gavetas", rotulo: "Gavetas" },
   { id: "arquivos", rotulo: "Arquivos" },
@@ -94,7 +95,7 @@ export default function App() {
               className={`aba ${vista === a.id ? "aba-ativa" : ""}`}
               onClick={() => setVista(a.id)}
             >
-              {a.rotulo}
+              {a.id === "gavetas" ? (operador ? "Usuários" : "Gavetas") : a.rotulo}
             </button>
           ))}
         </nav>
