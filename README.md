@@ -393,6 +393,51 @@ com fonte. `test_mcp.py` segue 17/17 (tools MCP corrigidas para chamar a REST
 
 ---
 
+## v2.4 — processador de documentos: original guardado, conversão e substituição (20/10/2026)
+
+O painel deixou de aceitar só `.txt`/`.md`. Agora ele recebe o **arquivo original**,
+guarda o binário e indexa o texto extraído dele.
+
+| rota | o que faz |
+|---|---|
+| `POST /arquivos` (multipart, campo `arquivo`) | recebe o arquivo (+ campos `memoria`, `tenant` só p/ operador, `doc_id?`, `title?`), **guarda o original**, converte em texto e enfileira. `201` documento novo · `200` quando **substituiu** (`substituiu:true`) · `422` tipo não aceito/arquivo sem texto · `413` acima de 15 MB |
+| `GET /documents/{doc_id}/arquivo?memoria=` | devolve o **binário original** com `content-type` e nome certos (`404` se o doc foi criado como texto no painel) |
+
+**Tipos aceitos**: pdf, docx, xlsx, csv, html, txt, md (15 MB por arquivo).
+
+- **pdf** → `pdfjs-dist` (legacy) por página. O `pdf-parse@1.1.1` foi removido: o pdf.js
+  embutido nele (2016) recusa PDFs atuais com `bad XRef entry` (medido com fpdf2, Word e
+  LibreOffice). PDF **sem texto** (digitalizado) → `422` explicando que precisa OCR.
+- **docx** → `mammoth` para HTML e daí texto (o markdown do mammoth escapa pontuação:
+  `\.`, `\-` e suja o índice).
+- **xlsx** → `exceljs`; cada aba vira `## Planilha: nome`, com `colunas: a | b` e uma
+  linha por registro no formato `coluna: valor | coluna: valor` (até 20 mil linhas por aba).
+- **csv** → separador detectado (`,` `;` tab), respeita aspas e quebra dentro de aspas.
+- **html** → remove script/style, transforma títulos em `#` e itens em `- `.
+- `.xls`, `.doc`, `.ppt` (Office antigo) → `422` dizendo para salvar como `.xlsx`/`.docx`.
+
+**"Mesmo nome substitui"**: o `doc_id` sai do nome do arquivo normalizado
+(minúsculo, sem acento, sem extensão) ou do campo `doc_id` quando enviado. Subir
+`contrato.pdf` de novo na mesma gaveta substitui **chunks + fonte + original** e volta
+para a fila (reindexação automática). Outra gaveta = documento novo.
+
+**Fluxo de edição**: `.md`/`.txt`/`.csv` → edita na tela (`PUT /documents/{id}`) e
+reindexa — o **original guardado acompanha a edição** (senão o download devolveria a
+versão velha); pdf/docx/xlsx → baixa o original, edita na máquina e sobe de novo (ou
+usa "⬆ versão" no painel, que mantém o mesmo `doc_id`).
+
+No `/docs`, cada item traz `arquivo.nome`, `arquivo.tipo` (texto, pdf, docx, planilha),
+`arquivo.ext` (md, pdf, xlsx… — é o que o painel mostra no chip), `arquivo.editavel`
+e `arquivo.tamanho`; o painel decide entre "abrir no editor" e "baixar original" por
+`editavel`, nunca pelo tipo bruto.
+
+**Onde mora o binário**: tabela `arquivos (tenant, memoria, doc_id, nome, mime, tipo,
+tamanho, conteudo BYTEA)`, separada de `documents` de propósito — o worker recria a
+linha de `documents` a cada reindexação e não pode encostar no original. `DELETE /docs`
+e `DELETE /gavetas` apagam o binário junto; `PATCH` que move/renomeia leva o binário.
+
+## v2.3 — navegação em 3 telas: usuários › gavetas › arquivos (20/10/2026)
+
 ## v1.10 — conforto de uso: organizar arquivos sem sair do painel (20/10/2026)
 
 Rotas novas (todas com o mesmo login; `?tenant=` só vale para a chave operador):
