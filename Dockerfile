@@ -22,12 +22,9 @@ RUN pip install --no-cache-dir --upgrade pip \
     && pip install --no-cache-dir -r requirements.txt
 
 # Asa o modelo: boot instantâneo e sem download em produção
-RUN python - <<'PY'
-from sentence_transformers import SentenceTransformer
-m = SentenceTransformer("nomic-ai/nomic-embed-text-v1.5")
-m.save("/app/models")
-print("model saved, dim =", m.get_embedding_dimension())
-PY
+# (comando em uma linha só: o builder legado do Docker não entende heredoc)
+RUN python -c "from sentence_transformers import SentenceTransformer; m = SentenceTransformer('nomic-ai/nomic-embed-text-v1.5'); m.save('/app/models'); print('model saved, dim =', m.get_embedding_dimension())" \
+    && test -f /app/models/config.json
 
 # ---------------------------------------------------------------- estágio 2
 # Build do TypeScript e do painel
