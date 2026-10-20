@@ -29,7 +29,7 @@ from fastapi.responses import JSONResponse, Response
 from pydantic import ValidationError
 
 PROTOCOLOS_SUPORTADOS = ("2025-06-18", "2025-03-10", "2024-11-05")
-SERVER_INFO = {"name": "minirag", "version": "1.10.0"}
+SERVER_INFO = {"name": "minirag", "version": "1.11.0"}
 
 # Schemas JSON (inputSchema) das tools — args viram o corpo da REST
 TOOLS = [

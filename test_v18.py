@@ -73,10 +73,10 @@ PALAVRAS = ("A raposa veloz salta sobre o cao preguiçoso do quintal. " * 22)
 
 print("== health e painel ==")
 st, _, h = call("GET", "/health")
-check("health 200 + versao 1.10", st == 200 and h.get("versao") == "1.10.0", h)
+check("health 200 + versao 1.11", st == 200 and h.get("versao") == "1.11.0", h)
 check("health operador ativo", h.get("operador") is True, h)
 st, hdr, bruto = call("GET", "/painel/", binary=True)
-check("painel servido (200 html)", st == 200 and "Minirag — Painel" in bruto, st)
+check("painel servido (200 html)", st == 200 and 'id="formLogin"' in bruto, st)
 
 print("== ingest vira DOCUMENTO com fonte ==")
 CONTEUDO1 = "O farol da baia guia os barcos na neblina de novembro. " * 3

@@ -563,7 +563,7 @@ async def lifespan(app: "FastAPI"):
 # docs_url=None: o Swagger do FastAPI mora em /docs, que colidiria com o
 # nosso GET /docs (listagem de documentos do tenant). Serviço interno,
 # entao desligamos a UI de docs do framework.
-app = FastAPI(title="Minirag", version="1.10.0", lifespan=lifespan,
+app = FastAPI(title="Minirag", version="1.11.0", lifespan=lifespan,
               docs_url=None, redoc_url=None)
 app.add_middleware(
     CORSMiddleware,
@@ -591,7 +591,7 @@ if os.path.isdir(PAINEL_DIR):
 @app.get("/health")
 def health():
     return {"status": "ok", "dim": MODEL_DIM, "usuarios": len(USERS),
-            "operador": bool(OPERADOR), "versao": "1.10.0"}
+            "operador": bool(OPERADOR), "versao": "1.11.0"}
 
 
 @app.get("/", include_in_schema=False)

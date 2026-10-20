@@ -403,6 +403,28 @@ de força bruta (11ª tentativa = 429, inclusive com a chave boa). Roda por
 
 ---
 
+## v1.11 — design do painel: hierarquia, estado e celular (20/10/2026)
+
+Trabalho de UI/UX, sem mudança de rota ou regra:
+
+- **Escala e cor com papel definido**: verde = ação primária e "ativo"; azul =
+  link/ação de abrir; âmbar = arquivar/arquivado; vermelho = destrutivo. Antes
+  todo botão tinha o mesmo peso.
+- **Ações agrupadas**: primária (`nova nota`) → secundárias com contorno
+  (`upload`, `exportar`) → separador → destrutiva (`apagar gaveta`).
+- **Estado por linha**: coluna `estado` com etiqueta `ativo`/`arquivado`; linha
+  arquivada fica esmaecida (antes só existia um número de chunks arquivados).
+- **Celular**: a tabela vira cartões e cada campo ganha rótulo
+  (`doc_id · …`, `chunks · …`), com alvo de toque de 38 px.
+- **Feedback**: "carregando…" nas listas, estado vazio com instrução, toast com
+  `aria-live`, foco visível em tudo (`:focus-visible`).
+- **Teclado**: `Ctrl+S` salva, `Esc` fecha o editor; `ver/ocultar` no segredo.
+- **Datas relativas** (`hoje 21:58`, `ontem`, `há 3 dias`) em vez de `19/10`.
+- Rodapé com versão do serviço e atalhos; assets sempre versionados (`?v=`)
+  para deploy novo não bater em cache velho.
+
+---
+
 ## MCP — acesso por agentes (POST /mcp)
 
 Além da REST, o minirag fala **MCP (Model Context Protocol)** em
