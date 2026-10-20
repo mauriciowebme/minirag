@@ -319,7 +319,7 @@ test("minirag v2 — suíte completa", async (t) => {
     f.fechar("v1.8");
   });
 
-  await t.test("MCP: JSON-RPC stateless com as 6 tools", async () => {
+  await t.test("MCP: JSON-RPC stateless com as 15 tools", async () => {
     const f = fiscal();
     const H = { key: TESTKEY };
     const rpc = (id: unknown, method: string, params?: unknown, key: string | null = TESTKEY) =>
@@ -344,12 +344,24 @@ test("minirag v2 — suíte completa", async (t) => {
 
     r = await rpc(4, "tools/list");
     const nomes = (r.json?.result?.tools ?? []).map((x: any) => x.name).sort();
-    f.check(
-      "tools/list tem 6 tools",
-      JSON.stringify(nomes) ===
-        JSON.stringify(["delete_doc", "health", "ingest", "ingest_status", "list_docs", "search"].sort()),
-      nomes,
-    );
+    const ESPERADAS = [
+      "archive_doc",
+      "create_gaveta",
+      "delete_doc",
+      "delete_gaveta",
+      "edit_doc",
+      "get_file",
+      "health",
+      "ingest",
+      "ingest_status",
+      "list_docs",
+      "list_gavetas",
+      "list_jobs",
+      "rename_doc",
+      "search",
+      "upload_file",
+    ].sort();
+    f.check("tools/list tem 15 tools (paridade com a REST)", JSON.stringify(nomes) === JSON.stringify(ESPERADAS), nomes);
 
     r = await rpc(5, "tools/call", { name: "health" }, null);
     f.check("tools/call sem Bearer -> 401", r.status === 401 && "error" in (r.json ?? {}), r.texto.slice(0, 150));
@@ -425,6 +437,86 @@ test("minirag v2 — suíte completa", async (t) => {
       r.status === 200 && r.json?.result?.isError === true,
       r.texto.slice(0, 150),
     );
+
+    console.log("-- MCP processador de documentos");
+    const md = "# ata da reuniao\n- decisao: subir o processador\n";
+    r = await rpc(20, "tools/call", {
+      name: "upload_file",
+      arguments: {
+        nome: "ata-mcp.md",
+        conteudo_base64: Buffer.from(md, "utf8").toString("base64"),
+        memoria: "mcp-gaveta",
+      },
+    });
+    const up = JSON.parse(r.json?.result?.content?.[0]?.text ?? "{}");
+    f.check(
+      "upload_file: 201-equivalente, tipo md, editavel",
+      r.status === 200 && up.doc_id === "ata-mcp" && up.tipo === "md" && up.editavel_na_tela === true,
+      r.texto.slice(0, 200),
+    );
+    if (Number.isFinite(Number(up.job_id))) await esperarJob(TESTKEY, Number(up.job_id));
+
+    r = await rpc(21, "tools/call", {
+      name: "get_file",
+      arguments: { doc_id: "ata-mcp", memoria: "mcp-gaveta" },
+    });
+    const gf = JSON.parse(r.json?.result?.content?.[0]?.text ?? "{}");
+    f.check(
+      "get_file devolve o original byte a byte",
+      Buffer.from(String(gf.conteudo_base64 ?? ""), "base64").toString("utf8") === md &&
+        gf.nome === "ata-mcp.md" &&
+        gf.mime === "text/markdown",
+      `${gf.nome} ${gf.mime} ${gf.tamanho}`,
+    );
+
+    const md2 = "# ata da reuniao\n- decisao: reprocessar depois da revisao\n";
+    r = await rpc(22, "tools/call", {
+      name: "edit_doc",
+      arguments: { doc_id: "ata-mcp", content: md2, memoria: "mcp-gaveta" },
+    });
+    const ed = JSON.parse(r.json?.result?.content?.[0]?.text ?? "{}");
+    f.check("edit_doc enfileira a reindexacao", r.status === 200 && Number.isFinite(Number(ed.job_id)), r.texto.slice(0, 150));
+    if (Number.isFinite(Number(ed.job_id))) await esperarJob(TESTKEY, Number(ed.job_id));
+    r = await rpc(23, "tools/call", {
+      name: "get_file",
+      arguments: { doc_id: "ata-mcp", memoria: "mcp-gaveta" },
+    });
+    const gf2 = JSON.parse(r.json?.result?.content?.[0]?.text ?? "{}");
+    f.check(
+      "edicao via MCP atualiza o original",
+      Buffer.from(String(gf2.conteudo_base64 ?? ""), "base64").toString("utf8") === md2,
+      gf2.tamanho,
+    );
+
+    r = await rpc(24, "tools/call", { name: "list_gavetas" });
+    const gv = JSON.parse(r.json?.result?.content?.[0]?.text ?? "{}");
+    f.check(
+      "list_gavetas mostra a gaveta do doc",
+      (gv.gavetas ?? []).some((g: any) => g.tenant === "teste" && g.memoria === "mcp-gaveta"),
+      (gv.gavetas ?? []).length,
+    );
+
+    const nomeGav = "mcp-nova-" + Math.random().toString(36).slice(2, 7);
+    r = await rpc(25, "tools/call", { name: "create_gaveta", arguments: { memoria: nomeGav } });
+    f.check("create_gaveta cria", r.status === 200 && JSON.parse(r.json?.result?.content?.[0]?.text ?? "{}").memoria === nomeGav, r.texto.slice(0, 120));
+
+    r = await rpc(26, "tools/call", { name: "delete_gaveta", arguments: { memoria: nomeGav } });
+    f.check("delete_gaveta apaga a vazia", r.status === 200 && r.json?.result?.isError !== true, r.texto.slice(0, 120));
+
+    r = await rpc(27, "tools/call", { name: "list_jobs", arguments: { limit: 5 } });
+    const lj = JSON.parse(r.json?.result?.content?.[0]?.text ?? "{}");
+    f.check("list_jobs devolve resumo por status", r.status === 200 && Array.isArray(lj.jobs), Object.keys(lj).slice(0, 5));
+
+    r = await rpc(28, "tools/call", { name: "upload_file", arguments: { nome: "x.zip", conteudo_base64: "AAAA" } });
+    f.check(
+      "upload_file recusa tipo nao aceito (isError)",
+      r.status === 200 && r.json?.result?.isError === true,
+      r.texto.slice(0, 150),
+    );
+
+    r = await rpc(29, "tools/call", { name: "delete_doc", arguments: { doc_id: "ata-mcp", memoria: "mcp-gaveta" } });
+    const dm = JSON.parse(r.json?.result?.content?.[0]?.text ?? "{}");
+    f.check("delete_doc limpa o doc do MCP", (dm.chunks_apagados ?? 0) >= 1, dm);
 
     const rest = await call("POST", "/search", { key: TESTKEY, corpo: { query: "oi", memoria: "mcp-gaveta" } });
     f.check("REST /search continua funcionando", rest.json?.items !== undefined, rest.status);
