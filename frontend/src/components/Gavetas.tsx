@@ -92,12 +92,12 @@ export function Gavetas({
     return [...mapa.entries()]
       .map(([tenant, gavetas]) => {
         const ordenadas = [...gavetas].sort((a, b) => ordemGaveta(a, b, ordem));
-        const vazio = ordenadas.length === 0;
+        const vazio = !ordenadas.some((g) => g.docs > 0 || g.chunks > 0);
         return {
           tenant,
           vazio,
           qtdGavetas: ordenadas.length,
-          gavetas: vazio ? [{ ...GAVETA_VAZIA, tenant }] : ordenadas,
+          gavetas: ordenadas.length ? ordenadas : [{ ...GAVETA_VAZIA, tenant }],
           docs: ordenadas.reduce((s, g) => s + g.docs, 0),
           ultimo: ordenadas.reduce((m, g) => (g.ultimo_ingress ?? "") > m ? (g.ultimo_ingress ?? "") : m, ""),
         };
@@ -141,6 +141,27 @@ export function Gavetas({
       void carregar();
     } catch (e) {
       toast((e as Error).message);
+    }
+  }
+
+  async function criarGavetaNova(tenant: string) {
+    const nome = prompt(
+      operador
+        ? `Nome da nova gaveta de ${tenant}:\n(ex.: vendas, suporte, contratos)`
+        : "Nome da nova gaveta:\n(ex.: vendas, suporte, contratos)",
+    );
+    if (nome === null) return;
+    const memoria = nome.trim();
+    if (!memoria) {
+      toast("nome vazio — gaveta não criada");
+      return;
+    }
+    try {
+      await post("/gavetas", { memoria, tenant: operador ? tenant : undefined });
+      toast(`gaveta "${memoria}" criada`);
+      void carregar();
+    } catch (e) {
+      toast("não deu para criar: " + (e as Error).message);
     }
   }
 
@@ -244,9 +265,16 @@ export function Gavetas({
                 )}
                 <span className="text-[12px] text-txt3">
                   {vazio
-                    ? "nenhuma gaveta ainda"
+                    ? "nenhuma gaveta com documento ainda"
                     : `${pl(qtdGavetas, "gaveta", "gavetas")} · ${pl(docs, "documento", "documentos")}`}
                 </span>
+                <button
+                  className="btn btn-sutil btn-mini ml-auto"
+                  title="criar uma gaveta nova neste usuário"
+                  onClick={() => void criarGavetaNova(tenant)}
+                >
+                  ＋ gaveta
+                </button>
               </div>
 
               {/* nível 2: as gavetas desse usuário, uma por linha */}
@@ -263,16 +291,16 @@ export function Gavetas({
                       <div className="min-w-0 flex-1">
                         <div className="flex flex-wrap items-center gap-1.5">
                           <span className="truncate text-[13px] font-semibold" title={g.memoria || "padrão"}>
-                            {vazio ? "gaveta padrão" : ehTecnica(g.memoria) ? "gaveta do perfil" : g.memoria || "padrão"}
+                            {ehTecnica(g.memoria) ? "gaveta do perfil" : g.memoria || "padrão"}
                           </span>
-                          {ehTecnica(g.memoria) && !vazio && (
+                          {ehTecnica(g.memoria) && (
                             <span className="chip" title={g.memoria}>
                               {curto(g.memoria)}
                             </span>
                           )}
                         </div>
                         <div className="mt-0.5 text-[12px] text-txt3">
-                          {vazio ? (
+                          {g.docs === 0 && g.chunks === 0 ? (
                             <span className="text-txt3">vazia — clique para enviar o primeiro documento</span>
                           ) : (
                             <>
@@ -285,8 +313,20 @@ export function Gavetas({
                         </div>
                       </div>
 
-                      {vazio ? (
-                        <span className="btn btn-primario btn-mini shrink-0">＋ documento</span>
+                      {g.docs === 0 && g.chunks === 0 ? (
+                        <div className="flex shrink-0 items-center gap-1">
+                          <span className="btn btn-primario btn-mini">＋ documento</span>
+                          <button
+                            className="btn btn-perigo btn-mini"
+                            title="apagar esta gaveta (está vazia)"
+                            onClick={(e) => {
+                              e.stopPropagation();
+                              void apagar(g.tenant, g.memoria, g.docs);
+                            }}
+                          >
+                            apagar
+                          </button>
+                        </div>
                       ) : (
                         <div className="flex shrink-0 gap-1">
                           <button

@@ -2,7 +2,7 @@
 import fs from "node:fs";
 import path from "node:path";
 import Fastify, { FastifyInstance, FastifyReply, FastifyRequest } from "fastify";
-import { CONFIG, OPERADOR, USERS } from "./config";
+import { CONFIG, OPERADOR, USERS, tenantFor } from "./config";
 import { HttpError, iso } from "./errors";
 import { authenticate, ipCliente } from "./auth";
 import { embedderDim, embedderDisponivel } from "./embed";
@@ -17,6 +17,7 @@ import {
   getDocument,
   jobParaUsuario,
   listDocs,
+  criarGaveta,
   listGavetas,
   listJobs,
   nomeArquivo,
@@ -208,6 +209,14 @@ export function criarApp(): FastifyInstance {
   });
 
   /* ----------------------------------------------------------- agregados */
+
+  app.post("/gavetas", async (req, reply) => {
+    const u = usuario(req);
+    const b = corpo(req);
+    const memoria = vString(b.memoria, "memoria", { obrigatorio: true, min: 1, max: 120 });
+    const tenant = tenantFor(u, (b.tenant as string) ?? null);
+    return reply.code(201).send(await criarGaveta(tenant, memoria));
+  });
 
   app.get("/gavetas", async (req) => {
     const u = usuario(req);

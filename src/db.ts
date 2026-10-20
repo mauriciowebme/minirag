@@ -116,6 +116,16 @@ export async function initDb(dim: number): Promise<void> {
       PRIMARY KEY (tenant, memoria, doc_id))`,
   );
 
+  /* Gavetas registradas: permite gaveta vazia (criada à mão) aparecer no mapa
+     antes do primeiro documento. */
+  await q(
+    `CREATE TABLE IF NOT EXISTS gavetas (
+      tenant TEXT NOT NULL,
+      memoria TEXT NOT NULL,
+      criado_em TIMESTAMPTZ NOT NULL DEFAULT now(),
+      PRIMARY KEY (tenant, memoria))`,
+  );
+
   // container pode ter morrido no meio de um job: devolve pra fila
   await q(`UPDATE ingest_jobs SET status = 'na_fila', chunks_feitos = 0 WHERE status = 'processando'`);
 

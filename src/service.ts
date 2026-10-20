@@ -137,26 +137,68 @@ export async function listGavetas(user: Usuario, tenantArg?: string) {
      GROUP BY tenant, memoria ORDER BY tenant, memoria`,
     params,
   );
+  const reg = await q<{ tenant: string; memoria: string }>(
+    `SELECT tenant, memoria FROM gavetas ${where}`,
+    params,
+  );
   const nd = await q<{ n: string }>(
     `SELECT count(*) AS n FROM documents${alvo !== null ? " WHERE tenant = $1" : ""}`,
     params,
   );
+
   /* Usuários conhecidos: operador vê todos os configurados (mesmo sem dados),
      para poder criar documentos neles; login comum vê só o próprio. */
   const comDados = [...new Set(r.rows.map((g) => g.tenant))];
   let usuarios: string[];
   if (isOperador(user)) {
     const configurados = [...USERS, ...OPERADOR].map(([nome]) => nome);
-    usuarios = [...new Set([...configurados, ...comDados])].sort();
+    usuarios = [...new Set([...configurados, ...comDados, ...reg.rows.map((g) => g.tenant)])].sort();
     if (alvo !== null) usuarios = usuarios.filter((t) => t === alvo);
   } else {
     usuarios = [user.tenant];
   }
 
-  return {
-    operador: isOperador(user),
-    usuarios,
-    gavetas: r.rows.map((g) => ({
+  type Linha = {
+    tenant: string;
+    memoria: string;
+    chunks: number;
+    docs: number;
+    chunks_arquivados: number;
+    primeiro_ingress: string | null;
+    ultimo_ingress: string | null;
+  };
+  const mapa = new Map<string, Linha>();
+  const chave = (t: string, m: string) => `${t}\u0000${m}`;
+
+  /* toda gaveta registrada existe, mesmo sem documento */
+  for (const g of reg.rows) {
+    mapa.set(chave(g.tenant, g.memoria), {
+      tenant: g.tenant,
+      memoria: g.memoria,
+      chunks: 0,
+      docs: 0,
+      chunks_arquivados: 0,
+      primeiro_ingress: null,
+      ultimo_ingress: null,
+    });
+  }
+  /* a gaveta padrão (memoria vazia) sempre aparece para cada usuário visível */
+  for (const t of usuarios) {
+    const k = chave(t, "");
+    if (!mapa.has(k)) {
+      mapa.set(k, {
+        tenant: t,
+        memoria: "",
+        chunks: 0,
+        docs: 0,
+        chunks_arquivados: 0,
+        primeiro_ingress: null,
+        ultimo_ingress: null,
+      });
+    }
+  }
+  for (const g of r.rows) {
+    mapa.set(chave(g.tenant, g.memoria), {
       tenant: g.tenant,
       memoria: g.memoria,
       chunks: Number(g.chunks),
@@ -164,9 +206,28 @@ export async function listGavetas(user: Usuario, tenantArg?: string) {
       chunks_arquivados: Number(g.arq),
       primeiro_ingress: iso(g.primeiro),
       ultimo_ingress: iso(g.ultimo),
-    })),
+    });
+  }
+
+  return {
+    operador: isOperador(user),
+    usuarios,
+    gavetas: [...mapa.values()]
+      .filter((g) => usuarios.includes(g.tenant))
+      .sort((a, b) => a.tenant.localeCompare(b.tenant) || a.memoria.localeCompare(b.memoria)),
     documentos_fonte: Number(nd.rows[0]?.n ?? 0),
   };
+}
+
+/** Cria uma gaveta vazia (aparece no mapa antes do primeiro documento). */
+export async function criarGaveta(tenant: string, memoriaArg: string) {
+  const memoria = (memoriaArg ?? "").trim().replace(/\s+/g, " ");
+  if (!memoria) throw erro422("nome da gaveta é obrigatório");
+  await q(
+    `INSERT INTO gavetas (tenant, memoria) VALUES ($1, $2) ON CONFLICT (tenant, memoria) DO NOTHING`,
+    [tenant, memoria],
+  );
+  return { tenant, memoria };
 }
 
 /** Fila de ingestão com resumo por status. */
@@ -501,7 +562,8 @@ export async function deleteGaveta(memoriaArg: string, tenantArg: string | null,
     );
     const ch = await c.query(`DELETE FROM chunks WHERE tenant=$1 AND memoria=$2`, [t, memoria]);
     const fo = await c.query(`DELETE FROM documents WHERE tenant=$1 AND memoria=$2`, [t, memoria]);
-    if (!ch.rowCount && !fo.rowCount) throw erro404("gaveta vazia ou inexistente");
+    const rg = await c.query(`DELETE FROM gavetas WHERE tenant=$1 AND memoria=$2`, [t, memoria]);
+    if (!ch.rowCount && !fo.rowCount && !rg.rowCount) throw erro404("gaveta vazia ou inexistente");
     return {
       tenant: t,
       memoria,

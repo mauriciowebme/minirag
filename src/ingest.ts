@@ -115,6 +115,12 @@ export async function processJob(job: JobRow): Promise<string> {
         [job.tenant, job.memoria, job.doc_id, primeiroNovoId],
       );
     }
+    /* a gaveta passa a existir oficialmente no primeiro documento */
+    await q(
+      `INSERT INTO gavetas (tenant, memoria) VALUES ($1, $2)
+       ON CONFLICT (tenant, memoria) DO NOTHING`,
+      [job.tenant, job.memoria],
+    );
     await q(
       `INSERT INTO documents (tenant, memoria, doc_id, title, content, size_bytes, origem)
        VALUES ($1,$2,$3,$4,$5,$6,'direto')
