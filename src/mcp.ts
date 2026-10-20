@@ -1,7 +1,21 @@
-/** MCP sobre POST /mcp — JSON-RPC 2.0 stateless, mesmas 6 tools da v1.x. */
-import { Usuario } from "./config";
+/** MCP sobre POST /mcp — JSON-RPC 2.0 stateless, espelho das rotas REST. */
+import { Usuario, tenantFor } from "./config";
 import { HttpError } from "./errors";
-import { deleteDoc, jobParaUsuario, listDocs, search } from "./service";
+import {
+  criarGaveta,
+  deleteDoc,
+  deleteGaveta,
+  getArquivoOriginal,
+  jobParaUsuario,
+  listDocs,
+  listGavetas,
+  listJobs,
+  patchArquivado,
+  patchDocument,
+  putDocument,
+  search,
+  uploadArquivo,
+} from "./service";
 import { enqueueIngest } from "./ingest";
 import { CONFIG } from "./config";
 
@@ -90,6 +104,132 @@ export const TOOLS: Tool[] = [
       required: ["doc_id"],
     },
   },
+  {
+    name: "upload_file",
+    description:
+      "Envia um ARQUIVO (pdf, docx, xlsx, csv, html, txt, md) em base64: guarda o original, extrai o texto e enfileira. Mesmo nome na mesma gaveta substitui o anterior.",
+    inputSchema: {
+      type: "object",
+      properties: {
+        nome: { type: "string", description: "nome do arquivo com extensao (ex: contrato.pdf)" },
+        conteudo_base64: { type: "string", description: "bytes do arquivo em base64 (max 15 MB)" },
+        mime: { type: "string", description: "content-type, opcional (o servidor deduz pela extensao)" },
+        memoria: { type: "string", description: "gaveta dentro do login (default '')" },
+        doc_id: { type: "string", description: "id do doc; vazio = derivado do nome do arquivo" },
+        title: { type: "string" },
+        tenant: { type: "string", description: "alvo do operador; ignorado para login comum" },
+      },
+      required: ["nome", "conteudo_base64"],
+    },
+  },
+  {
+    name: "get_file",
+    description:
+      "Devolve o ARQUIVO ORIGINAL guardado (nome, mime, tipo, tamanho e conteudo_base64). 404 quando o doc foi criado como texto puro.",
+    inputSchema: {
+      type: "object",
+      properties: {
+        doc_id: { type: "string" },
+        memoria: { type: "string", description: "gaveta dentro do login (default '')" },
+        tenant: { type: "string", description: "alvo do operador; ignorado para login comum" },
+      },
+      required: ["doc_id"],
+    },
+  },
+  {
+    name: "edit_doc",
+    description:
+      "Edita o TEXTO de um documento existente e reindexa (202). Em doc vindo de arquivo de texto, o original guardado acompanha a edicao.",
+    inputSchema: {
+      type: "object",
+      properties: {
+        doc_id: { type: "string" },
+        content: { type: "string", description: "texto novo (max 500000 chars)" },
+        title: { type: "string" },
+        memoria: { type: "string", description: "gaveta dentro do login (default '')" },
+        tenant: { type: "string", description: "alvo do operador; ignorado para login comum" },
+      },
+      required: ["doc_id", "content"],
+    },
+  },
+  {
+    name: "rename_doc",
+    description:
+      "Renomeia o doc_id e/ou muda o titulo e/ou move para outra gaveta, sem reindexar. 409 se o doc tem job processando.",
+    inputSchema: {
+      type: "object",
+      properties: {
+        doc_id: { type: "string" },
+        novo_doc_id: { type: "string" },
+        title: { type: "string" },
+        destino_memoria: { type: "string", description: "gaveta de destino (default: a mesma)" },
+        memoria: { type: "string", description: "gaveta atual (default '')" },
+        tenant: { type: "string", description: "alvo do operador; ignorado para login comum" },
+      },
+      required: ["doc_id"],
+    },
+  },
+  {
+    name: "archive_doc",
+    description: "Arquiva ou revive um documento inteiro (sem apagar nada).",
+    inputSchema: {
+      type: "object",
+      properties: {
+        doc_id: { type: "string" },
+        arquivado: { type: "boolean", description: "true arquiva, false revive" },
+        memoria: { type: "string", description: "gaveta dentro do login (default '')" },
+        tenant: { type: "string", description: "alvo do operador; ignorado para login comum" },
+      },
+      required: ["doc_id", "arquivado"],
+    },
+  },
+  {
+    name: "list_gavetas",
+    description:
+      "Mapa de usuarios e gavetas com contagem de documentos e chunks. Operador ve tudo; login comum ve so o proprio.",
+    inputSchema: {
+      type: "object",
+      properties: {
+        tenant: { type: "string", description: "filtra um usuario (so operador)" },
+      },
+    },
+  },
+  {
+    name: "create_gaveta",
+    description: "Cria uma gaveta vazia (para receber documentos depois).",
+    inputSchema: {
+      type: "object",
+      properties: {
+        memoria: { type: "string", description: "nome da gaveta" },
+        tenant: { type: "string", description: "dono (so operador; comum cria na propria)" },
+      },
+      required: ["memoria"],
+    },
+  },
+  {
+    name: "delete_gaveta",
+    description: "Apaga a gaveta inteira (chunks + fontes + arquivos originais + jobs na fila). 409 se ha job processando.",
+    inputSchema: {
+      type: "object",
+      properties: {
+        memoria: { type: "string" },
+        tenant: { type: "string", description: "dono (obrigatorio quando o operador apaga gaveta alheia)" },
+      },
+      required: ["memoria"],
+    },
+  },
+  {
+    name: "list_jobs",
+    description: "Fila de ingestao com resumo por status (na_fila | processando | concluido | erro | cancelado).",
+    inputSchema: {
+      type: "object",
+      properties: {
+        status: { type: "string" },
+        tenant: { type: "string", description: "filtra um usuario (so operador)" },
+        limit: { type: "integer", description: "default 50, max 200" },
+      },
+    },
+  },
 ];
 
 const ok = (id: unknown, result: unknown) => ({ jsonrpc: "2.0", id, result });
@@ -112,8 +252,11 @@ function initialize(params: Row) {
     capabilities: { tools: { listChanged: false } },
     serverInfo: SERVER_INFO,
     instructions:
-      "RAG semantico multi-tenant. Tools: search (busca), ingest (doc entra na fila), " +
-      "ingest_status (progresso), list_docs, delete_doc, health.",
+      "RAG semantico multi-tenant com processador de documentos. Tools: search (busca), " +
+      "ingest (texto na fila), ingest_status (progresso), list_docs, delete_doc, health, " +
+      "upload_file (pdf/docx/xlsx/csv/html/txt/md em base64), get_file (original guardado), " +
+      "edit_doc (edita texto e reindexa), rename_doc (renomeia/move/titulo), archive_doc, " +
+      "list_gavetas, create_gaveta, delete_gaveta, list_jobs.",
   };
 }
 
@@ -148,7 +291,85 @@ async function executarTool(
         user,
       );
     case "delete_doc":
-      return deleteDoc(args.doc_id, args.memoria ?? "", null, user);
+      return deleteDoc(args.doc_id, args.memoria ?? "", args.tenant ?? null, user);
+    case "upload_file": {
+      if (typeof args.nome !== "string" || typeof args.conteudo_base64 !== "string") {
+        throw new Error("parametros invalidos: nome e conteudo_base64 sao obrigatorios");
+      }
+      const b64 = args.conteudo_base64.replace(/^data:[^;]+;base64,/, "");
+      if (!/^[A-Za-z0-9+/=\s]+$/.test(b64)) throw new Error("conteudo_base64 invalido");
+      const buf = Buffer.from(b64, "base64");
+      if (!buf.length) throw new Error("conteudo_base64 vazio");
+      return uploadArquivo(
+        {
+          nome: args.nome,
+          mime: args.mime ?? null,
+          conteudo: buf,
+          memoria: args.memoria ?? "",
+          tenant: args.tenant ?? null,
+          doc_id: args.doc_id ?? null,
+          title: args.title ?? null,
+        },
+        user,
+      );
+    }
+    case "get_file": {
+      const a = await getArquivoOriginal(args.doc_id, args.memoria ?? "", args.tenant ?? null, user);
+      return {
+        doc_id: args.doc_id,
+        nome: a.nome,
+        mime: a.mime,
+        tipo: a.tipo,
+        tamanho: a.tamanho,
+        conteudo_base64: Buffer.from(a.conteudo).toString("base64"),
+      };
+    }
+    case "edit_doc":
+      return putDocument(
+        args.doc_id,
+        {
+          content: args.content,
+          title: args.title ?? null,
+          memoria: args.memoria ?? "",
+          tenant: args.tenant ?? null,
+        },
+        user,
+      );
+    case "rename_doc":
+      return patchDocument(
+        args.doc_id,
+        {
+          novo_doc_id: args.novo_doc_id ?? null,
+          title: args.title,
+          destino_memoria: args.destino_memoria ?? null,
+          tenant: args.tenant ?? null,
+        },
+        args.memoria ?? "",
+        user,
+      );
+    case "archive_doc":
+      return patchArquivado(
+        args.doc_id,
+        Boolean(args.arquivado),
+        args.memoria ?? "",
+        args.tenant ?? null,
+        user,
+      );
+    case "list_gavetas":
+      return listGavetas(user, args.tenant ?? undefined);
+    case "create_gaveta":
+      return criarGaveta(tenantFor(user, args.tenant ?? null), args.memoria);
+    case "delete_gaveta":
+      return deleteGaveta(args.memoria, args.tenant ?? null, user);
+    case "list_jobs":
+      return listJobs(
+        {
+          status: args.status ?? undefined,
+          tenant: args.tenant ?? null,
+          limit: args.limit === undefined ? undefined : Number(args.limit),
+        },
+        user,
+      );
     default:
       throw new Error(`tool desconhecida: ${name}`);
   }
