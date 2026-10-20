@@ -10,3 +10,4 @@ dist/
 painel/app.js
 tests-dist/
 .hermes/
+*.tsbuildinfo
