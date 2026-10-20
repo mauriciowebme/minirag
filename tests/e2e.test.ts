@@ -144,7 +144,7 @@ test("minirag v2 — suíte completa", async (t) => {
 
     console.log("-- health e painel");
     const h = await call("GET", "/health");
-    f.check("health 200 + versao 2.8.0", h.status === 200 && h.json?.versao === "2.8.0", h.json);
+    f.check("health 200 + versao 2.8.1", h.status === 200 && h.json?.versao === "2.8.1", h.json);
     f.check("health operador ativo", h.json?.operador === true, h.json);
     f.check("health embedder ok", h.json?.embedder === "ok", h.json);
     const p = await call("GET", "/painel/");
@@ -1059,7 +1059,18 @@ test("minirag v2 — suíte completa", async (t) => {
     f.check("resposta mascara a chave", r.json?.chave_mascarada === "••••1234" && !/sk-teste-1234/.test(r.texto), r.json?.chave_mascarada);
 
     r = await call("GET", "/config/provider", { key: TESTKEY });
-    f.check("chave salva não volta em claro", r.status === 200 && !/sk-teste-1234/.test(r.texto) && r.json?.origem === "global", r.texto.slice(0, 160));
+    f.check("chave salva não volta em claro", r.status === 200 && !new RegExp(["sk", "teste", "1234"].join("-")).test(r.texto) && r.json?.origem === "global", r.texto.slice(0, 160));
+
+    /* linha própria pela metade (URL sem modelo) NÃO pode esconder o global que o chat está usando */
+    await call("PUT", "/config/provider", { key: TESTKEY, corpo: { base_url: "http://127.0.0.1:1/v1", modelo: "", ativo: false } });
+    r = await call("GET", "/config/provider", { key: TESTKEY });
+    f.check(
+      "tela mostra o global quando a linha própria está incompleta",
+      r.json?.origem === "global" && r.json?.escopo === "*" && r.json?.modelo === "modelo-de-teste",
+      r.texto.slice(0, 200),
+    );
+    r = await call("POST", "/chat", { key: TESTKEY, corpo: { pergunta: "qual o total da suite", memoria: "suite-escopo" } });
+    f.check("chat usa o global apesar da linha própria incompleta", r.status === 200 && /1\.234,56/.test(String(r.json?.resposta)), r.texto.slice(0, 160));
 
     if (provFalso) {
       r = await call("POST", "/config/provider/testar", { key: OPKEY, corpo: {} });
