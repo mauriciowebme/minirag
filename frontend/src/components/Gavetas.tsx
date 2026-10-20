@@ -19,6 +19,24 @@ function curto(m: string): string {
   return `p:${m.slice(2, 10)}…`;
 }
 
+type Ordem = "nome" | "docs" | "recente";
+
+const PAGINA = 9; // painéis por página
+
+function cmpH(a: Gaveta, b: Gaveta): number {
+  return (a.memoria || "").localeCompare(b.memoria || "");
+}
+
+function ordemGaveta(a: Gaveta, b: Gaveta, ordem: Ordem): number {
+  if (ordem === "docs") return b.docs - a.docs || cmpH(a, b);
+  if (ordem === "recente") {
+    const x = a.ultimo_ingress ?? "";
+    const y = b.ultimo_ingress ?? "";
+    return y.localeCompare(x) || cmpH(a, b);
+  }
+  return cmpH(a, b);
+}
+
 const GAVETA_VAZIA: Gaveta = {
   tenant: "",
   memoria: "",
@@ -39,6 +57,9 @@ export function Gavetas({
   const { toast } = useToast();
   const [dados, setDados] = useState<GavetasResp | null>(null);
   const [carregando, setCarregando] = useState(true);
+  const [filtro, setFiltro] = useState("");
+  const [ordem, setOrdem] = useState<Ordem>("nome");
+  const [todos, setTodos] = useState(false);
 
   const carregar = useCallback(async () => {
     setCarregando(true);
@@ -66,9 +87,11 @@ export function Gavetas({
       if (atual) atual.push(g);
       else mapa.set(g.tenant, [g]);
     }
+
+    const f = filtro.trim().toLowerCase();
     return [...mapa.entries()]
       .map(([tenant, gavetas]) => {
-        const ordenadas = [...gavetas].sort((a, b) => (a.memoria || "").localeCompare(b.memoria || ""));
+        const ordenadas = [...gavetas].sort((a, b) => ordemGaveta(a, b, ordem));
         const vazio = ordenadas.length === 0;
         return {
           tenant,
@@ -76,10 +99,23 @@ export function Gavetas({
           qtdGavetas: ordenadas.length,
           gavetas: vazio ? [{ ...GAVETA_VAZIA, tenant }] : ordenadas,
           docs: ordenadas.reduce((s, g) => s + g.docs, 0),
+          ultimo: ordenadas.reduce((m, g) => (g.ultimo_ingress ?? "") > m ? (g.ultimo_ingress ?? "") : m, ""),
         };
       })
-      .sort((a, b) => a.tenant.localeCompare(b.tenant));
-  }, [dados]);
+      .filter(({ tenant, gavetas }) => {
+        if (!f) return true;
+        if (tenant.toLowerCase().includes(f)) return true;
+        return gavetas.some((g) => (g.memoria || "padrão").toLowerCase().includes(f));
+      })
+      .sort((a, b) => {
+        if (ordem === "docs") return b.docs - a.docs || a.tenant.localeCompare(b.tenant);
+        if (ordem === "recente") return b.ultimo.localeCompare(a.ultimo) || a.tenant.localeCompare(b.tenant);
+        return a.tenant.localeCompare(b.tenant);
+      });
+  }, [dados, filtro, ordem]);
+
+  const visiveis = todos ? grupos : grupos.slice(0, PAGINA);
+  const restantes = grupos.length - visiveis.length;
 
   async function exportar(tenant: string, memoria: string) {
     try {
@@ -149,12 +185,41 @@ export function Gavetas({
         </button>
       </div>
 
+      <div className="faixa">
+        <input
+          id="gavFiltro"
+          className="campo max-w-[260px]"
+          placeholder="filtrar por usuário ou gaveta…"
+          value={filtro}
+          onChange={(e) => setFiltro(e.target.value)}
+        />
+        <label className="flex items-center gap-2 text-[13px] text-txt2">
+          ordenar por
+          <select
+            id="gavOrdem"
+            className="campo max-w-[190px]"
+            value={ordem}
+            onChange={(e) => setOrdem(e.target.value as Ordem)}
+          >
+            <option value="nome">nome (A-Z)</option>
+            <option value="docs">mais documentos</option>
+            <option value="recente">mais recente</option>
+          </select>
+        </label>
+        {filtro && (
+          <button className="btn btn-sutil btn-mini" onClick={() => setFiltro("")}>
+            limpar filtro
+          </button>
+        )}
+      </div>
+
       <div id="gavetasInfo" className="dica">
         {dados
           ? (operador ? `${pl(grupos.length, "usuário", "usuários")} · ` : "") +
             `${
               totalGavetas === 0 ? "nenhuma gaveta com documento" : `${pl(totalGavetas, "gaveta", "gavetas")} com documento`
             } · ${pl(totalDocs, "documento", "documentos")} com fonte guardada` +
+            (filtro ? ` · filtro: ${grupos.length} de ${(dados?.usuarios ?? []).length} usuário(s)` : "") +
             (grupos.length ? " · clique numa gaveta para ver os documentos" : "")
           : ""}
       </div>
@@ -168,7 +233,7 @@ export function Gavetas({
           </div>
         )}
         {!carregando &&
-          grupos.map(({ tenant, gavetas, docs, qtdGavetas, vazio }) => (
+          visiveis.map(({ tenant, gavetas, docs, qtdGavetas, vazio }) => (
             <div key={tenant} className="rounded-cartao border border-borda bg-sup">
               {/* nível 1: o usuário (chave de login) */}
               <div className="flex flex-wrap items-baseline gap-x-2 gap-y-1 border-b border-borda/70 px-3.5 py-2.5">
@@ -252,6 +317,13 @@ export function Gavetas({
               </ul>
             </div>
           ))}
+        {!carregando && restantes > 0 && (
+          <div className="col-span-full flex justify-center pt-1">
+            <button id="gavMais" className="btn" onClick={() => setTodos(true)}>
+              mostrar mais {restantes} usuário(s)
+            </button>
+          </div>
+        )}
       </div>
     </section>
   );
