@@ -43,7 +43,9 @@ services:
       minirag-db:
         condition: service_healthy
     ports:
-      - "127.0.0.1:8001:8000"
+      # bind configurável: no host 127.0.0.1 basta; de dentro de outro
+      # container (CI/Hermes) use 0.0.0.0 e acesse pelo IP da ponte
+      - "${MINIRAG_TEST_BIND:-127.0.0.1}:${MINIRAG_TEST_PORT:-8001}:8000"
 
 volumes:
   miniragtest_data:
