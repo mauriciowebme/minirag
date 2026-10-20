@@ -16,17 +16,17 @@
   }
   body {
     @apply bg-bg text-txt font-sans antialiased;
-    font-size: 15px;
+    font-size: 14px;
     line-height: 1.55;
   }
   ::selection {
     background: var(--azul-suave);
   }
   h1 {
-    @apply text-[22px] tracking-[-0.2px];
+    @apply text-[20px] tracking-[-0.2px];
   }
   h2 {
-    @apply text-[17px] tracking-[-0.1px];
+    @apply text-[16px] tracking-[-0.1px];
   }
 }
 
@@ -54,7 +54,7 @@
       hover:border-vermelho hover:bg-[rgba(248,81,73,.2)];
   }
   .btn-mini {
-    @apply h-7 rounded-lg px-2.5 text-[12.5px];
+    @apply h-7 rounded-lg px-2.5 text-[13px];
   }
   /* papéis da barra de ações (mesma semântica da v1.11) */
   .btn-arquivar {
@@ -110,12 +110,12 @@
       text-[13px] text-txt3;
   }
   .vazio .tit {
-    @apply mb-1 text-[15px] font-semibold text-txt2;
+    @apply mb-1 text-[14px] font-semibold text-txt2;
   }
 
   /* --------------------------------------------------------------- tabelas */
   .tabela {
-    @apply w-full border-collapse text-[13.5px];
+    @apply w-full border-collapse text-[14px];
   }
   .tabela thead th {
     @apply border-b border-borda px-2.5 py-2 text-left text-[12px]
@@ -134,7 +134,7 @@
     @apply opacity-55;
   }
   .tcode {
-    @apply font-mono text-[12.5px] text-txt2;
+    @apply font-mono text-[13px] text-txt2;
   }
   .acoes-linha {
     @apply flex flex-wrap justify-end gap-1.5;
@@ -143,7 +143,7 @@
   /* ------------------------------------------------------------------ tags */
   .tag {
     @apply inline-flex items-center gap-1 rounded-full border px-2 py-0.5
-      text-[11.5px] font-medium;
+      text-[12px] font-medium;
   }
   .tag-ativo {
     @apply border-[rgba(63,185,80,.35)] bg-[color:var(--verde-suave)] text-verde;
@@ -162,7 +162,7 @@
   }
   .chip {
     @apply inline-flex items-center rounded-full border border-borda bg-sup2
-      px-2 py-0.5 text-[11.5px] text-txt3;
+      px-2 py-0.5 text-[12px] text-txt3;
   }
   .chip-op {
     @apply border-[rgba(108,182,255,.35)] bg-[color:var(--azul-suave)] text-azul;
@@ -193,7 +193,7 @@
     @apply font-mono text-[12px] text-txt3;
   }
   .hit .x {
-    @apply m-0 whitespace-pre-wrap text-[13.5px] text-txt2;
+    @apply m-0 whitespace-pre-wrap text-[14px] text-txt2;
   }
 
   /* --------------------------------------------------------------- prévia */
@@ -201,19 +201,19 @@
     @apply min-h-[52vh] rounded-campo border border-borda bg-sup p-4 text-[14px];
   }
   .previa h1 {
-    @apply mb-2 mt-3 text-[19px];
+    @apply mb-2 mt-3 text-[20px];
   }
   .previa h2 {
     @apply mb-2 mt-3 text-[16px];
   }
   .previa h3 {
-    @apply mb-1.5 mt-2.5 text-[14.5px];
+    @apply mb-1.5 mt-2.5 text-[14px];
   }
   .previa pre {
-    @apply overflow-x-auto rounded-campo bg-[#0c1017] p-3 font-mono text-[12.5px];
+    @apply overflow-x-auto rounded-campo bg-[#0c1017] p-3 font-mono text-[13px];
   }
   .previa code {
-    @apply rounded bg-[#0c1017] px-1 py-0.5 font-mono text-[12.5px];
+    @apply rounded bg-[#0c1017] px-1 py-0.5 font-mono text-[13px];
   }
   .previa a {
     @apply text-azul underline;
@@ -223,7 +223,7 @@
   .toast {
     @apply pointer-events-none fixed bottom-5 left-1/2 z-50 -translate-x-1/2
       translate-y-3 rounded-campo border border-bordaforte bg-sup3 px-4 py-2.5
-      text-[13.5px] opacity-0 shadow-painel transition-all duration-200;
+      text-[14px] opacity-0 shadow-painel transition-all duration-200;
   }
   .toast-ver {
     @apply translate-y-0 opacity-100;
@@ -232,6 +232,17 @@
 
 /* Celular: a tabela vira cartão com rótulo por célula (mesma regra da v1.11). */
 @media (max-width: 720px) {
+  /* Alvo de toque: 44px de altura mínima (padrão de dedo em tela pequena). */
+  .btn,
+  .aba,
+  .btn-mini,
+  .campo {
+    height: auto;
+    min-height: 44px;
+  }
+  .aba {
+    @apply px-3.5;
+  }
   .tabela thead {
     @apply hidden;
   }
@@ -243,12 +254,16 @@
   }
   .tabela tbody td::before {
     content: attr(data-rot);
-    @apply mr-auto text-[11.5px] uppercase tracking-[0.4px] text-txt3;
+    @apply mr-auto text-[12px] uppercase tracking-[0.4px] text-txt3;
   }
   .tabela tbody td:not([data-rot])::before {
     content: "";
   }
   .acoes-linha {
     @apply justify-end;
+  }
+  /* Célula sem conteúdo não vira linha no cartão (ex.: ERRO vazio). */
+  .tabela tbody td.celula-vazia {
+    display: none;
   }
 }

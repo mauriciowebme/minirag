@@ -78,7 +78,7 @@ export default function App() {
   return (
     <div className="min-h-screen">
       <header className="sticky top-0 z-20 flex flex-wrap items-center gap-x-[18px] gap-y-1.5 border-b border-borda bg-sup/95 px-4 py-2.5 backdrop-blur sm:px-5">
-        <div className="flex items-baseline gap-2 whitespace-nowrap text-[15px] font-semibold tracking-[0.2px]">
+        <div className="flex items-baseline gap-2 whitespace-nowrap text-[14px] font-semibold tracking-[0.2px]">
           <span className="text-verde">◆</span> minirag
           <span className="text-[12px] font-normal text-txt3">painel de memória</span>
         </div>

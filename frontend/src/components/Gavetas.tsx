@@ -76,6 +76,7 @@ export function Gavetas({
         <h2>Mapa da memória</h2>
         <span className="flex-1" />
         <button id="btnAtualizarGav" className="btn btn-sutil" title="recarregar a lista" onClick={() => void carregar()}>
+          <span aria-hidden="true">⟳</span>
           atualizar
         </button>
         <button id="btnDecay" className="btn" title="arquiva documentos que ninguém usa há dias" onClick={() => void rodarDecay()}>
@@ -105,11 +106,11 @@ export function Gavetas({
               onClick={() => onAbrir(g.tenant, g.memoria)}
               onKeyDown={(e) => e.key === "Enter" && onAbrir(g.tenant, g.memoria)}
             >
-              <div className="mb-2 text-[15px] font-semibold">
+              <div className="mb-2 text-[14px] font-semibold">
                 {operador ? <span className="text-txt3">{g.tenant} ▸ </span> : null}
                 {g.memoria || "(padrão)"}
               </div>
-              <div className="mb-3 flex flex-wrap gap-2.5 text-[12.5px] text-txt3">
+              <div className="mb-3 flex flex-wrap gap-2.5 text-[13px] text-txt3">
                 <span>
                   <b className="text-txt2">{g.docs}</b> arquivo(s)
                 </span>

@@ -92,7 +92,7 @@ export function Buscar({
             className="accent-verde"
             onChange={(e) => setScore(Number(e.target.value))}
           />
-          <output id="busScoreOut" className="w-9 font-mono text-[12.5px] text-txt3">
+          <output id="busScoreOut" className="w-9 font-mono text-[13px] text-txt3">
             {score.toFixed(2)}
           </output>
         </label>

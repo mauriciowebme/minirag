@@ -89,7 +89,13 @@ export function Jobs({ tenant, nome, operador }: { tenant: string; nome: string;
           <option value="erro">erro</option>
           <option value="cancelado">cancelado</option>
         </select>
-        <button id="btnJobs" className="btn btn-sutil" onClick={() => void carregar(status)}>
+        <button
+          id="btnJobs"
+          className="btn"
+          title="recarregar a lista"
+          onClick={() => void carregar(status)}
+        >
+          <span aria-hidden="true">⟳</span>
           atualizar
         </button>
       </div>
@@ -145,8 +151,8 @@ export function Jobs({ tenant, nome, operador }: { tenant: string; nome: string;
                 <td className="num" data-rot="progresso">
                   {job.chunks_feitos}/{job.chunks_total}
                 </td>
-                <td data-rot="erro">
-                  <span className="text-[12.5px] text-vermelho" title={job.erro || ""}>
+                <td data-rot="erro" className={job.erro ? "" : "celula-vazia"}>
+                  <span className="text-[13px] text-vermelho" title={job.erro || ""}>
                     {job.erro || ""}
                   </span>
                 </td>
