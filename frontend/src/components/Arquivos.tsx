@@ -178,7 +178,7 @@ export function Arquivos({
         <h2>
           Arquivos{" "}
           <span id="arqOnde" className="sub2">
-            — {escopo.tenant || "—"} : {escopo.memoria || "(padrão)"}
+            {escopo.tenant ? `— 👤 ${escopo.tenant} ▸ gaveta ${escopo.memoria || "padrão"}` : ""}
           </span>
         </h2>
         <span className="flex-1" />
