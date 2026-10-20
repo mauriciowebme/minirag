@@ -22,7 +22,7 @@ function bool(name: string, def: boolean): boolean {
 }
 
 export const CONFIG = {
-  versao: "2.8.0",
+  versao: "2.8.1",
   model: process.env.MINIRAG_MODEL ?? "nomic-ai/nomic-embed-text-v1.5",
   modelDir: process.env.MINIRAG_MODEL_DIR ?? "/app/models",
 

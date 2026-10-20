@@ -131,11 +131,15 @@ export async function verProvider(user: Usuario, tenantArg?: string | null) {
   const tenant = tenantFor(user, tenantArg);
   const propria = await q<Linha>(`SELECT * FROM provider_config WHERE escopo = $1`, [tenant]);
   const global = await q<Linha>(`SELECT * FROM provider_config WHERE escopo = $1`, [GLOBAL]);
-  const l = propria.rows[0] ?? global.rows[0] ?? null;
+  /* regra v2.8: a linha própria só vale completa (base_url E modelo) — igual ao chat.
+     Linha própria pela metade não pode esconder do usuário o provider que está em uso. */
+  const completa = (l?: Linha | null) => Boolean(l && l.base_url && l.modelo);
+  const usaPropria = completa(propria.rows[0]) || !global.rows[0];
+  const l = (usaPropria ? propria.rows[0] : global.rows[0]) ?? propria.rows[0] ?? global.rows[0] ?? null;
   return {
     configurado: Boolean(l?.ativo && l?.base_url && l?.modelo),
     escopo: l?.escopo ?? null,
-    origem: propria.rows[0] ? "propria" : global.rows[0] ? "global" : null,
+    origem: usaPropria && propria.rows[0] ? "propria" : global.rows[0] ? "global" : null,
     tem_global: Boolean(global.rows[0]),
     tipo: l?.tipo ?? "litellm",
     base_url: l?.base_url ?? "",
