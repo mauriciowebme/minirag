@@ -144,7 +144,7 @@ test("minirag v2 — suíte completa", async (t) => {
 
     console.log("-- health e painel");
     const h = await call("GET", "/health");
-    f.check("health 200 + versao 2.7.0", h.status === 200 && h.json?.versao === "2.7.0", h.json);
+    f.check("health 200 + versao 2.8.0", h.status === 200 && h.json?.versao === "2.8.0", h.json);
     f.check("health operador ativo", h.json?.operador === true, h.json);
     f.check("health embedder ok", h.json?.embedder === "ok", h.json);
     const p = await call("GET", "/painel/");
@@ -361,12 +361,14 @@ test("minirag v2 — suíte completa", async (t) => {
       "list_docs",
       "list_gavetas",
       "list_jobs",
+      "listar_mcp",
       "listar_usuarios",
+      "gerir_mcp",
       "rename_doc",
       "search",
       "upload_file",
     ].sort();
-    f.check("tools/list tem 19 tools (paridade com a REST)", JSON.stringify(nomes) === JSON.stringify(ESPERADAS), nomes);
+    f.check("tools/list tem 21 tools (paridade com a REST)", JSON.stringify(nomes) === JSON.stringify(ESPERADAS.sort()), nomes.length);
 
     r = await rpc(5, "tools/call", { name: "health" }, null);
     f.check("tools/call sem Bearer -> 401", r.status === 401 && "error" in (r.json ?? {}), r.texto.slice(0, 150));
@@ -1051,9 +1053,9 @@ test("minirag v2 — suíte completa", async (t) => {
 
     r = await call("PUT", "/config/provider", {
       key: OPKEY,
-      corpo: { tipo: "litellm", base_url: provFalso || "http://127.0.0.1:9911/v1", modelo: "modelo-de-teste", chave: "sk-teste-1234", temperatura: 0.2, trechos: 4, ativo: true, global: true },
+      corpo: { tipo: "litellm", base_url: provFalso || "http://127.0.0.1:9911/v1", modelo: "modelo-de-teste", chave: "sk-teste-1234", temperatura: 0.2, system_prompt: "", max_rodadas: 3, ativo: true, global: true },
     });
-    f.check("salvar provider global", r.status === 200, r.texto.slice(0, 160));
+    f.check("salvar provider global", r.status === 200 && r.json?.tem_system_prompt === false, r.texto.slice(0, 160));
     f.check("resposta mascara a chave", r.json?.chave_mascarada === "••••1234" && !/sk-teste-1234/.test(r.texto), r.json?.chave_mascarada);
 
     r = await call("GET", "/config/provider", { key: TESTKEY });
@@ -1074,7 +1076,10 @@ test("minirag v2 — suíte completa", async (t) => {
 
       r = await call("POST", "/chat", { key: TESTKEY, corpo: { pergunta: "qual o total da nota fiscal do fornecedor AC ME?", memoria: GAV } });
       f.check("chat responde", r.status === 200 && /1\.234,56/.test(r.json?.resposta ?? ""), r.texto.slice(0, 200));
-      f.check("chat cita fontes com score", (r.json?.fontes ?? []).length >= 1 && typeof r.json?.fontes?.[0]?.score === "number", r.json?.fontes);
+      f.check("nada ligado = nenhuma ferramenta chamada", r.json?.ferramentas?.length === 0 && r.json?.ferramentas_ligadas === 0, {
+        ferramentas: r.json?.ferramentas,
+        ligadas: r.json?.ferramentas_ligadas,
+      });
 
       r = await call("GET", `/chat?memoria=${GAV}`, { key: TESTKEY });
       f.check("histórico guarda pergunta e resposta", r.status === 200 && (r.json?.mensagens ?? []).length === 2, (r.json?.mensagens ?? []).length);
@@ -1093,7 +1098,7 @@ test("minirag v2 — suíte completa", async (t) => {
     /* sem provider o chat recusa com mensagem clara */
     r = await call("PUT", "/config/provider", {
       key: OPKEY,
-      corpo: { tipo: "litellm", base_url: "http://127.0.0.1:9911/v1", modelo: "modelo-de-teste", temperatura: 0.2, trechos: 4, ativo: false, global: true },
+      corpo: { tipo: "litellm", base_url: "http://127.0.0.1:9911/v1", modelo: "modelo-de-teste", temperatura: 0.2, max_rodadas: 3, ativo: false, global: true },
     });
     f.check("provider desligado", r.status === 200, r.texto.slice(0, 120));
     r = await call("POST", "/chat", { key: TESTKEY, corpo: { pergunta: "qualquer coisa", memoria: GAV } });
@@ -1104,6 +1109,241 @@ test("minirag v2 — suíte completa", async (t) => {
     await call("DELETE", `/gavetas/${GAV}`, { key: TESTKEY });
 
     f.fechar("v2.7 painel/usuarios/chat");
+  });
+
+  await t.test("v2.8: instruções do modelo, ferramentas MCP e servidores externos", async () => {
+    const f = fiscal();
+    const CONTAINER = process.env.CONTAINER ?? "";
+    const GAV = "suite-v28";
+    if (!CONTAINER || !OPKEY) {
+      f.check("v2.8 precisa do container (provider e MCP falsos dentro dele)", true, "sem CONTAINER: bloco não executável");
+      f.fechar("v2.8 (pulada)");
+      return;
+    }
+
+    /* provider OpenAI-compatível falso, com modos por nome de modelo */
+    const codProv = [
+      "const http=require('http');",
+      "const s=http.createServer((req,res)=>{let b='';req.on('data',c=>b+=c);req.on('end',()=>{",
+      "let b0={};try{b0=JSON.parse(b||'{}');}catch(e){}",
+      "const m=b0.messages||[];const tools=b0.tools||[];const nome=b0.model||'';",
+      "res.setHeader('content-type','application/json');",
+      "const diz=(texto)=>res.end(JSON.stringify({choices:[{message:{role:'assistant',content:texto}}]}));",
+      "const pede=(id,fn,arg)=>res.end(JSON.stringify({choices:[{message:{role:'assistant',content:'PEDINDO',tool_calls:[{id:id,type:'function',function:{name:fn,arguments:arg}}]}}]}));",
+      "if(nome==='eco'){return diz(JSON.stringify({roles:m.map(x=>x.role),ntools:tools.length,sys:(m[0]&&m[0].role==='system')?String(m[0].content).slice(0,60):null}));}",
+      "if(nome==='agente'){",
+      "if(tools.length&&m.length===1){const ns=tools.map(x=>x.function.name);const alvo=ns.indexOf('search')>=0?'search':ns[0];",
+      "return pede('c1',alvo,alvo==='search'?'{\"query\":\"nota fiscal\",\"k\":3}':'{\"texto\":\"oi do chat\"}');}",
+      "const t=m.filter(x=>x.role==='tool');return diz(t.length?('USEI:'+String(t[0].content).slice(0,90)):'SEM_FERRAMENTA');}",
+      "if(nome==='parcial'){if(tools.length)return pede('p'+m.length,tools[0].function.name,'{}');return diz('SEM_TOOLS');}",
+      "if(nome==='usuario'){",
+      "if(m.length===1)return pede('u1','criar_usuario','{\"nome\":\"suite-segredo\",\"papel\":\"usuario\"}');",
+      "return diz('CRIEI o usuario; a chave dele nao mostro aqui');}",
+      "diz('resposta do provider falso');});});",
+      "s.listen(9913,'127.0.0.1');setTimeout(()=>process.exit(0),240000);",
+    ].join("");
+    /* servidor MCP falso: initialize / tools/list / tools/call */
+    const codMcp = [
+      "const http=require('http');",
+      "const s=http.createServer((req,res)=>{let b='';req.on('data',c=>b+=c);req.on('end',()=>{",
+      "let j={};try{j=JSON.parse(b||'{}');}catch(e){}",
+      "res.setHeader('content-type','application/json');",
+      "if(j.method==='initialize')return res.end(JSON.stringify({jsonrpc:'2.0',id:j.id,result:{protocolVersion:'2025-03-10',capabilities:{tools:{}},serverInfo:{name:'fake-mcp',version:'1.0'}}}));",
+      "if(j.method==='notifications/initialized'){res.statusCode=202;return res.end('');}",
+      "if(j.method==='tools/list')return res.end(JSON.stringify({jsonrpc:'2.0',id:j.id,result:{tools:[{name:'eco',description:'devolve o texto',inputSchema:{type:'object',properties:{texto:{type:'string'}}}}]}}));",
+      "if(j.method==='tools/call'){const a=(j.params&&j.params.arguments)||{};return res.end(JSON.stringify({jsonrpc:'2.0',id:j.id,result:{content:[{type:'text',text:'ECHO:'+(a.texto||'vazio')}]}}));}",
+      "res.end(JSON.stringify({jsonrpc:'2.0',id:j.id,error:{code:-32601,message:'metodo nao suportado'}}));});});",
+      "s.listen(9912,'127.0.0.1');setTimeout(()=>process.exit(0),240000);",
+    ].join("");
+    execFileSync("docker", ["exec", "-d", CONTAINER, "node", "-e", codProv]);
+    execFileSync("docker", ["exec", "-d", CONTAINER, "node", "-e", codMcp]);
+    await dormir(1500);
+
+    let r = await call("POST", "/ingest", {
+      key: TESTKEY,
+      corpo: { doc_id: "suite-v28-nota", content: "Nota fiscal 5512 da empresa Beta. Total R$ 9.876,54 com vencimento em 05/12/2026.", memoria: GAV },
+    });
+    let job = await esperarJob(TESTKEY, r.json?.job_id);
+    f.check("documento da v2.8 indexado", job.status === "concluido", job);
+
+    const provedor = (corpo: Record<string, unknown>) =>
+      call("PUT", "/config/provider", {
+        key: OPKEY,
+        corpo: {
+          tipo: "litellm",
+          base_url: "http://127.0.0.1:9913/v1",
+          modelo: "eco",
+          temperatura: 0,
+          system_prompt: "",
+          mcp_interno: false,
+          max_rodadas: 3,
+          ativo: true,
+          global: true,
+          ...corpo,
+        },
+      });
+
+    /* ---- 1. provider é o único pré-requisito; sem prompt = conversa pura ---- */
+    r = await provedor({});
+    f.check("provider salvo sem instruções", r.status === 200 && r.json?.tem_system_prompt === false && r.json?.mcp_interno === false, r.texto.slice(0, 160));
+
+    r = await call("POST", "/chat", { key: TESTKEY, corpo: { pergunta: "oi", memoria: GAV } });
+    let eco = (() => {
+      try {
+        return JSON.parse(r.json?.resposta ?? "{}");
+      } catch {
+        return {};
+      }
+    })();
+    f.check("sem prompt: o modelo recebe só a pergunta, sem system", eco.roles?.join(",") === "user" && eco.sys === null, eco);
+    f.check("sem MCP ligado: nenhuma ferramenta vai no pedido", eco.ntools === 0 && r.json?.ferramentas_ligadas === 0, { eco, ligadas: r.json?.ferramentas_ligadas });
+    f.check("sem ferramenta: resposta sai em 1 rodada", r.json?.rodadas === 1 && (r.json?.ferramentas ?? []).length === 0, { rodadas: r.json?.rodadas });
+
+    /* ---- 2. system prompt livre ---- */
+    r = await provedor({ system_prompt: "Responda como um pirata, em uma linha." });
+    f.check("instruções salvas", r.status === 200 && r.json?.tem_system_prompt === true && /pirata/.test(r.json?.system_prompt ?? ""), r.texto.slice(0, 160));
+    r = await call("POST", "/chat", { key: TESTKEY, corpo: { pergunta: "oi de novo", memoria: GAV } });
+    eco = (() => {
+      try {
+        return JSON.parse(r.json?.resposta ?? "{}");
+      } catch {
+        return {};
+      }
+    })();
+    f.check("prompt vai como system na frente do pedido", eco.roles?.[0] === "system" && /pirata/.test(String(eco.sys)), eco);
+
+    /* ---- 3. MCP interno ligado dá as ferramentas ao chat ---- */
+    r = await call("POST", "/mcp", { key: TESTKEY, corpo: { jsonrpc: "2.0", id: 900, method: "tools/list" } });
+    const totalMcp = (r.json?.result?.tools ?? []).length;
+    r = await provedor({ mcp_interno: true, system_prompt: "" });
+    f.check("botão do MCP interno salva", r.status === 200 && r.json?.mcp_interno === true, r.texto.slice(0, 120));
+    r = await call("POST", "/chat", { key: TESTKEY, corpo: { pergunta: "oi com ferramentas", memoria: GAV } });
+    eco = (() => {
+      try {
+        return JSON.parse(r.json?.resposta ?? "{}");
+      } catch {
+        return {};
+      }
+    })();
+    f.check("ferramentas do minirag vão no pedido (sem o próprio chat)", eco.ntools === totalMcp - 1, { enviado: eco.ntools, no_mcp: totalMcp });
+
+    /* ---- 4. agente: o modelo pede ferramenta, ela executa direto, e volta na resposta ---- */
+    r = await provedor({ modelo: "agente", mcp_interno: true });
+    f.check("mcp interno ligado antes do teste de agente", r.json?.mcp_interno === true, r.texto.slice(0, 120));
+    r = await call("POST", "/chat", { key: TESTKEY, corpo: { pergunta: "quanto é a nota da beta?", memoria: GAV } });
+    const chamada1 = (r.json?.ferramentas ?? [])[0] ?? {};
+    f.check("chat executou search do minirag sem pedir confirmação", r.status === 200 && chamada1.servidor === "minirag" && chamada1.nome === "search" && chamada1.ok === true, chamada1);
+    f.check("a gaveta da tela entra na busca feita pelo modelo", chamada1.args?.memoria === GAV, chamada1.args);
+    f.check("a busca achou o documento da gaveta", /9\.876,54|suite-v28-nota/.test(String(chamada1.resumo)), String(chamada1.resumo).slice(0, 120));
+    f.check("resposta usa o resultado da ferramenta", /^USEI:/.test(r.json?.resposta ?? "") && r.json?.rodadas === 2, { resposta: r.json?.resposta?.slice(0, 90), rodadas: r.json?.rodadas });
+
+    r = await call("GET", `/chat?memoria=${GAV}`, { key: TESTKEY });
+    const guardada = (r.json?.mensagens ?? []).slice().reverse().find((m: any) => m.ferramentas?.length) ?? {};
+    f.check("histórico registra a ferramenta chamada", guardada.ferramentas?.[0]?.nome === "search" && guardada.ferramentas[0].servidor === "minirag", guardada.ferramentas);
+
+    /* ---- 5. trava de rodadas ---- */
+    r = await provedor({ modelo: "parcial", max_rodadas: 1, mcp_interno: true });
+    r = await call("POST", "/chat", { key: TESTKEY, corpo: { pergunta: "loop", memoria: GAV } });
+    f.check("limite de rodadas corta o loop", r.status === 200 && (r.json?.ferramentas ?? []).length === 1 && /limite de 1 rodada/.test(r.json?.aviso ?? ""), {
+      chamadas: (r.json?.ferramentas ?? []).length,
+      aviso: r.json?.aviso,
+    });
+
+    r = await provedor({ modelo: "eco", max_rodadas: 0, mcp_interno: true });
+    r = await call("POST", "/chat", { key: TESTKEY, corpo: { pergunta: "oi sem rodada", memoria: GAV } });
+    eco = (() => {
+      try {
+        return JSON.parse(r.json?.resposta ?? "{}");
+      } catch {
+        return {};
+      }
+    })();
+    f.check("0 rodadas = nenhuma ferramenta oferecida", eco.ntools === 0, eco);
+
+    /* ---- 6. ferramenta que cria usuário: roda direto e o segredo não fica registrado ---- */
+    r = await provedor({ modelo: "usuario", max_rodadas: 3, mcp_interno: true });
+    r = await call("POST", "/chat", { key: OPKEY, corpo: { pergunta: "crie um usuario novo", memoria: GAV } });
+    const chamada2 = (r.json?.ferramentas ?? [])[0] ?? {};
+    f.check("chat criou usuário de verdade (execução direta)", chamada2.nome === "criar_usuario" && chamada2.ok === true, chamada2);
+    r = await call("GET", "/usuarios", { key: OPKEY });
+    f.check("usuário criado pelo chat existe", (r.json?.usuarios ?? []).some((u: any) => u.nome === "suite-segredo"), (r.json?.usuarios ?? []).map((u: any) => u.nome));
+    r = await call("GET", `/chat?memoria=${GAV}`, { key: OPKEY });
+    const achada = await call("POST", "/chat", { key: OPKEY, corpo: { pergunta: "mostre a chave criada", memoria: GAV } });
+    const registrada = JSON.stringify(achada.json?.ferramentas ?? []);
+    f.check("o registro da ferramenta não devolve chave em claro", !/mr_[A-Za-z0-9_-]{8,}/.test(registrada), registrada.slice(0, 160));
+    await call("DELETE", "/usuarios/suite-segredo", { key: OPKEY });
+
+    /* ---- 7. servidor MCP externo cadastrado por endereço ---- */
+    const TOKEN = ["sk", "suite", Date.now().toString(36), "qz7x1v9b3n4k2m"].join("-");
+    r = await call("POST", "/config/mcp", { key: TESTKEY, corpo: { nome: "fake", url: "http://127.0.0.1:9912/mcp" } });
+    f.check("usuário comum não cadastra MCP -> 403", r.status === 403, r.status);
+
+    r = await call("POST", "/config/mcp", { key: OPKEY, corpo: { nome: "fake", url: "http://127.0.0.1:9912/mcp", cabecalho: "Authorization: Bearer " + TOKEN } });
+    f.check("cadastrar MCP já lista as ferramentas dele", r.status === 200 && r.json?.ferramentas === 1 && r.json?.nomes?.[0] === "fake__eco", r.texto.slice(0, 200));
+
+    r = await call("GET", "/config/mcp", { key: TESTKEY });
+    const srv = (r.json?.servidores ?? []).find((s: any) => s.nome === "fake") ?? {};
+    f.check("cabeçalho de acesso nunca volta em claro", srv.tem_cabecalho === true && !r.texto.includes(TOKEN) && srv.cabecalho_mascarado === "••••" + TOKEN.slice(-4), srv);
+
+    r = await provedor({ modelo: "agente", mcp_interno: false, max_rodadas: 3 });
+    r = await call("POST", "/chat", { key: TESTKEY, corpo: { pergunta: "usa a ferramenta de fora", memoria: GAV } });
+    const chamada3 = (r.json?.ferramentas ?? [])[0] ?? {};
+    f.check("ferramenta veio do servidor externo", chamada3.servidor === "fake" && chamada3.nome === "eco" && chamada3.ok === true, chamada3);
+    f.check("resposta usa o eco do servidor externo", /^USEI:ECHO:oi do chat/.test(r.json?.resposta ?? ""), (r.json?.resposta ?? "").slice(0, 80));
+    f.check("uma ferramenta externa ligada = uma oferecida", r.json?.ferramentas_ligadas === 1, r.json?.ferramentas_ligadas);
+
+    r = await call("POST", "/config/mcp/testar", { key: OPKEY, corpo: { nome: "fake" } });
+    f.check("testar servidor MCP responde com latência", r.status === 200 && r.json?.ferramentas === 1 && r.json?.servidor === "fake-mcp" && r.json?.ms >= 0, r.texto.slice(0, 160));
+
+    r = await call("PATCH", "/config/mcp/fake", { key: OPKEY, corpo: { ativo: false } });
+    f.check("desligar servidor MCP", r.status === 200 && r.json?.ativo === false, r.texto.slice(0, 120));
+    r = await call("POST", "/chat", { key: TESTKEY, corpo: { pergunta: "agora sem ferramenta", memoria: GAV } });
+    f.check("desligado, o chat fica sem ferramenta nenhuma", (r.json?.ferramentas ?? []).length === 0 && r.json?.ferramentas_ligadas === 0, { ligadas: r.json?.ferramentas_ligadas });
+
+    r = await call("DELETE", "/config/mcp/fake", { key: OPKEY });
+    f.check("apagar servidor MCP", r.status === 200 && r.json?.removido === true, r.texto.slice(0, 120));
+    r = await call("DELETE", "/config/mcp/nao-existe", { key: OPKEY });
+    f.check("apagar MCP inexistente -> 404", r.status === 404, r.status);
+
+    /* ---- 8. linha própria pela metade não tapa o padrão global ---- */
+    r = await call("PUT", "/config/provider", { key: TESTKEY, corpo: { tipo: "litellm", base_url: "http://127.0.0.1:1/v1", modelo: "", ativo: false } });
+    f.check("linha própria incompleta aceita (desligada)", r.status === 200, r.texto.slice(0, 140));
+    r = await provedor({ modelo: "eco", global: true });
+    f.check("provider global de volta", r.status === 200 && r.json?.configurado === true, r.texto.slice(0, 140));
+    r = await call("POST", "/chat", { key: TESTKEY, corpo: { pergunta: "a global ainda funciona?", memoria: GAV } });
+    f.check("incompleta não tapa a global: chat responde", r.status === 200 && /roles/.test(r.json?.resposta ?? ""), r.texto.slice(0, 140));
+
+    /* ---- 9. o MCP também cadastra e apaga MCP ---- */
+    r = await call("POST", "/mcp", {
+      key: OPKEY,
+      corpo: { jsonrpc: "2.0", id: 901, method: "tools/call", params: { name: "gerir_mcp", arguments: { acao: "criar", nome: "via-mcp", url: "http://127.0.0.1:9912/mcp" } } },
+    });
+    const textoCriar = r.json?.result?.content?.[0]?.text ?? "";
+    f.check("tool MCP gerir_mcp cria servidor", !r.json?.result?.isError && /"ferramentas":1/.test(textoCriar.replace(/\s/g, "")), textoCriar.slice(0, 160));
+
+    r = await call("POST", "/mcp", { key: OPKEY, corpo: { jsonrpc: "2.0", id: 902, method: "tools/call", params: { name: "listar_mcp", arguments: {} } } });
+    const textoLista = r.json?.result?.content?.[0]?.text ?? "";
+    f.check("tool MCP listar_mcp mostra os servidores", !r.json?.result?.isError && /via-mcp/.test(textoLista), textoLista.slice(0, 200));
+
+    r = await call("POST", "/mcp", {
+      key: TESTKEY,
+      corpo: { jsonrpc: "2.0", id: 903, method: "tools/call", params: { name: "gerir_mcp", arguments: { acao: "apagar", nome: "via-mcp" } } },
+    });
+    f.check("usuário comum não gerencia MCP pela tool", (r.json?.result?.isError ?? false) && /403/.test(r.json?.result?.content?.[0]?.text ?? ""), r.json?.result);
+
+    r = await call("POST", "/mcp", {
+      key: OPKEY,
+      corpo: { jsonrpc: "2.0", id: 904, method: "tools/call", params: { name: "gerir_mcp", arguments: { acao: "apagar", nome: "via-mcp" } } },
+    });
+    f.check("tool MCP apaga servidor", !r.json?.result?.isError && /removido/.test(r.json?.result?.content?.[0]?.text ?? ""), r.json?.result?.content?.[0]?.text);
+
+    /* ---- limpeza ---- */
+    r = await call("PUT", "/config/provider", { key: OPKEY, corpo: { tipo: "litellm", base_url: "http://127.0.0.1:9913/v1", modelo: "eco", system_prompt: "", max_rodadas: 3, ativo: false, global: true } });
+    f.check("provider desligado no fim", r.status === 200 && r.json?.configurado === false, r.texto.slice(0, 120));
+    await call("DELETE", `/gavetas/${GAV}`, { key: TESTKEY });
+    await call("DELETE", `/chat?memoria=${GAV}`, { key: OPKEY });
+
+    f.fechar("v2.8 prompt/MCP interno/externo/rodadas/segredo");
   });
 
   await t.test("freio de força bruta (último: bloqueia o IP)", async () => {
