@@ -1,5 +1,5 @@
-# RAG service — Postgres(pgvector) + FastAPI + nomic-embed-text-v1.5
-# 2 containers: minirag-db (banco) + minirag-api (serviço, porta local por padrão)
+# RAG service v2 — Postgres(pgvector) + Node/TypeScript (embedder Python dentro)
+# 2 containers: minirag-db (banco) + minirag-api (serviço: Node + Python filho)
 #
 # Acesso: domínio público via Traefik do Dokploy (minirag.techupsistemas.com,
 # HTTPS) + ports locais 127.0.0.1 e tailnet no api (ver seção ports:).
@@ -66,6 +66,10 @@ services:
       MINIRAG_DECAY_MIN_ACESSOS: ${MINIRAG_DECAY_MIN_ACESSOS:-2}
       MINIRAG_DECAY_INTERVALO_MINUTOS: ${MINIRAG_DECAY_INTERVALO_MINUTOS:-60}
       MINIRAG_USERS: ${MINIRAG_USERS:-}
+      # v2: embedder Python roda DENTRO deste container, em 127.0.0.1:8001
+      # (filho do Node). "externo" só para desenvolvimento fora do Docker.
+      MINIRAG_EMBEDDER_MODO: ${MINIRAG_EMBEDDER_MODO:-filho}
+      MINIRAG_EMBEDDER_PORT: ${MINIRAG_EMBEDDER_PORT:-8001}
       # v1.8: chave(s) de operador "nome:chave" — veem TODAS as gavetas e
       # operam em tenant alheio (?tenant=). Login comum permanece por-tenant.
       MINIRAG_OPERADOR: ${MINIRAG_OPERADOR:-}
@@ -74,8 +78,8 @@ services:
       minirag-db:
         condition: service_healthy
     healthcheck:
-      test: ["CMD", "python", "-c",
-             "import urllib.request;urllib.request.urlopen('http://localhost:8000/health')"]
+      test: ["CMD", "node", "-e",
+             "fetch('http://127.0.0.1:8000/health').then(r=>process.exit(r.ok?0:1)).catch(()=>process.exit(1))"]
       interval: 15s
       timeout: 5s
       retries: 12

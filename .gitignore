@@ -5,3 +5,8 @@ __pycache__/
 .pytest_cache/
 .venv/
 *.log
+node_modules/
+dist/
+painel/app.js
+tests-dist/
+.hermes/
