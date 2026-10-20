@@ -58,15 +58,22 @@ export function Gavetas({
     }
   }
 
-  async function rodarDecay() {
-    const alvo = operador ? "TODOS os tenants (global)" : "só o teu tenant";
-    if (!confirm(`Rodar decay agora sobre ${alvo}?`)) return;
+  async function arquivarEsquecidos() {
+    const alvo = operador ? "todas as gavetas" : "a tua gaveta";
+    const ok = confirm(
+      `Arquivar os documentos sem uso há 30 dias ou mais em ${alvo}?\n\n` +
+        "Nada é apagado: eles só saem da busca e podem ser revividos depois.",
+    );
+    if (!ok) return;
     try {
       const r = await post<DecayResp>("/decay");
-      toast(`decay: ${r.docs_arquivados_agora} doc(s) arquivados agora · ativos ${r.ativos} · arquivados ${r.arquivados}`);
+      toast(
+        `${r.docs_arquivados_agora} documento(s) arquivado(s) agora · ` +
+          `${r.ativos} ativo(s) · ${r.arquivados} arquivado(s)`,
+      );
       void carregar();
     } catch (e) {
-      toast("decay: " + (e as Error).message);
+      toast("não deu para arquivar: " + (e as Error).message);
     }
   }
 
@@ -79,8 +86,13 @@ export function Gavetas({
           <span aria-hidden="true">⟳</span>
           atualizar
         </button>
-        <button id="btnDecay" className="btn" title="arquiva documentos que ninguém usa há dias" onClick={() => void rodarDecay()}>
-          rodar decay
+        <button
+          id="btnDecay"
+          className="btn"
+          title="arquiva (sem apagar) os documentos sem uso há 30 dias ou mais — padrão, ajustável"
+          onClick={() => void arquivarEsquecidos()}
+        >
+          arquivar esquecidos
         </button>
       </div>
 

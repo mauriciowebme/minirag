@@ -299,6 +299,10 @@ outros logins nem de outras gavetas.
 
 ### `POST /decay` — rodar o "esquecimento" agora
 
+> No painel, a ação aparece como **"arquivar esquecidos"** (nome de tela).
+> O endereço `/decay`, o campo `decay` dos JSONs e as variáveis `MINIRAG_DECAY_*`
+> continuam como estão — só o texto que o usuário vê mudou.
+
 O serviço já roda o decay sozinho a cada `MINIRAG_DECAY_INTERVALO_MINUTOS`.
 Este endpoint força a execução na hora (útil pra teste/operação manual).
 
@@ -375,7 +379,7 @@ Tailwind**, compilado para `frontend/dist` e servido em `/painel/`; sem segundo
 container, sem CORS extra). Tela de login: nome da
 chave + segredo (sessão só em `sessionStorage` — fecha a aba, sumiu). Quem
 loga com chave comum vê só as próprias gavetas; com a operador vê o mapa
-inteiro. Telas: **Gavetas** (mapa + botão decay) → **Arquivos** (lista,
+inteiro. Telas: **Gavetas** (mapa + botão "arquivar esquecidos") → **Arquivos** (lista,
 upload .txt/.md, download, apagar) → **Editor** (abre a fonte, salva →
 reindexa com progresso ao vivo) → **Buscar** (teste de score, incluir
 arquivados) → **Fila** (jobs por status).
