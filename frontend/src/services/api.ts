@@ -51,6 +51,46 @@ export function post<T>(caminho: string, corpo?: unknown): Promise<T> {
   return api<T>(caminho, { method: "POST", body: JSON.stringify(corpo ?? {}) });
 }
 
+/** POST que lê um fluxo de eventos (SSE) e chama `onEvento` para cada `data:`.
+ *  Usado pelo chat com streaming; erros antes do fluxo chegam como ApiErro normal. */
+export async function postStream(caminho: string, corpo: unknown, onEvento: (e: any) => void): Promise<void> {
+  const r = await fetch(caminho, {
+    method: "POST",
+    headers: cabecalhos(true),
+    body: JSON.stringify(corpo ?? {}),
+  });
+  if (!r.ok) {
+    let detalhe = `${r.status} ${r.statusText}`;
+    try {
+      const j = (await r.json()) as { detail?: string };
+      if (j.detail) detalhe = j.detail;
+    } catch {
+      /* corpo não-JSON */
+    }
+    throw new ApiErro(r.status, detalhe);
+  }
+  if (!r.body) throw new ApiErro(r.status, "o servidor respondeu sem corpo");
+  const leitor = r.body.getReader();
+  const dec = new TextDecoder();
+  let sobra = "";
+  for (;;) {
+    const { done, value } = await leitor.read();
+    if (done) break;
+    sobra += dec.decode(value, { stream: true });
+    const blocos = sobra.split("\n\n");
+    sobra = blocos.pop() ?? "";
+    for (const bloco of blocos) {
+      const linha = bloco.split("\n").find((l) => l.startsWith("data:"));
+      if (!linha) continue;
+      try {
+        onEvento(JSON.parse(linha.slice(5).trim()));
+      } catch {
+        /* comentário de manutenção (: ping) ou payload quebrado */
+      }
+    }
+  }
+}
+
 export function patch<T>(caminho: string, corpo: unknown): Promise<T> {
   return api<T>(caminho, { method: "PATCH", body: JSON.stringify(corpo) });
 }

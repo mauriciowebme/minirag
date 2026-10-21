@@ -376,6 +376,90 @@
   .fonte b {
     @apply font-medium text-azul;
   }
+  /* resposta do chat em markdown (renderizado) */
+  .msg-ia .md {
+    @apply whitespace-normal;
+  }
+  .msg-ia .md > *:first-child {
+    @apply mt-0;
+  }
+  .msg-ia .md p {
+    @apply my-2;
+  }
+  .msg-ia .md h1,
+  .msg-ia .md h2,
+  .msg-ia .md h3,
+  .msg-ia .md h4 {
+    @apply mb-1.5 mt-3 font-medium text-txt;
+  }
+  .msg-ia .md h1 {
+    @apply text-[16px];
+  }
+  .msg-ia .md h2,
+  .msg-ia .md h3,
+  .msg-ia .md h4 {
+    @apply text-[14px];
+  }
+  .msg-ia .md ul,
+  .msg-ia .md ol {
+    @apply my-2 pl-5;
+  }
+  .msg-ia .md ul {
+    list-style: disc;
+  }
+  .msg-ia .md ol {
+    @apply list-decimal;
+  }
+  .msg-ia .md li {
+    @apply my-1;
+  }
+  .msg-ia .md li > ul,
+  .msg-ia .md li > ol {
+    @apply my-1;
+  }
+  .msg-ia .md code {
+    @apply rounded bg-[#0c1017] px-1 py-0.5 font-mono text-[13px];
+  }
+  .msg-ia .md pre {
+    @apply my-2 overflow-x-auto rounded-campo bg-[#0c1017] p-3 font-mono text-[13px] whitespace-pre;
+  }
+  .msg-ia .md blockquote {
+    @apply my-2 border-l-2 border-borda pl-3 text-txt2;
+  }
+  .msg-ia .md hr {
+    @apply my-3 border-borda;
+  }
+  .msg-ia .md a {
+    @apply text-azul underline;
+  }
+  .msg-ia .md table {
+    @apply my-2 w-full border-collapse text-[13px];
+  }
+  .msg-ia .md th,
+  .msg-ia .md td {
+    @apply border border-borda px-2 py-1 text-left align-top;
+  }
+  .msg-ia .md th {
+    @apply bg-sup3 font-medium text-txt;
+  }
+  .rola {
+    @apply overflow-x-auto;
+  }
+
+  /* cursor de digitação enquanto a resposta chega em pedaços */
+  .msg-ia .md.vivo::after {
+    content: "\258D";
+    margin-left: 2px;
+    color: var(--verde);
+    animation: piscar 1s steps(1) infinite;
+  }
+
+  @keyframes piscar {
+    50% {
+      opacity: 0;
+    }
+  }
+
 
   /* configurações */
   .grade-cfg {
