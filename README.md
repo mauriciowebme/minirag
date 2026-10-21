@@ -53,6 +53,25 @@ parecidos com a pergunta, com uma nota de 0 a 1.
   seguindo a navegação (usuário → arquivos → editor mantém "Usuários/Gavetas" aceso).
 - **Versão**: `3.2.2`.
 
+### v3.2.3 — cadastro de usuário: só o admin vem do ambiente, o resto nasce na tela
+
+- **Política decidida pelo dono (21/10)**: a única conta criada por variável de ambiente é a
+  do **admin** (`MINIRAG_OPERADOR`). Usuário comum é cadastrado **dentro da plataforma**, na
+  tela **Usuários**, pelo admin — `POST /usuarios` já existia desde a v2.7; aqui muda o uso,
+  não o código. Auto-cadastro (pessoa se inscreve sozinha) foi avaliado e **não** é objetivo:
+  cada usuário é um tenant isolado com chave própria.
+- **Guarda nova no apagar**: `DELETE /usuarios/:nome` agora responde `409`
+  (`este e o ultimo operador ativo: crie outro antes de apagar`) quando se tenta apagar o
+  último operador ativo. A guarda já existia no `PATCH` (desativar/rebaixar); faltava no
+  `DELETE` — e com o `MINIRAG_USERS` vazio isso viraria **trancamento sem volta**, porque não
+  haveria mais semente no ambiente para recriar o admin no boot seguinte.
+- **Efeito colateral desejado**: usuário criado pela tela não existe no env, então **deixa de
+  voltar** no deploy seguinte. Antes, um usuário apagado que ainda constasse em `MINIRAG_USERS`
+  era recriado no boot, com a chave antiga (o seed é `ON CONFLICT DO NOTHING`).
+- **Ação pendente do dono (no painel Dokploy)**: esvaziar `MINIRAG_USERS` em produção.
+
+- **Versão**: `3.2.3`.
+
 ---
 
 ## v3.1 — A conversa para de puxar a tela e o recomeçar desceu para o pé (21/10/2026)
@@ -977,7 +996,7 @@ SO_BLOCOS="v3.2" npm test    # só os blocos afetados, antes de pedir OK do depl
 npm test                     # suíte COMPLETA, uma vez antes do push
 ```
 
-A suíte (`tests/e2e.test.ts`, **255 checagens em 12 blocos**) roda por HTTP contra a instância de
+A suíte (`tests/e2e.test.ts`, **260 checagens em 12 blocos**) roda por HTTP contra a instância de
 teste: é juiz de **contrato**, não de implementação, e imprime no fim a tabela de cobertura da
 rodada (blocos pulados por `SO_BLOCOS` aparecem nominalmente). O último bloco testa o freio de
 força bruta e bloqueia o IP por 5 minutos — por isso ele é o último, e fica fora do portão de CI.

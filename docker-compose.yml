@@ -9,9 +9,14 @@
 # (branch main), e preencha as variáveis na aba Environment (ou num .env):
 #   MINIRAG_DB_USER / MINIRAG_DB_PASSWORD  (senha do banco; mesma nos dois serviços)
 #   MINIRAG_USERS                    lista "nome:chave" separada por vírgula —
-#                                    cada nome é um tenant com memória própria
+#                                    cada nome é um tenant com memória própria.
+#                                    POLÍTICA (v3.2.3): deixe VAZIO em produção. O env é
+#                                    só semente do primeiro boot; usuário comum nasce na
+#                                    tela "Usuários", criado pelo admin.
 #   MINIRAG_OPERADOR                 (v1.8) "nome:chave" — chave global do dono:
-#                                    vê todas as gavetas (painel /painel)
+#                                    vê todas as gavetas (painel /painel).
+#                                    (v3.2.3) é a ÚNICA conta vinda do env, e o sistema
+#                                    recusa apagar o último operador ativo.
 #   MINIRAG_CORS_ORIGINS               (ex.: https://seudominio.com)
 
 services:
