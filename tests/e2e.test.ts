@@ -17,6 +17,9 @@ import test from "node:test";
 import assert from "node:assert/strict";
 
 const BASE = process.env.BASE ?? "http://127.0.0.1:8002";
+/** prova de release: o /health tem que anunciar a versão que este commit promete.
+ *  Sem isso, a suíte passa verde contra um container velho (deploy que não subiu). */
+const VERSAO_ESPERADA = process.env.VERSAO ?? "3.0.0";
 const TESTKEY = process.env.TESTKEY ?? "";
 const OPKEY = process.env.OPKEY ?? "";
 
@@ -83,6 +86,17 @@ async function ingerir(
   return esperarJob(key, r.json.job_id);
 }
 
+/** SO_BLOCOS filtra por trecho do nome (separado por vírgula). A suíte inteira custa ~5min; rodar
+ *  só os blocos afetados pela mudança custa ~1min — é isso que se roda antes de pedir OK pro deploy. */
+function bloco(t: any, nome: string, fn: () => Promise<void>) {
+  const filtro = (process.env.SO_BLOCOS ?? "").trim();
+  if (filtro) {
+    const alvos = filtro.split(",").map((s) => s.trim()).filter(Boolean);
+    if (!alvos.some((p) => nome.includes(p))) return;
+  }
+  return t.test(nome, fn);
+}
+
 /** Coletor de checagens: acumula e falha no fim do bloco (mostra tudo). */
 function fiscal() {
   const falhas: string[] = [];
@@ -92,7 +106,8 @@ function fiscal() {
       if (cond) {
         oks += 1;
       } else {
-        falhas.push(`${nome} :: ${String(extra).slice(0, 240)}`);
+        const detalhe = typeof extra === "string" || typeof extra === "number" ? String(extra) : JSON.stringify(extra);
+        falhas.push(`${nome} :: ${detalhe.slice(0, 300)}`);
       }
     },
     fechar(bloco: string) {
@@ -141,12 +156,12 @@ function lerZip(buf: Buffer): Map<string, Buffer> {
 /* ---------------------------------------------------------------- blocos */
 
 test("minirag v2 — suíte completa", async (t) => {
-  await t.test("v1.8: documents, escopos e decay por documento", async () => {
+  await bloco(t, "v1.8: documents, escopos e decay por documento", async () => {
     const f = fiscal();
 
     console.log("-- health e painel");
     const h = await call("GET", "/health");
-    f.check("health 200 + versao 2.9.0", h.status === 200 && h.json?.versao === "2.9.0", h.json);
+    f.check(`health 200 + versao ${VERSAO_ESPERADA}`, h.status === 200 && h.json?.versao === VERSAO_ESPERADA, h.json);
     f.check("health operador ativo", h.json?.operador === true, h.json);
     f.check("health embedder ok", h.json?.embedder === "ok", h.json);
     const p = await call("GET", "/painel/");
@@ -322,7 +337,7 @@ test("minirag v2 — suíte completa", async (t) => {
     f.fechar("v1.8");
   });
 
-  await t.test("MCP: JSON-RPC stateless com as 19 tools", async () => {
+  await bloco(t, "MCP: JSON-RPC stateless com as 19 tools", async () => {
     const f = fiscal();
     const H = { key: TESTKEY };
     const rpc = (id: unknown, method: string, params?: unknown, key: string | null = TESTKEY) =>
@@ -533,7 +548,7 @@ test("minirag v2 — suíte completa", async (t) => {
     f.fechar("MCP");
   });
 
-  await t.test("v1.10: renomear/mover, arquivar, zip, gaveta, jobs", async () => {
+  await bloco(t, "v1.10: renomear/mover, arquivar, zip, gaveta, jobs", async () => {
     const f = fiscal();
     const TEXTO = "Relatório de campo sobre marés e ventos do litoral norte. ".repeat(4);
     const ing = async (docId: string, content: string, memoria: string) => {
@@ -668,7 +683,7 @@ test("minirag v2 — suíte completa", async (t) => {
 
   // ÚLTIMO: bloqueia o IP por 5 minutos
 
-  await t.test("arquivos: upload, conversão e substituição por nome", async () => {
+  await bloco(t, "arquivos: upload, conversão e substituição por nome", async () => {
     const f = fiscal();
 
     /* bloco idempotente: começa e termina com as gavetas de teste vazias
@@ -873,7 +888,7 @@ test("minirag v2 — suíte completa", async (t) => {
   });
 
 
-  await t.test("imagem: OCR de print, foto e PDF escaneado", async () => {
+  await bloco(t, "imagem: OCR de print, foto e PDF escaneado", async () => {
     const f = fiscal();
     const fs = require("node:fs") as typeof import("node:fs");
     const nodePath = require("node:path") as typeof import("node:path");
@@ -991,7 +1006,7 @@ test("minirag v2 — suíte completa", async (t) => {
     f.fechar("imagem/OCR");
   });
 
-  await t.test("v2.7: painel, usuários, provider e chat", async () => {
+  await bloco(t, "v2.7: painel, usuários, provider e chat", async () => {
     const f = fiscal();
     const CONTAINER = process.env.CONTAINER ?? "";
     const GAV = "suite-v27";
@@ -1124,7 +1139,7 @@ test("minirag v2 — suíte completa", async (t) => {
     f.fechar("v2.7 painel/usuarios/chat");
   });
 
-  await t.test("v2.8: instruções do modelo, ferramentas MCP e servidores externos", async () => {
+  await bloco(t, "v2.8: instruções do modelo, ferramentas MCP e servidores externos", async () => {
     const f = fiscal();
     const CONTAINER = process.env.CONTAINER ?? "";
     const GAV = "suite-v28";
@@ -1145,12 +1160,15 @@ test("minirag v2 — suíte completa", async (t) => {
       "const pede=(id,fn,arg)=>res.end(JSON.stringify({choices:[{message:{role:'assistant',content:'PEDINDO',tool_calls:[{id:id,type:'function',function:{name:fn,arguments:arg}}]}}]}));",
       "if(nome==='eco'){return diz(JSON.stringify({roles:m.map(x=>x.role),ntools:tools.length,sys:(m[0]&&m[0].role==='system')?String(m[0].content).slice(0,60):null}));}",
       "if(nome==='agente'){",
-      "if(tools.length&&m.length===1){const ns=tools.map(x=>x.function.name);const alvo=ns.indexOf('search')>=0?'search':ns[0];",
+      /* chama a ferramenta na PRIMEIRA resposta desta rodada (sem resultado de tool ainda no
+       historico) — com memoria ligada o numero de mensagens do usuario nao e mais o marcador */
+      "const semResultadoDeTool=!m.some(x=>x.role==='tool');",
+      "if(tools.length&&semResultadoDeTool){const ns=tools.map(x=>x.function.name);const alvo=ns.indexOf('search')>=0?'search':ns[0];",
       "return pede('c1',alvo,alvo==='search'?'{\"query\":\"nota fiscal\",\"k\":3}':'{\"texto\":\"oi do chat\"}');}",
       "const t=m.filter(x=>x.role==='tool');return diz(t.length?('USEI:'+String(t[0].content).slice(0,90)):'SEM_FERRAMENTA');}",
       "if(nome==='parcial'){if(tools.length)return pede('p'+m.length,tools[0].function.name,'{}');return diz('SEM_TOOLS');}",
       "if(nome==='usuario'){",
-      "if(m.length===1)return pede('u1','criar_usuario','{\"nome\":\"suite-segredo\",\"papel\":\"usuario\"}');",
+      "if(!m.some(x=>x.role==='tool'))return pede('u1','criar_usuario','{\"nome\":\"suite-segredo\",\"papel\":\"usuario\"}');",
       "return diz('CRIEI o usuario; a chave dele nao mostro aqui');}",
       "diz('resposta do provider falso');});});",
       "s.listen(9913,'127.0.0.1');setTimeout(()=>process.exit(0),240000);",
@@ -1172,6 +1190,14 @@ test("minirag v2 — suíte completa", async (t) => {
     execFileSync("docker", ["exec", "-d", CONTAINER, "node", "-e", codMcp]);
     await dormir(1500);
 
+    /* O chat deste bloco roda com a chave do usuario. Se existir linha PROPRIA completa dele
+       (sobrou de outro bloco), ela tem prioridade sobre o padrao — regra de escopo da v2.8.1, nao
+       defeito. Entao o bloco desliga a linha propria antes de apontar o padrao para o fake dele. */
+    await call("PUT", "/config/provider", {
+      key: TESTKEY,
+      corpo: { tipo: "litellm", base_url: "http://127.0.0.1:1/v1", modelo: "", ativo: false },
+    });
+
     let r = await call("POST", "/ingest", {
       key: TESTKEY,
       corpo: { doc_id: "suite-v28-nota", content: "Nota fiscal 5512 da empresa Beta. Total R$ 9.876,54 com vencimento em 05/12/2026.", memoria: GAV },
@@ -1192,6 +1218,9 @@ test("minirag v2 — suíte completa", async (t) => {
           max_rodadas: 3,
           ativo: true,
           global: true,
+          /* memoria_turnos 0: este bloco prova PROMPT e FERRAMENTA. Memória da conversa tem o
+             bloco próprio (v3.0); deixar ligada aqui faria o fake ver rodadas de outros testes. */
+          memoria_turnos: 0,
           ...corpo,
         },
       });
@@ -1396,7 +1425,7 @@ test("minirag v2 — suíte completa", async (t) => {
     return { ctype: r.headers.get("content-type") ?? "", eventos, bruto: texto };
   }
 
-  await t.test("v2.9: markdown na tela, resposta em pedaços e fila", async () => {
+  await bloco(t, "v2.9: markdown na tela, resposta em pedaços e fila", async () => {
     const f = fiscal();
     const CONTAINER = process.env.CONTAINER ?? "";
     const GAV = "suite-v29";
@@ -1544,7 +1573,170 @@ test("minirag v2 — suíte completa", async (t) => {
     f.fechar("v2.9 markdown/streaming/fila");
   });
 
-  await t.test("freio de força bruta (último: bloqueia o IP)", async () => {
+  /* ------------------------------------------------------------------ v3.0 */
+
+  await bloco(t, "v3.0: memória da conversa, orçamento de contexto e escopo do provider", async () => {
+    const f = fiscal();
+    const CONTAINER = process.env.CONTAINER ?? "";
+    const GAV = "suite-v30";
+    const CLI = "cli-30";
+    /* provedor que DEVOLVE o resumo do payload que recebeu: assim a checagem vê o que chegou
+       ao modelo (quantas mensagens, papéis, caracteres), não só o que a API respondeu. */
+    const codEco = [
+      "const http=require('http');",
+      "const s=http.createServer((req,res)=>{let b='';req.on('data',c=>b+=c);req.on('end',()=>{",
+      "const u=req.url||'';",
+      "if(u.indexOf('models')>=0){res.setHeader('content-type','application/json');return res.end(JSON.stringify({data:[{id:'eco',context_length:16000},{id:'outro',context_length:4096}]}));}",
+      "let j={};try{j=JSON.parse(b||'{}')}catch(e){}",
+      "const m=j.messages||[];",
+      "const r0=JSON.stringify({n:m.length,papeis:m.map(x=>x.role).join(','),chars:m.reduce((a,x)=>a+String(x.content||'').length,0),",
+      "maxlinha:(()=>{const v=m.slice(0,-1).map(x=>String(x.content||'').length);return v.length?Math.max(...v):0})(),",
+      "primeiro:String(m[0]&&m[0].content||'').slice(0,18),ultimo:String(m[m.length-1]&&m[m.length-1].content||'').slice(0,40),",
+      "ferramentas:(j.tools||[]).length});",
+      "res.setHeader('content-type','application/json');",
+      "res.end(JSON.stringify({choices:[{message:{role:'assistant',content:r0}}]}));",
+      "});});",
+      "s.listen(9915,'127.0.0.1');setTimeout(()=>process.exit(0),420000);",
+    ].join("");
+
+    if (!CONTAINER) {
+      f.check("v3.0 precisa do container (provedor eco dentro dele)", true, "sem CONTAINER: partes de memória/compactação não executáveis");
+      f.fechar("v3.0 (parcial)");
+      return;
+    }
+    execFileSync("docker", ["exec", "-d", CONTAINER, "node", "-e", codEco]);
+    await dormir(1200);
+
+    const base = {
+      tipo: "litellm",
+      base_url: "http://127.0.0.1:9915/v1",
+      modelo: "eco",
+      mcp_interno: false,
+      max_rodadas: 1,
+      ativo: true,
+      global: true,
+    };
+    /* `base` escreve na linha PADRAO (global); `semGlobal` escreve na linha do CLIENTE citado em tenant.
+       Sao alvos diferentes de proposito: e exatamente a distincao que a v2.9 nao fazia. */
+    const semGlobal = { ...base, global: false };
+    const eco = async (corpoPergunta: Record<string, unknown>) => {
+      /* OPKEY de proposito: o chat do operador resolve a linha PADRAO (*), que e este bloco quem
+         configura. Com a chave de um usuario, a linha propria (completa) dele teria prioridade e o
+         eco deste bloco nunca seria chamado. */
+      const r = await call("POST", "/chat", { key: OPKEY, corpo: { memoria: GAV, ...corpoPergunta } });
+      let p: any = {};
+      try {
+        p = JSON.parse(String(r.json?.resposta));
+      } catch {
+        /* resposta do eco não veio JSON: a checagem abaixo acusa */
+      }
+      return { r, p };
+    };
+
+    /* ---------------------------------------------- 1. os campos novos salvam e voltam */
+    let r = await call("PUT", "/config/provider", {
+      key: OPKEY,
+      corpo: {
+        ...base,
+        system_prompt: "PROMPT-DE-INSTRUCAO",
+        memoria_turnos: 12,
+        verbatim_turnos: 2,
+        reserva_tokens: 60,
+        contexto_tokens: 4000,
+      },
+    });
+    f.check("v3.0 campos do provider salvos", r.status === 200 && r.json?.memoria_turnos === 12 && r.json?.verbatim_turnos === 2 && r.json?.reserva_tokens === 60 && r.json?.contexto_tokens === 4000, r.texto.slice(0, 200));
+    r = await call("GET", "/config/provider", { key: OPKEY });
+    f.check("janela efetiva anunciada como configurada", r.json?.janela_efetiva === 4000 && r.json?.origem_janela === "configurada", { janela: r.json?.janela_efetiva, origem: r.json?.origem_janela });
+    f.check("a linha visada e a padrao (asterisco)", r.json?.escopo === "*" && r.json?.memoria_turnos === 12, { escopo: r.json?.escopo, memoria: r.json?.memoria_turnos });
+    r = await call("PUT", "/config/provider", { key: OPKEY, corpo: { ...base, contexto_tokens: 40000000 } });
+    f.check("janela absurda recusada com 422", r.status === 422, r.status);
+
+    /* ---------------------------------------------- 2. memória: o payload que chega ao modelo */
+    await call("PUT", "/config/provider", { key: OPKEY, corpo: { ...base, system_prompt: "PROMPT-DE-INSTRUCAO", memoria_turnos: 0, verbatim_turnos: 2, reserva_tokens: 60, contexto_tokens: 4000 } });
+    await call("DELETE", `/chat?memoria=${GAV}`, { key: OPKEY });
+    let e = await eco({ pergunta: "primeira" });
+    f.check("sem memória (0): só instruções + pergunta chegam ao modelo", e.p.n === 2 && e.p.papeis === "system,user" && String(e.p.primeiro).startsWith("PROMPT-DE-INSTRU"), e.p);
+
+    await call("PUT", "/config/provider", { key: OPKEY, corpo: { ...base, system_prompt: "PROMPT-DE-INSTRUCAO", memoria_turnos: 12, verbatim_turnos: 2, reserva_tokens: 60, contexto_tokens: 4000 } });
+    e = await eco({ pergunta: "segunda" });
+    f.check("com memória: a rodada anterior volta para o modelo", e.p.n === 4 && e.p.papeis === "system,user,assistant,user", e.p);
+    /* a gaveta PADRAO (nome vazio) tem que lembrar igual — foi buraco achado ao escrever este bloco */
+    await call("DELETE", `/chat?memoria=`, { key: OPKEY });
+    let padrao = await call("POST", "/chat", { key: OPKEY, corpo: { pergunta: "primeira na padrao", memoria: "" } });
+    padrao = await call("POST", "/chat", { key: OPKEY, corpo: { pergunta: "segunda na padrao", memoria: "" } });
+    let pp: any = {};
+    try {
+      pp = JSON.parse(String(padrao.json?.resposta));
+    } catch {
+      /* eco respondeu fora de forma */
+    }
+    f.check("gaveta padrão (nome vazio) também lembra da conversa", pp.n === 4 && pp.papeis === "system,user,assistant,user", pp);
+    await call("DELETE", `/chat?memoria=`, { key: OPKEY });
+
+    r = await call("POST", "/chat", { key: OPKEY, corpo: { pergunta: "terceira", memoria: GAV } });
+    f.check("a resposta traz a contabilidade da compactação", r.json?.compactacao && r.json.compactacao.historico_lido >= 2 && r.json.compactacao.resumidas >= 1 && r.json.compactacao.memoria_turnos === 12, r.json?.compactacao);
+
+    /* ---------------------------------------------- 3. compactação determinística (sem LLM) */
+    await call("PUT", "/config/provider", { key: OPKEY, corpo: { ...base, system_prompt: "PROMPT-DE-INSTRUCAO", memoria_turnos: 12, verbatim_turnos: 0, reserva_tokens: 60, contexto_tokens: 300 } });
+    const antes = await call("GET", `/chat?memoria=${GAV}`, { key: OPKEY });
+    e = await eco({ pergunta: "quarta depois do historico grande" });
+    const disponivelChars = (300 - 60) * 4;
+    f.check("a chamada compactada respondeu normal (200)", e.r.status === 200, e.r.status);
+    f.check("o payload enviado coube no orçamento", e.p.chars <= disponivelChars, { chars: e.p.chars, teto: disponivelChars });
+    f.check("verbatim 0: nenhuma mensagem antiga passou inteira", e.p.maxlinha <= 200, { maior_linha: e.p.maxlinha });
+    r = await call("POST", "/chat", { key: OPKEY, corpo: { pergunta: "quinta", memoria: GAV } });
+    const c = r.json?.compactacao ?? {};
+    f.check("compactação resumiu mensagens antigas (não jogou tudo fora)", c.resumidas >= 1 && c.historico_lido > 0, c);
+    f.check("o system prompt NUNCA é comprimido (continua integral no payload)", String(e.p.primeiro).startsWith("PROMPT-DE-INSTRU") && e.p.papeis.startsWith("system,user"), e.p);
+    f.check("números batem: o que saiu do payload foi contado", (c.resumidas ?? 0) + (c.descartadas ?? 0) >= 1 && c.janela === 300 && c.origem_janela === "configurada", c);
+    f.check("histórico gravado na tela permanece íntegro (compactação não reescreve o banco)", (antes.json?.mensagens ?? []).length >= 6, (antes.json?.mensagens ?? []).length);
+
+    /* ---------------------------------------------- 4. quando nem assim cabe, avisa em vez de estourar */
+    await call("PUT", "/config/provider", { key: OPKEY, corpo: { ...base, system_prompt: "PROMPT-DE-INSTRUCAO", memoria_turnos: 12, verbatim_turnos: 4, reserva_tokens: 40, contexto_tokens: 120 } });
+    e = await eco({ pergunta: "pergunta comprida ".repeat(40) });
+    f.check("não coube: enviou instruções + pergunta e avisou", e.p.n === 2 && e.r.status === 200, e.p);
+    const estouro = e.r.json?.compactacao;
+    f.check("o aviso de estouro chegou honesto NA RESPOSTA da pergunta que estourou", estouro?.coube === false && estouro.janela === 120 && estouro.historico_lido >= 1, estouro);
+    r = await call("POST", "/chat", { key: OPKEY, corpo: { pergunta: "sexta", memoria: GAV } });
+    f.check("a pergunta seguinte volta ao normal (o estouro não quebra a gaveta)", r.status === 200 && r.json?.compactacao?.coube === true, r.json?.compactacao);
+
+    /* ---------------------------------------------- 5. detecção da janela no testar conexão */
+    await call("PUT", "/config/provider", { key: OPKEY, corpo: { ...base, contexto_tokens: 0, memoria_turnos: 12, verbatim_turnos: 4, reserva_tokens: 60 } });
+    r = await call("POST", "/config/provider/testar", { key: OPKEY, corpo: { ...base, contexto_tokens: 0 } });
+    f.check("testar conexão detectou a janela do provider", r.status === 200 && r.json?.contexto_detectado === 16000, r.texto.slice(0, 200));
+    r = await call("GET", "/config/provider", { key: OPKEY });
+    f.check("janela detectada virou a efetiva (sem o humano digitar)", r.json?.janela_efetiva === 16000 && r.json?.origem_janela === "detectada" && r.json?.contexto_detectado === 16000, { janela: r.json?.janela_efetiva, origem: r.json?.origem_janela });
+
+    /* ---------------------------------------------- 6. escopo: o que a tela mostra é onde grava */
+    r = await call("PUT", "/config/provider", { key: OPKEY, corpo: { ...semGlobal, tenant: CLI, system_prompt: "PROBE-CLI-30", contexto_tokens: 4000 } });
+    f.check("operador salvando com tenant grava NA LINHA DO CLIENTE", r.status === 200 && r.json?.escopo === CLI && r.json?.system_prompt === "PROBE-CLI-30", r.texto.slice(0, 200));
+    r = await call("GET", `/config/provider?tenant=${CLI}`, { key: OPKEY });
+    f.check("reler o cliente mostra o texto gravado (o bug da v2.9)", r.json?.system_prompt === "PROBE-CLI-30" && r.json?.escopo === CLI, r.json?.system_prompt);
+    r = await call("PUT", "/config/provider", { key: OPKEY, corpo: { ...semGlobal, tenant: CLI, memoria_turnos: 3, verbatim_turnos: 1, contexto_tokens: 900 } });
+    f.check("a memória é configurada POR CLIENTE (cada um com seu tamanho)", r.status === 200 && r.json?.memoria_turnos === 3 && r.json?.verbatim_turnos === 1, r.texto.slice(0, 200));
+    r = await call("GET", `/config/provider?tenant=${CLI}`, { key: OPKEY });
+    f.check("o cliente tem janela própria, independente da padrão", r.json?.memoria_turnos === 3 && r.json?.janela_efetiva === 900, { memoria: r.json?.memoria_turnos, janela: r.json?.janela_efetiva });
+    r = await call("GET", "/config/provider", { key: OPKEY });
+    f.check("a linha do operador não foi tocada de relance", r.json?.escopo !== CLI && r.json?.system_prompt === "PROMPT-DE-INSTRUCAO", { escopo: r.json?.escopo, prompt: r.json?.system_prompt });
+    r = await call("PUT", "/config/provider", { key: TESTKEY, corpo: { ...semGlobal, tenant: CLI, system_prompt: "INVADE-CLI-30", contexto_tokens: 4000 } });
+    f.check("usuário comum que tenta gravar em cliente alheio cai na própria linha", r.status === 200 && r.json?.escopo !== CLI, { escopo: r.json?.escopo });
+    r = await call("GET", `/config/provider?tenant=${CLI}`, { key: OPKEY });
+    f.check("e o cliente alheio continua intacto", r.json?.system_prompt === "PROBE-CLI-30", r.json?.system_prompt);
+    r = await call("PUT", "/config/provider", { key: TESTKEY, corpo: { ...base, global: true, system_prompt: "x", contexto_tokens: 4000 } });
+    f.check("usuário comum não grava o padrão global", r.status === 409, r.status);
+
+    /* ---------------------------------------------- limpeza (não contamina os blocos seguintes) */
+    /* a linha do usuario comum tambem: ela ficou completa durante os testes de escopo e passaria a
+       ter prioridade sobre o padrao nos blocos que rodam depois deste */
+    await call("PUT", "/config/provider", { key: TESTKEY, corpo: { ...semGlobal, base_url: "http://127.0.0.1:1/v1", modelo: "", ativo: false } });
+    await call("PUT", "/config/provider", { key: OPKEY, corpo: { ...semGlobal, tenant: CLI, system_prompt: "", ativo: false, contexto_tokens: 4000 } });
+    await call("PUT", "/config/provider", { key: OPKEY, corpo: { ...base, system_prompt: "", memoria_turnos: 12, verbatim_turnos: 4, reserva_tokens: 1024, contexto_tokens: 0, ativo: false } });
+    await call("DELETE", `/chat?memoria=${GAV}`, { key: OPKEY });
+    f.fechar("v3.0 memória/orçamento/escopo");
+  });
+
+  await bloco(t, "freio de força bruta (último: bloqueia o IP)", async () => {
     const f = fiscal();
     for (let i = 0; i < 10; i++) {
       await call("GET", "/gavetas", { key: `chave-errada-${String(i).padStart(2, "0")}` });
