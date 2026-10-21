@@ -2,7 +2,7 @@
 import { spawn, ChildProcess } from "node:child_process";
 import path from "node:path";
 import { CONFIG, log } from "./config";
-import { initDb, pool, waitDb } from "./db";
+import { initDb, limparTarefas, pool, waitDb } from "./db";
 import { embedderDim, esperarEmbedder, marcarEmbedder } from "./embed";
 import { detectarOcr } from "./ocr";
 import { pararWorker, workerLoop } from "./ingest";
@@ -70,6 +70,7 @@ async function main(): Promise<void> {
     throw new Error("dimensao do embedding desconhecida (embedder fora) — abortando boot");
   }
   await initDb(embedderDim());
+  await limparTarefas(); // v3.3: rodando órfã vira falhou; terminadas antigas saem
   await initUsuarios(); // v2.7: env semeia, banco manda
   await initProvider();
   await initFerramentas(); // v2.8: servidores MCP que dão ferramentas ao chat
