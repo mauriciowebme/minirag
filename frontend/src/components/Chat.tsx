@@ -1,5 +1,5 @@
 import { useCallback, useEffect, useRef, useState } from "react";
-import { del, get, post, postStream, qs, type ApiErro } from "../services/api";
+import { ApiErro, del, get, getStream, post, postStream, qs } from "../services/api";
 import { useToast } from "./Toast";
 import { mdParaHtml } from "../lib/md";
 import {
@@ -9,11 +9,52 @@ import {
   estado,
   enviar as enviarNaConversa,
   limpar as limparConversa,
+  reativar,
   semear,
   type Estado,
+  type EventoTransporte,
   type Transportar,
 } from "../lib/conversa";
-import type { ChatHistorico, ChatResp, Compactacao, GavetasResp, ProviderResp } from "../types";
+import type { ChatHistorico, Compactacao, GavetasResp, ProviderResp } from "../types";
+
+/** linha de status da tarefa viva (GET /chat/tarefas e GET /chat/tarefa/:id) */
+type TarefaStatus = { id: string; pergunta?: string; status: string; parcial: string; ferramentas?: unknown[]; aviso?: string | null };
+
+/** v3.3: lê o stream de uma tarefa no servidor, RELIGANDO em queda de rede (até 3×, backoff).
+ *  Queda de conexão ≠ falha: a tarefa vive no servidor; se o stream quebrar, consulta o
+ *  estado e reanexa. Devolve os dados do `fim` (ou reconstrói do GET se terminou no vão). */
+async function bombearTarefa(
+  id: string,
+  onEvent: (e: EventoTransporte) => void,
+): Promise<Record<string, unknown> | null> {
+  let dados: Record<string, unknown> | null = null;
+  for (let tentativa = 0; tentativa <= 3; tentativa++) {
+    try {
+      await getStream(`/chat/tarefa/${id}/stream`, (e) => {
+        if (e.tipo === "fim") dados = e.dados as Record<string, unknown>;
+        onEvent(e as EventoTransporte);
+      });
+      return dados; // stream fechou de verdade (fim, erro ou corrida tratada no servidor)
+    } catch (e) {
+      if (e instanceof ApiErro && e.status === 404) throw e; // tarefa sumiu: não tem o que religar
+      /* rede/proxy caiu no meio: perguntar ao servidor o que houve, sem confiar no stream */
+      let t: TarefaStatus | null = null;
+      try {
+        t = await get<TarefaStatus>(`/chat/tarefa/${id}`);
+      } catch {
+        /* servidor inacessível também: tratar como rodando e tentar de novo */
+      }
+      if (t && t.status !== "rodando") {
+        if (t.status === "terminou") return { resposta: t.parcial, ferramentas: t.ferramentas ?? [], aviso: t.aviso ?? null };
+        throw new ApiErro(0, t.aviso || "a tarefa falhou");
+      }
+      if (tentativa >= 3) throw new ApiErro(0, "sem conexão com o servidor");
+      await new Promise((r) => setTimeout(r, 500 * 2 ** tentativa));
+      if (t) onEvent({ tipo: "parcial", texto: t.parcial }); // ressincroniza a base antes de reanexar
+    }
+  }
+  return dados;
+}
 
 /** traduz o que a compactação fez em uma linha honesta (nada de "resumido por IA") */
 function textoCompacto(c?: Compactacao | null): string | undefined {
@@ -102,6 +143,24 @@ export function Chat({
     } catch (e) {
       toast("histórico: " + (e as Error).message);
     }
+    /* v3.3: fechou a aba no meio e voltou? A tarefa viva do servidor entra na tela
+       (pergunta empurrada + bolha escrevendo desde o parcial, religando sozinha).
+       Em servidor antigo a rota não existe: silencia, o histórico acima já valeu. */
+    try {
+      const tv = await get<{ tarefas: TarefaStatus[] }>(
+        "/chat/tarefas?" + qs({ memoria, ...(tenantParam ? { tenant: tenantParam } : {}) }),
+      );
+      const viva = (tv.tarefas ?? [])[0];
+      if (viva) {
+        void reativar(
+          chave,
+          { id: String(viva.id), pergunta: String(viva.pergunta ?? ""), parcial: String(viva.parcial ?? "") },
+          bombearTarefa,
+        );
+      }
+    } catch {
+      /* servidor antigo ou rede caída agora: nada a readotar */
+    }
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [chave, memoria, tenantParam, toast]);
 
@@ -158,19 +217,22 @@ export function Chat({
   const transportar = useCallback<Transportar>(
     async (pedido, onEvent) => {
       let dados: Record<string, unknown> | null = null;
+      /* v3.3: a resposta agora VIVE no servidor (tarefa): fechar a aba não mata o trabalho.
+         Servidor antigo (404 em /chat/tarefa): cai no caminho direto /chat/stream. */
+      let idTarefa = "";
       try {
-        await postStream("/chat/stream", pedido, (e) => {
-          if (e.tipo === "fim") dados = e.dados as Record<string, unknown>;
-          else onEvent(e);
-        });
+        idTarefa = String((await post<{ id: string }>("/chat/tarefa", pedido)).id);
       } catch (e) {
-        /* servidor antigo, sem /chat/stream: a resposta inteira de uma vez */
-        if ((e as ApiErro).status === 404) {
-          dados = (await post<ChatResp>("/chat", pedido)) as unknown as Record<string, unknown>;
+        if (e instanceof ApiErro && e.status === 404) {
+          await postStream("/chat/stream", pedido, (ev) => {
+            if (ev.tipo === "fim") dados = ev.dados as Record<string, unknown>;
+            else onEvent(ev as EventoTransporte);
+          });
         } else {
           throw e;
         }
       }
+      if (idTarefa) dados = await bombearTarefa(idTarefa, onEvent);
       const d = (dados ?? {}) as Record<string, unknown>;
       const aviso = textoCompacto(d.compactacao as Compactacao | undefined);
       if (aviso) d.compacto = aviso;

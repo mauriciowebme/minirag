@@ -12,6 +12,9 @@
 
 export type EventoTransporte =
   | { tipo: "delta"; texto: string }
+  /** v3.3: fotografia do texto acumulado no servidor (stream reanexável); o client usa
+   *  como BASE e descarta o delta cujo efeito não passa dela (duplicata da corrida R2). */
+  | { tipo: "parcial"; texto: string }
   | { tipo: "descartar" }
   | { tipo: "ferramenta"; servidor: string; nome: string; ok: boolean; ms: number }
   | { tipo: "fim"; dados: Record<string, unknown> }
@@ -139,6 +142,83 @@ export function limpar(chave: string): void {
 export function temTrabalho(chave: string): boolean {
   const c = pega(chave);
   return c.rodando || c.fila.length > 0;
+}
+
+/** v3.3: tarefa que está viva no servidor (a aba fechou no meio e voltou). */
+export type TarefaViva = { id: string; pergunta: string; parcial: string };
+
+/** Adota uma tarefa viva no servidor: bolha do usuário + bolha escrevendo desde o parcial.
+ *  A pergunta ainda NÃO está no histórico (o servidor só grava as mensagens no fim), por
+ *  isso ela é empurrada aqui. `correr` é injetado — quem sabe religar em queda de rede é
+ *  o transporte (Chat.tsx); conversa.ts continua puro, sem conhecer fetch. */
+export async function reativar(
+  chave: string,
+  tarefa: TarefaViva,
+  correr: (id: string, onEvent: (e: EventoTransporte) => void) => Promise<Record<string, unknown> | null>,
+): Promise<void> {
+  const c = pega(chave);
+  if (c.rodando) return; // já há trabalho local na frente: não atropela
+  c.rodando = true;
+  c.inicio = Date.now();
+  const vivoId = proximoId();
+  c.vivo = vivoId;
+  c.msgs.push(
+    { id: proximoId(), papel: "user", texto: tarefa.pergunta, ferramentas: [] },
+    { id: vivoId, papel: "assistant", texto: tarefa.parcial, ferramentas: [], escrevendo: true },
+  );
+  notifica(chave);
+
+  let bruto = tarefa.parcial;
+  let base = bruto.length; // tamanho da última fotografia confirmada pelo servidor (R2)
+  let erro = "";
+  const caixa: { dados: Record<string, unknown> | null } = { dados: null };
+  try {
+    const saida = await correr(tarefa.id, (e) => {
+      const bolha = c.msgs.find((m) => m.id === vivoId);
+      if (!bolha) return;
+      if (e.tipo === "parcial") {
+        const foto = String(e.texto ?? "");
+        if (foto.length > bruto.length) bruto = foto;
+        base = Math.max(base, bruto.length);
+        bolha.texto = bruto;
+      } else if (e.tipo === "delta") {
+        const pedaco = String(e.texto ?? "");
+        if (bruto.length >= base) {
+          bruto += pedaco;
+          bolha.texto = bruto;
+        } // abaixo da base: o delta já está contido na fotografia — descarta (R2)
+      } else if (e.tipo === "ferramenta") {
+        bolha.ferramentas.push({ servidor: String(e.servidor), nome: String(e.nome), ok: Boolean(e.ok), ms: Number(e.ms), args: {}, resumo: "" });
+      } else if (e.tipo === "fim") {
+        caixa.dados = e.dados;
+      } else if (e.tipo === "erro") {
+        erro = String(e.detalhe ?? "a tarefa falhou");
+      }
+      notifica(chave);
+    });
+    const bolha = c.msgs.find((m) => m.id === vivoId);
+    if (bolha) {
+      const r = caixa.dados ?? saida ?? { resposta: bruto };
+      bolha.texto = erro ? "não consegui responder: " + erro : String(r.resposta ?? bruto);
+      bolha.ferramentas = (r.ferramentas as FerramentaLinha[]) ?? bolha.ferramentas;
+      bolha.aviso = (r.aviso as string) ?? null;
+      bolha.compacto = (r.compacto as string) ?? undefined;
+      bolha.escrevendo = false;
+      bolha.falha = Boolean(erro);
+    }
+  } catch (e) {
+    const bolha = c.msgs.find((m) => m.id === vivoId);
+    if (bolha) {
+      bolha.escrevendo = false;
+      bolha.falha = true;
+      bolha.texto = "não consegui responder: " + (e as Error).message;
+    }
+  } finally {
+    c.rodando = false;
+    c.inicio = 0;
+    c.vivo = "";
+    notifica(chave);
+  }
 }
 
 /** dispara a próxima da fila quando estiver livre */

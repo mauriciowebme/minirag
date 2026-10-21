@@ -59,6 +59,18 @@ export async function postStream(caminho: string, corpo: unknown, onEvento: (e: 
     headers: cabecalhos(true),
     body: JSON.stringify(corpo ?? {}),
   });
+  await lerSse(r, onEvento);
+}
+
+/** GET que lê um fluxo de eventos (SSE) — v3.3: stream reanexável da tarefa.
+ *  `EventSource` não serve: ele não manda o header Authorization. */
+export async function getStream(caminho: string, onEvento: (e: any) => void): Promise<void> {
+  const r = await fetch(caminho, { headers: cabecalhos(false) });
+  await lerSse(r, onEvento);
+}
+
+/** miolo comum dos dois fluxos: valida, lê `data:` por bloco até o servidor fechar. */
+async function lerSse(r: Response, onEvento: (e: any) => void): Promise<void> {
   if (!r.ok) {
     let detalhe = `${r.status} ${r.statusText}`;
     try {
