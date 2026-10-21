@@ -19,7 +19,7 @@ import assert from "node:assert/strict";
 const BASE = process.env.BASE ?? "http://127.0.0.1:8002";
 /** prova de release: o /health tem que anunciar a versão que este commit promete.
  *  Sem isso, a suíte passa verde contra um container velho (deploy que não subiu). */
-const VERSAO_ESPERADA = process.env.VERSAO ?? "3.0.0";
+const VERSAO_ESPERADA = process.env.VERSAO ?? "3.1.0";
 const TESTKEY = process.env.TESTKEY ?? "";
 const OPKEY = process.env.OPKEY ?? "";
 
@@ -1734,6 +1734,52 @@ test("minirag v2 — suíte completa", async (t) => {
     await call("PUT", "/config/provider", { key: OPKEY, corpo: { ...base, system_prompt: "", memoria_turnos: 12, verbatim_turnos: 4, reserva_tokens: 1024, contexto_tokens: 0, ativo: false } });
     await call("DELETE", `/chat?memoria=${GAV}`, { key: OPKEY });
     f.fechar("v3.0 memória/orçamento/escopo");
+  });
+
+  await bloco(t, "v3.1: boot não quebra quando a mesma chave existe sob outro nome", async () => {
+    const f = fiscal();
+    const CONTAINER = process.env.CONTAINER ?? "";
+    const DB = process.env.DBCONTAINER ?? CONTAINER.replace("-api-", "-db-");
+    if (!CONTAINER || !OPKEY) {
+      f.check("v3.1 precisa do container (reinicia a API)", true, "sem CONTAINER: bloco não executável");
+      f.fechar("v3.1 boot/chave repetida");
+      return;
+    }
+    /* Retrato de uma rotação de chave: a linha do operador vai morar sob OUTRO nome,
+       carrying o mesmo hash. No boot a semente do env tenta reinserir ('op', mesmo hash):
+       antes do conserto era INSERT ... ON CONFLICT (nome), que não cobre o hash -> o
+       serviço inteiro morria em usuarios_chave_hash_key e não subia mais. */
+    execFileSync("docker", ["exec", DB, "sh", "-c",
+      `psql -U "$POSTGRES_USER" -d "$POSTGRES_DB" -tAc "UPDATE usuarios SET nome='op-rotacionada' WHERE nome='op'"`],
+      { encoding: "utf8" });
+    let r: Resp = { status: 0, texto: "", json: undefined } as unknown as Resp;
+
+    /* o boot semeia MINIRAG_USERS de novo -> era aqui que o serviço inteiro morria
+       (duplicate key ... usuarios_chave_hash_key) */
+    execFileSync("docker", ["restart", CONTAINER], { stdio: "ignore" });
+    let vivo = 0;
+    for (let i = 0; i < 40; i++) {
+      try {
+        const p = await fetch(BASE + "/health");
+        if (p.status === 200) {
+          vivo = i + 1;
+          break;
+        }
+      } catch {
+        /* ainda subindo */
+      }
+      await dormir(2000);
+    }
+    f.check("boot com hash repetido sobe o serviço", vivo > 0, "health nunca respondeu");
+    r = await call("GET", "/gavetas", { key: TESTKEY });
+    f.check("chave do teste continua autenticando depois do boot", r.status === 200, r.status);
+    /* devolve o nome para o registro não ficar torto para os blocos seguintes */
+    execFileSync("docker", ["exec", DB, "sh", "-c",
+      `psql -U "$POSTGRES_USER" -d "$POSTGRES_DB" -tAc "UPDATE usuarios SET nome='op' WHERE nome='op-rotacionada'"`],
+      { encoding: "utf8" });
+    r = await call("GET", "/gavetas", { key: OPKEY });
+    f.check("operador continua autenticando depois da restauração", r.status === 200, r.status);
+    f.fechar("v3.1 boot/chave repetida");
   });
 
   await bloco(t, "freio de força bruta (último: bloqueia o IP)", async () => {
