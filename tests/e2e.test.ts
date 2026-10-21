@@ -1901,6 +1901,90 @@ test("minirag v2 — suíte completa", async (t) => {
     f.fechar("v3.2 silêncio");
   });
 
+  /* ------------------------------------------------------------------ v3.3 */
+
+  await bloco(t, "v3.3: tarefa de chat que sobrevive (cria, roda, espeia o parcial)", async () => {
+    const f = fiscal();
+    const CONTAINER = process.env.CONTAINER ?? "";
+    const DB = process.env.DBCONTAINER ?? "";
+    const GAV = "suite-v33";
+
+    if (!CONTAINER) {
+      f.check("v3.3 precisa do container (provedor falso dentro dele)", true, "sem CONTAINER: bloco não executável");
+      f.fechar("v3.3 tarefa (parcial)");
+      return;
+    }
+
+    console.log("-- provedor falso LENTO (8 peças de ~250 ms ≈ 2 s), porta 9918, morte auto 240s");
+    const codTarefa = [
+      "const http=require('http');",
+      "const s=http.createServer((req,res)=>{let b='';req.on('data',c=>b+=c);req.on('end',()=>{",
+      "let j={};try{j=JSON.parse(b||'{}');}catch(e){}",
+      "const m=j.messages||[];const comFerramenta=m.filter(x=>x.role==='tool').length>0;",
+      "const sse=(pecas,fim)=>{res.setHeader('content-type','text/event-stream');let k=0;",
+      "const t=setInterval(()=>{",
+      "if(k<pecas.length){res.write('data: '+JSON.stringify({choices:[{delta:{content:pecas[k]}}]})+'\\n\\n');k++;return;}",
+      "clearInterval(t);fim();},250);};",
+      "if(j.stream&&comFerramenta){",
+      "sse(['A nota 5512 da Beta ','soma R$ 9.876,54 ','com vencimento ','em 05/12/2026 ','[tarefa].'],()=>{res.write('data: [DONE]\\n\\n');res.end();});",
+      "return;}",
+      "if(j.stream){",
+      "sse(['Thinking:',' vou',' consultar',' a gaveta'],()=>{",
+      "res.write('data: '+JSON.stringify({choices:[{delta:{tool_calls:[{index:0,id:'f1',type:'function',function:{name:'search',arguments:JSON.stringify({query:'nota fiscal',k:3})}}]}}]})+'\\n\\n');",
+      "res.write('data: [DONE]\\n\\n');res.end();});",
+      "return;}",
+      "res.setHeader('content-type','application/json');",
+      "if(comFerramenta)return res.end(JSON.stringify({choices:[{message:{role:'assistant',content:'A nota 5512 da Beta soma R$ 9.876,54 com vencimento em 05/12/2026 [tarefa].'}}]}));",
+      "res.end(JSON.stringify({choices:[{message:{role:'assistant',content:'',tool_calls:[{id:'f1',type:'function',function:{name:'search',arguments:JSON.stringify({query:'nota fiscal',k:3})}}]}}]}));",
+      "});});",
+      "s.listen(9918,'127.0.0.1');setTimeout(()=>process.exit(0),240000);",
+    ].join("");
+    execFileSync("docker", ["exec", "-d", CONTAINER, "node", "-e", codTarefa]);
+    await dormir(1200);
+
+    const psql = (sql: string) =>
+      execFileSync("docker", ["exec", DB, "sh", "-c", `psql -U "$POSTGRES_USER" -d "$POSTGRES_DB" -tAc "${sql}"`], { encoding: "utf8" }).trim();
+
+    const rg = await call("POST", "/ingest", {
+      key: TESTKEY,
+      corpo: { doc_id: "suite-v33-nota", content: "Nota fiscal 5512 da empresa Beta. Total R$ 9.876,54 com vencimento em 05/12/2026.", memoria: GAV },
+    });
+    const job = await esperarJob(TESTKEY, rg.json?.job_id);
+    f.check("documento da v3.3 indexado", job.status === "concluido", job);
+
+    const rp = await call("PUT", "/config/provider", {
+      key: OPKEY,
+      corpo: { tipo: "litellm", base_url: "http://127.0.0.1:9918/v1", modelo: "tarefa", temperatura: 0, system_prompt: "", mcp_interno: true, max_rodadas: 3, ativo: true, global: true },
+    });
+    f.check("provedor lento salvo (9918, MCP interno)", rp.status === 200 && rp.json?.mcp_interno === true, rp.texto.slice(0, 160));
+
+    console.log("-- POST /chat/tarefa");
+    const r = await call("POST", "/chat/tarefa", { key: TESTKEY, corpo: { pergunta: "qual o total da nota da Beta?", memoria: GAV } });
+    f.check("cria tarefa: 201 + id", r.status === 201 && typeof r.json?.id === "string" && r.json.id.length >= 8, r.texto.slice(0, 120));
+    const id = String(r.json?.id ?? "");
+    f.check("linha existe no banco (rodando, tenant da chave)", /^rodando\|teste$/.test(psql(`SELECT status||'|'||tenant FROM chat_tarefas WHERE id='${id}'`)), psql(`SELECT status||'|'||tenant FROM chat_tarefas WHERE id='${id}'`));
+
+    const rv = await call("POST", "/chat/tarefa", { key: TESTKEY, corpo: { pergunta: "", memoria: GAV } });
+    f.check("pergunta vazia: 422 (mesma regra do /chat)", rv.status === 422, rv.texto.slice(0, 120));
+
+    console.log("-- deixa a tarefa terminar SOZINHA (provedor lento: ~4 s de deltas)");
+    let st = "";
+    for (let i = 0; i < 60; i++) {
+      await dormir(500);
+      st = psql(`SELECT status FROM chat_tarefas WHERE id='${id}'`);
+      if (st === "terminou" || st === "falhou") break;
+    }
+    f.check("tarefa terminou sem nenhum cliente conectado", st === "terminou", { st, aviso: psql(`SELECT COALESCE(aviso,'') FROM chat_tarefas WHERE id='${id}'`) });
+    const parcial = psql(`SELECT parcial FROM chat_tarefas WHERE id='${id}'`);
+    f.check("parcial no banco é a resposta final (sem 'Thinking:')", /9\.876,54/.test(parcial) && !/Thinking:/.test(parcial), parcial.slice(0, 160));
+
+    /* limpeza OBRIGATÓRIA — as três chamadas finais do padrão v2.9 (sem isso contamina runs futuros) */
+    await call("PUT", "/config/provider", { key: OPKEY, corpo: { tipo: "litellm", base_url: "http://127.0.0.1:9918/v1", modelo: "tarefa", system_prompt: "", mcp_interno: false, max_rodadas: 3, ativo: false, global: true } });
+    await call("DELETE", `/gavetas/${GAV}`, { key: TESTKEY });
+    await call("DELETE", `/chat?memoria=${GAV}`, { key: OPKEY });
+    f.fechar("v3.3 tarefa");
+  });
+
   await bloco(t, "freio de força bruta (último: bloqueia o IP)", async () => {
     const f = fiscal();
     for (let i = 0; i < 10; i++) {

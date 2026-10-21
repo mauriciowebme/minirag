@@ -37,6 +37,7 @@ import {
   testarProvider,
   verProvider,
 } from "./provider";
+import { criarTarefa, rodarTarefa } from "./tarefa";
 import multipart from "@fastify/multipart";
 import { LIMITE_BYTES } from "./conversor";
 import {
@@ -586,6 +587,19 @@ export function criarApp(): FastifyInstance {
     });
     void contarUso("chats");
     return r;
+  });
+
+  /** v3.3: tarefa de chat que roda no servidor — grava a linha `rodando`, dispara o
+   *  responderChat sem bloquear e devolve 201 {id}. O INSERT é awaitado: a linha está
+   *  commitada antes do `rodar` ler; o queueMicrotask só tira o loop do caminho da resposta. */
+  app.post("/chat/tarefa", async (req, reply) => {
+    const u = usuario(req);
+    const b = corpo(req);
+    const pergunta = vString(b.pergunta, "pergunta", { obrigatorio: true, min: 1, max: CONFIG.maxQueryChars });
+    const memoria = vString(b.memoria, "memoria", { max: 128, def: "" });
+    const id = await criarTarefa(u, { pergunta: pergunta.trim(), memoria: memoria.trim(), tenant: b.tenant ?? null }, rodarTarefa);
+    void contarUso("chats"); // paridade de métrica com POST /chat
+    reply.code(201).send({ id });
   });
 
   /** Chat com streaming (SSE): o texto chega em pedaços, como o modelo escreve.
