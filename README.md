@@ -10,6 +10,46 @@ parecidos com a pergunta, com uma nota de 0 a 1.
 
 ---
 
+## v2.9 — Chat que escreve em pedaços, markdown de verdade e fila de perguntas (20/10/2026)
+
+- **Markdown na bolha do chat**: o texto que o modelo devolve é convertido na tela
+  (`frontend/src/lib/md.ts`) — negrito, itálico, código, link, títulos, citação,
+  linha horizontal, **lista numerada e sub-lista** (o filho mora dentro do `<li>` do
+  pai) e **tabela GFM** com rolagem horizontal quando não cabe. Continua sem
+  dependência nova e **tudo passa por escape antes de qualquer marca**: `<script>`
+  escrito no documento vira texto, nunca tag. Link só aceita `http(s)` —
+  `javascript:` fica de fora por construção.
+- **Resposta ao vivo (`POST /chat/stream`, SSE)**: a bolha aparece e cresce com os
+  pedaços do modelo, com cursor piscando, em vez de chegar inteira depois de 15 s.
+  Eventos: `delta` (pedaço), `descartar` (o texto até aqui NÃO era a resposta — era
+  o raciocínio que vazou pelo `content`), `ferramenta` (uma chamada terminou, ainda
+  durante o fluxo), `fim` (o mesmo objeto que `POST /chat` devolve) e `erro`
+  (depois de `hijack()` não existe mais HTTP de erro: o problema vira evento).
+  O pulso `: ping` a cada 10 s segura a conexão contra proxies enquanto o modelo
+  local pensa. `POST /chat` continua igual, sem streaming — é o caminho do
+  `Clauricio` via MCP e a reserva do painel se o servidor não tiver `/chat/stream`.
+- **Regra nova do raciocínio vazado**: um modelo local
+  (llama.cpp, vLLM com chat template de raciocínio) pode escrever o pensamento em
+  voz alta dentro de `message.content` ANTES de chamar a ferramenta, e o mesmo
+  texto se repete em `reasoning_content`/`thinking`. A resposta não é final quando
+  vêm `tool_calls`: o texto daquela rodada é descartado e a tela recebe
+  `descartar`, então nada de `Thinking:` fica na bolha nem no histórico.
+  Na rodada final (sem `tool_calls`) o texto é a resposta e vai inteiro.
+- **Fila de perguntas**: o campo fica livre enquanto o modelo trabalha. Enter manda
+  para a fila (uma por vez, na ordem, serial — o modelo local tem duas placas e
+  requisição paralela só deixaria tudo mais lento). Item na fila tem **✕ na fila**
+  para cancelar antes de sair; se uma pergunta falhar, a fila continua. Trocar de
+  gaveta derruba o que ainda não saiu.
+- **Rodapé do chat**: enquanto nada chegou, a bolha mostra `pensando… Ns` (cronômetro
+  real) e quantas perguntas estão na fila.
+- **Configurações em abas** (`Config.tsx`): Provider do chat · Ferramentas (MCP) ·
+  Servidores MCP externos.
+- **API**: +1 rota (`POST /chat/stream`). Versão: `2.9.0`.
+- **Suíte**: +22 checagens (convertedor de markdown testado a partir do MESMO
+  arquivo do frontend, sem build; fluxo SSE completo com provedor falso dentro do
+  container: pedaços, descarte do raciocínio, ferramenta ao vivo, histórico limpo,
+  erro como evento).
+
 ## v2.8.1 — Regra do escopo: linha própria só vale completa (20/10/2026)
 
 - `provider_config` tem linha por usuário e o padrão global (`*`). **Ambos os lados agora
