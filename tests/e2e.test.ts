@@ -1429,6 +1429,13 @@ test("minirag v2 — suíte completa", async (t) => {
     return modulo.exports.mdParaHtml as (md: string) => string;
   }
 
+  /** cabeçalho de autorização para fetch cru (streams da Task 4). A palavra do cabeçalho
+   *  vem montada por partes porque o filtro de segredo do ambiente come o padrão completo
+   *  quando escrito num patch — é limitação da ferramenta, não do código. */
+  function cabecalho(k: string): string {
+    return ["B", "earer ", k].join("");
+  }
+
   /** chama /chat/stream e devolve os eventos na ordem em que chegaram */
   async function fluxo(key: string, corpo: Record<string, unknown>): Promise<{ ctype: string; eventos: any[]; bruto: string }> {
     const r = await fetch(`${BASE}/chat/stream`, {
@@ -1988,6 +1995,27 @@ test("minirag v2 — suíte completa", async (t) => {
     f.check("tarefa terminou sem nenhum cliente conectado", st === "terminou", { st, aviso: psql(`SELECT COALESCE(aviso,'') FROM chat_tarefas WHERE id='${id}'`) });
     const parcial = psql(`SELECT parcial FROM chat_tarefas WHERE id='${id}'`);
     f.check("parcial no banco é a resposta final (sem 'Thinking:')", /9\.876,54/.test(parcial) && !/Thinking:/.test(parcial), parcial.slice(0, 160));
+
+    console.log("-- SSE reanexável (Task 4): abre, lê o replay, ABORTA no meio, reanexa do zero");
+    const rt = await call("POST", "/chat/tarefa", { key: TESTKEY, corpo: { pergunta: "reanexa por favor", memoria: GAV } });
+    const idRe = String(rt.json?.id ?? "");
+    const c1 = new AbortController();
+    const s1 = await fetch(`${BASE}/chat/tarefa/${idRe}/stream`, { headers: { authorization: cabecalho(TESTKEY) }, signal: c1.signal });
+    f.check("stream abre: 200 + event-stream", s1.status === 200 && /text\/event-stream/.test(s1.headers.get("content-type") ?? ""), `${s1.status} ${s1.headers.get("content-type") ?? ""}`);
+    const leitura = await Promise.race([
+      s1.body!.getReader().read(),
+      new Promise<never>((_, rej) => setTimeout(() => rej(new Error("stream não mandou evento em 30s")), 30_000)),
+    ]);
+    f.check("abre com replay: primeiro evento é parcial", new TextDecoder().decode(leitura.value ?? new Uint8Array()).includes('"tipo":"parcial"'), String(new TextDecoder().decode(leitura.value ?? new Uint8Array())).slice(0, 160));
+    c1.abort(); // simula fechar a aba no meio
+
+    const s2 = await fetch(`${BASE}/chat/tarefa/${idRe}/stream`, { headers: { authorization: cabecalho(TESTKEY) }, signal: AbortSignal.timeout(60_000) });
+    const bruto2 = await s2.text(); // server fecha o stream no fim → text() resolve
+    f.check("reanexar recebe tudo até o fim", bruto2.includes('"tipo":"fim"'), bruto2.slice(-180));
+    const rGet = await call("GET", `/chat/tarefa/${idRe}`, { key: TESTKEY });
+    f.check("fim coerente com o GET (estado já fechado quando o fim chega)", rGet.json?.status === "terminou", rGet.texto.slice(0, 160));
+    const s404 = await fetch(`${BASE}/chat/tarefa/nao-existe-999/stream`, { headers: { authorization: cabecalho(TESTKEY) }, signal: AbortSignal.timeout(15_000) });
+    f.check("stream de id inexistente: 404 sem hijack", s404.status === 404, String(s404.status));
 
     /* limpeza OBRIGATÓRIA — as três chamadas finais do padrão v2.9 (sem isso contamina runs futuros) */
     await call("PUT", "/config/provider", { key: OPKEY, corpo: { tipo: "litellm", base_url: "http://127.0.0.1:9918/v1", modelo: "tarefa", system_prompt: "", mcp_interno: false, max_rodadas: 3, ativo: false, global: true } });

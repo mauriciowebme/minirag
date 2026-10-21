@@ -37,7 +37,7 @@ import {
   testarProvider,
   verProvider,
 } from "./provider";
-import { criarTarefa, listarTarefas, rodarTarefa, verTarefa } from "./tarefa";
+import { assinarTarefa, criarTarefa, listarTarefas, rodarTarefa, verTarefa } from "./tarefa";
 import multipart from "@fastify/multipart";
 import { LIMITE_BYTES } from "./conversor";
 import {
@@ -619,6 +619,95 @@ export function criarApp(): FastifyInstance {
       return;
     }
     return { id: t.id, status: t.status, parcial: t.parcial, ferramentas: t.ferramentas, aviso: t.aviso };
+  });
+
+  /** v3.3: SSE reanexável da tarefa — replay do parcial + deltas ao vivo + fim/erro.
+   *  Ordem anti-corrida ASSINAR-DEPOIS-RELER: o ouvinte entra ANTES de qualquer leitura;
+   *  eventos disparados no vão viram snapshot da releitura, duplicatas caem no dedupe
+   *  do client (R2 — texto.length <= parcial.length descarta). Mesmo padrão do
+   *  POST /chat/stream: hijack, vivo via close da RESPOSTA, pulso 10s.
+   *  Depois do hijack nada pode lançar erro — existência foi checada ANTES. */
+  app.get("/chat/tarefa/:id/stream", async (req, reply) => {
+    const u = usuario(req);
+    const s = req.query as Record<string, string>;
+    const id = String((req.params as Record<string, string>).id);
+    if (!(await verTarefa(u, id, s.tenant ?? null))) {
+      reply.code(404).send({ detail: "tarefa não encontrada" });
+      return;
+    }
+
+    reply.hijack();
+    const bruto = reply.raw;
+    bruto.writeHead(200, {
+      "content-type": "text/event-stream; charset=utf-8",
+      "cache-control": "no-cache, must-revalidate",
+      connection: "keep-alive",
+      "x-accel-buffering": "no",
+    });
+    let vivo = true;
+    bruto.on("close", () => {
+      vivo = false; // cliente foi embora: para de escrever, a TAREFA continua no servidor
+    });
+    const enviar = (e: unknown): void => {
+      if (!vivo || bruto.writableEnded || bruto.destroyed) return;
+      try {
+        bruto.write(`data: ${JSON.stringify(e)}\n\n`);
+      } catch {
+        vivo = false;
+      }
+    };
+    const pulso = setInterval(() => {
+      if (!vivo || bruto.writableEnded || bruto.destroyed) return;
+      try {
+        bruto.write(": ping\n\n");
+      } catch {
+        vivo = false;
+      }
+    }, 10_000);
+    let off = () => {};
+    const fechar = (): void => {
+      clearInterval(pulso);
+      off();
+      if (!bruto.writableEnded) {
+        try {
+          bruto.end();
+        } catch {
+          /* conexão já caída */
+        }
+      }
+    };
+    /* 1. assina ANTES de ler */
+    off = assinarTarefa(id, (e) => {
+      enviar(e);
+      const tipo = (e as { tipo?: string }).tipo;
+      if (tipo === "fim" || tipo === "erro") fechar(); // stream vivo tem que FECHAR no fim
+    });
+    if (!vivo) {
+      fechar();
+      return;
+    }
+    /* 2. releitura = snapshot (cobre eventos do vão entre assinatura e leitura) */
+    const t = await verTarefa(u, id, s.tenant ?? null);
+    if (!t) {
+      enviar({ tipo: "erro", detalhe: "a tarefa não existe mais" });
+      fechar();
+      return;
+    }
+    /* 3. corrida: tarefa terminou/falhou enquanto a conexão se montava */
+    if (t.status === "terminou") {
+      enviar({ tipo: "parcial", texto: t.parcial });
+      enviar({ tipo: "fim", dados: { resposta: t.parcial, ferramentas: t.ferramentas, aviso: t.aviso } });
+      fechar();
+      return;
+    }
+    if (t.status === "falhou") {
+      enviar({ tipo: "parcial", texto: t.parcial });
+      enviar({ tipo: "erro", detalhe: t.aviso ?? "a tarefa falhou" });
+      fechar();
+      return;
+    }
+    /* 4. rodando: snapshot do parcial e segue ao vivo pelo ouvinte */
+    enviar({ tipo: "parcial", texto: t.parcial });
   });
 
   /** Chat com streaming (SSE): o texto chega em pedaços, como o modelo escreve.
