@@ -1144,6 +1144,23 @@ test("minirag v2 — suíte completa", async (t) => {
     r = await call("POST", "/chat", { key: TESTKEY, corpo: { pergunta: "qualquer coisa", memoria: GAV } });
     f.check("chat sem provider -> 409 explicando", r.status === 409 && /provider/i.test(r.json?.detail ?? ""), r.texto.slice(0, 160));
 
+    /* ---- guarda do último operador no APAGAR (v3.2.3: mesma do PATCH) ---- */
+    const listaOps = await call("GET", "/usuarios", { key: OPKEY });
+    const ops = (listaOps.json?.usuarios ?? []).filter((u: any) => u.papel === "operador" && u.ativo);
+    f.check("ambiente de teste tem exatamente 1 operador ativo", ops.length === 1, ops.map((u: any) => u.nome));
+    const nomeOp = String(ops[0]?.nome ?? "");
+
+    r = await call("DELETE", `/usuarios/${nomeOp}`, { key: OPKEY });
+    f.check("apagar o último operador -> 409 (admin não se tranca fora)", r.status === 409 && /ultimo operador/.test(String(r.json?.detail ?? "")), r.texto.slice(0, 180));
+    r = await call("GET", "/gavetas", { key: OPKEY });
+    f.check("o operador continua vivo depois da recusa", r.status === 200, r.status);
+
+    r = await call("POST", "/usuarios", { key: OPKEY, corpo: { nome: "suite-op2", papel: "operador" } });
+    const chaveOp2 = r.json?.chave ?? "";
+    f.check("criar segundo operador pela tela/API", r.status === 201 && String(chaveOp2).length > 20, r.texto.slice(0, 140));
+    r = await call("DELETE", "/usuarios/suite-op2", { key: OPKEY });
+    f.check("com outro operador sobrando, apagar operador ok", r.status === 200 && r.json?.removido === true, r.texto.slice(0, 140));
+
     r = await call("DELETE", "/usuarios/suite-novo", { key: OPKEY });
     f.check("remover usuário sem documentos", r.status === 200 && r.json?.removido === true, r.texto.slice(0, 120));
     await call("DELETE", `/gavetas/${GAV}`, { key: TESTKEY });

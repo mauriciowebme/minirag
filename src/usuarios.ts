@@ -229,6 +229,17 @@ export async function removerUsuario(nomeBruto: string): Promise<{ nome: string;
   if (Number(docs.rows[0]?.n ?? 0) > 0) {
     throw erro409("usuario tem documentos: apague as gavetas dele antes de remover");
   }
+
+  // v3.2.3: mesma guarda do PATCH. Sem isto, apagar o último operador deixava a
+  // plataforma sem admin — e como a política passou a ser "só o admin vem do env",
+  // não haveria mais semente para recriá-lo no próximo boot.
+  const linha = await q(`SELECT papel, ativo FROM usuarios WHERE nome = $1`, [nome]);
+  if (!linha.rowCount) throw erro404(`usuario '${nome}' nao existe`);
+  const alvo = linha.rows[0] as { papel: Papel; ativo: boolean };
+  if (alvo.papel === "operador" && alvo.ativo && operadores.filter((o) => o !== nome).length === 0) {
+    throw erro409("este e o ultimo operador ativo: crie outro antes de apagar");
+  }
+
   const r = await q(`DELETE FROM usuarios WHERE nome = $1`, [nome]);
   if (!r.rowCount) throw erro404(`usuario '${nome}' nao existe`);
   await recarregarUsuarios();
