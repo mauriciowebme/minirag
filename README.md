@@ -10,6 +10,30 @@ parecidos com a pergunta, com uma nota de 0 a 1.
 
 ---
 
+## v3.2 — A resposta longa parou de ser morta no meio (21/10/2026)
+
+- **O defeito**: depois de uma rodada de ferramentas, a tela mostrava
+  `não consegui responder: The operation was aborted due to timeout`. Não era o modelo
+  travado: o pedido ao provider tinha um teto de **90 s para a requisição inteira** e esse
+  teto continuava armado enquanto o corpo da resposta chegava. Com a memória ligada (12
+  turnos) mais os resultados de ferramenta, a conta passa de 90 s escrevendo — e era cortada
+  no meio da frase.
+- **Por que a etiqueta era aquela**: o `try/catch` que traduz o erro para português envolvia
+  só o `fetch`; a leitura do corpo (o stream) estava fora, então o abort cru vazava para a
+  bolha do chat.
+- **A regra nova**: o que corta a conversa é **silêncio**, não duração. Cada pedaço que chega
+  renova o relógio; paro se o provider ficar 180 s sem mandar nada (padrão) ou se a resposta
+  passar de 20 min escrevendo sem parar. Resposta longa e constante tem quanto tempo quiser.
+- **Na tela** (Configurações → Modelo): campo *espera sem sinal do modelo (segundos)*, aceitando
+  0–1800; `0` = padrão do sistema (180 s). É o número para quem usa modelo local lento.
+- **Ferramentas MCP**: mesmo vazamento corrigido — se o servidor MCP morre no meio do corpo,
+  a etiqueta agora é `o servidor MCP não respondeu: ...`, nunca a frase crua do fetch.
+- **Versão**: `3.2.0`.
+- **Testes**: 3 checagens novas na suíte (limite fora da faixa → 422, valor round-trip pela
+  tela, `0` volta ao padrão e aparece como efetivo).
+
+---
+
 ## v3.1 — A conversa para de puxar a tela e o recomeçar desceu para o pé (21/10/2026)
 
 - **Você manda na rolagem**: enquanto o modelo pensa, a caixa de mensagens descia sozinha a
