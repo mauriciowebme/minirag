@@ -14,6 +14,7 @@
 import { Usuario, tenantFor } from "./config";
 import { erro409, erro422 } from "./errors";
 import { q } from "./db";
+import { apertarRodada, custoDoPayload, type MsgChat, montarPayload } from "./compactar";
 import {
   type ChamadaFerramenta,
   executarFerramenta,
@@ -28,6 +29,12 @@ export type TipoProvider = "litellm" | "openai" | "ollama";
 const GLOBAL = "*";
 const LIMITE_PROMPT = 8000;
 export const RODADAS_PADRAO = 5;
+/* v3.0 — memória e orçamento de contexto (heurística de tokens em compactar.ts) */
+export const MEMORIA_PADRAO = 12; // turnos antigos que voltam ao modelo (0 = sem memória, como na v2.9)
+export const VERBATIM_PADRAO = 4; // quantos deles ficam intactos na compactação
+export const RESERVA_PADRAO = 1024; // tokens livres para a resposta
+export const JANELA_PADRAO = 8192; // usada quando nem o painel nem a detecção informaram
+export const TETO_FERRAMENTA = 6000; // caracteres de cada resultado de ferramenta que entra no payload
 
 type Linha = {
   escopo: string;
@@ -39,6 +46,11 @@ type Linha = {
   system_prompt: string;
   mcp_interno: boolean;
   max_rodadas: number;
+  memoria_turnos: number | null;
+  verbatim_turnos: number | null;
+  reserva_tokens: number | null;
+  contexto_tokens: number | null;
+  contexto_detectado: number | null;
   ativo: boolean;
   atualizado_em: string;
 };
@@ -53,6 +65,12 @@ export type CfgResolvida = {
   system_prompt: string;
   mcp_interno: boolean;
   max_rodadas: number;
+  memoria_turnos: number;
+  verbatim_turnos: number;
+  reserva_tokens: number;
+  /** janela efetiva em tokens (configurada > detectada > padrão) */
+  janela: number;
+  origem_janela: "configurada" | "detectada" | "padrao";
   ativo: boolean;
 };
 
@@ -82,6 +100,13 @@ export async function initProvider(): Promise<void> {
   await q(`ALTER TABLE provider_config ADD COLUMN IF NOT EXISTS system_prompt TEXT NOT NULL DEFAULT ''`);
   await q(`ALTER TABLE provider_config ADD COLUMN IF NOT EXISTS mcp_interno BOOLEAN NOT NULL DEFAULT false`);
   await q(`ALTER TABLE provider_config ADD COLUMN IF NOT EXISTS max_rodadas INT NOT NULL DEFAULT ${RODADAS_PADRAO}`);
+  /* v3.0: memória e orçamento de contexto. NULL = "não configurado" (usa o padrão do código);
+     contexto_tokens/contexto_detectado ficam NULL até alguém configurar ou o teste de conexão detectar. */
+  await q(`ALTER TABLE provider_config ADD COLUMN IF NOT EXISTS memoria_turnos INT NOT NULL DEFAULT ${MEMORIA_PADRAO}`);
+  await q(`ALTER TABLE provider_config ADD COLUMN IF NOT EXISTS verbatim_turnos INT NOT NULL DEFAULT ${VERBATIM_PADRAO}`);
+  await q(`ALTER TABLE provider_config ADD COLUMN IF NOT EXISTS reserva_tokens INT NOT NULL DEFAULT ${RESERVA_PADRAO}`);
+  await q(`ALTER TABLE provider_config ADD COLUMN IF NOT EXISTS contexto_tokens INT`);
+  await q(`ALTER TABLE provider_config ADD COLUMN IF NOT EXISTS contexto_detectado INT`);
   await q(
     `CREATE TABLE IF NOT EXISTS chat_mensagens (
        id BIGSERIAL PRIMARY KEY,
@@ -95,6 +120,15 @@ export async function initProvider(): Promise<void> {
   );
   await q(`ALTER TABLE chat_mensagens ADD COLUMN IF NOT EXISTS ferramentas JSONB`);
   await q(`CREATE INDEX IF NOT EXISTS chat_tenant_idx ON chat_mensagens (tenant, memoria, id)`);
+}
+
+/** Janela de contexto efetiva: o que o operador digitou > o que a detecção achou > padrão. */
+function planoDeJanela(l: Linha | null | undefined): { janela: number; origem_janela: "configurada" | "detectada" | "padrao" } {
+  const configurada = Number(l?.contexto_tokens ?? 0);
+  const detectada = Number(l?.contexto_detectado ?? 0);
+  if (configurada > 0) return { janela: configurada, origem_janela: "configurada" };
+  if (detectada > 0) return { janela: detectada, origem_janela: "detectada" };
+  return { janela: JANELA_PADRAO, origem_janela: "padrao" };
 }
 
 /** Config efetiva (ordem): linha própria completa › global › linha própria incompleta.
@@ -122,6 +156,10 @@ export async function resolverProvider(tenant: string): Promise<CfgResolvida | n
     system_prompt: l.system_prompt ?? "",
     mcp_interno: Boolean(l.mcp_interno),
     max_rodadas: Number(l.max_rodadas ?? RODADAS_PADRAO),
+    memoria_turnos: Number(l.memoria_turnos ?? MEMORIA_PADRAO),
+    verbatim_turnos: Number(l.verbatim_turnos ?? VERBATIM_PADRAO),
+    reserva_tokens: Number(l.reserva_tokens ?? RESERVA_PADRAO),
+    ...planoDeJanela(l),
     ativo: l.ativo,
   };
 }
@@ -134,8 +172,9 @@ export async function verProvider(user: Usuario, tenantArg?: string | null) {
   /* regra v2.8: a linha própria só vale completa (base_url E modelo) — igual ao chat.
      Linha própria pela metade não pode esconder do usuário o provider que está em uso. */
   const completa = (l?: Linha | null) => Boolean(l && l.base_url && l.modelo);
-  const usaPropria = completa(propria.rows[0]) || !global.rows[0];
+  const usaPropria = tenant !== GLOBAL && (completa(propria.rows[0]) || !global.rows[0]);
   const l = (usaPropria ? propria.rows[0] : global.rows[0]) ?? propria.rows[0] ?? global.rows[0] ?? null;
+  const plano = planoDeJanela(l);
   return {
     configurado: Boolean(l?.ativo && l?.base_url && l?.modelo),
     escopo: l?.escopo ?? null,
@@ -149,6 +188,13 @@ export async function verProvider(user: Usuario, tenantArg?: string | null) {
     tem_system_prompt: Boolean(l?.system_prompt?.trim()),
     mcp_interno: Boolean(l?.mcp_interno ?? false),
     max_rodadas: l ? Number(l.max_rodadas ?? RODADAS_PADRAO) : RODADAS_PADRAO,
+    memoria_turnos: l ? Number(l.memoria_turnos ?? MEMORIA_PADRAO) : MEMORIA_PADRAO,
+    verbatim_turnos: l ? Number(l.verbatim_turnos ?? VERBATIM_PADRAO) : VERBATIM_PADRAO,
+    reserva_tokens: l ? Number(l.reserva_tokens ?? RESERVA_PADRAO) : RESERVA_PADRAO,
+    contexto_tokens: l?.contexto_tokens === null || l?.contexto_tokens === undefined ? null : Number(l.contexto_tokens),
+    contexto_detectado: l?.contexto_detectado === null || l?.contexto_detectado === undefined ? null : Number(l.contexto_detectado),
+    janela_efetiva: plano.janela,
+    origem_janela: plano.origem_janela,
     ativo: Boolean(l?.ativo ?? false),
     tem_chave: Boolean(l?.chave),
     chave_mascarada: mascararChave(l?.chave ?? ""),
@@ -167,6 +213,11 @@ export async function salvarProvider(
     system_prompt?: unknown;
     mcp_interno?: unknown;
     max_rodadas?: unknown;
+    memoria_turnos?: unknown;
+    verbatim_turnos?: unknown;
+    reserva_tokens?: unknown;
+    contexto_tokens?: unknown;
+    tenant?: unknown;
     ativo?: unknown;
     global?: unknown;
   },
@@ -180,7 +231,12 @@ export async function salvarProvider(
 
   const usaGlobal = Boolean(body.global);
   if (usaGlobal && !user.operador) throw erro409("só o operador grava o padrão global");
-  const escopo = usaGlobal ? GLOBAL : tenantFor(user);
+  /* v3.0: a tela mostra o provider do cliente selecionado (GET ?tenant=...), entao o SALVAR tem que
+     ir para o MESMO escopo. Antes o `tenant` do corpo era ignorado: instruções digitadas para um
+     cliente eram gravadas na linha do operador e, ao reler o cliente, pareciam apagadas
+     (reproduzido no container de teste em 20/10). tenantFor já protege: usuário comum não alcança
+     tenant alheio nem aqui. */
+  const escopo = usaGlobal ? GLOBAL : tenantFor(user, typeof body.tenant === "string" ? body.tenant : null);
 
   const anterior = await q<Linha>(`SELECT * FROM provider_config WHERE escopo = $1`, [escopo]);
   const linhaAnterior = anterior.rows[0];
@@ -209,18 +265,40 @@ export async function salvarProvider(
     throw erro422("max_rodadas deve ser um número entre 0 e 10");
   }
 
+  /* v3.0 — memória e orçamento. `contexto_tokens: 0` significa "deixa automático". */
+  const inteiro = (v: unknown, anterior: unknown, nome: string, min: number, max: number): number => {
+    if (v === undefined || v === null || v === "") return Number(anterior ?? 0);
+    const n = Number(v);
+    if (!Number.isInteger(n) || n < min || n > max) throw erro422(`${nome} deve ser um número entre ${min} e ${max}`);
+    return n;
+  };
+  const memoriaTurnos = inteiro(body.memoria_turnos, linhaAnterior?.memoria_turnos ?? MEMORIA_PADRAO, "memoria_turnos", 0, 100);
+  const verbatimTurnos = inteiro(body.verbatim_turnos, linhaAnterior?.verbatim_turnos ?? VERBATIM_PADRAO, "verbatim_turnos", 0, 40);
+  const reservaTokens = inteiro(body.reserva_tokens, linhaAnterior?.reserva_tokens ?? RESERVA_PADRAO, "reserva_tokens", 1, 200000);
+  const contextoBruta = inteiro(body.contexto_tokens, linhaAnterior?.contexto_tokens ?? 0, "contexto_tokens", 0, 4000000);
+  const contextoTokens = contextoBruta > 0 ? contextoBruta : null;
+
   await q(
-    `INSERT INTO provider_config (escopo, tipo, base_url, modelo, chave, temperatura, system_prompt, mcp_interno, max_rodadas, ativo, atualizado_em)
-     VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, now())
+    `INSERT INTO provider_config (escopo, tipo, base_url, modelo, chave, temperatura, system_prompt, mcp_interno, max_rodadas,
+       ativo, memoria_turnos, verbatim_turnos, reserva_tokens, contexto_tokens, atualizado_em)
+     VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14, now())
      ON CONFLICT (escopo) DO UPDATE SET
        tipo = EXCLUDED.tipo, base_url = EXCLUDED.base_url, modelo = EXCLUDED.modelo,
        chave = EXCLUDED.chave, temperatura = EXCLUDED.temperatura,
        system_prompt = EXCLUDED.system_prompt, mcp_interno = EXCLUDED.mcp_interno,
-       max_rodadas = EXCLUDED.max_rodadas, ativo = EXCLUDED.ativo, atualizado_em = now()`,
-    [escopo, tipo, baseUrl, modelo, chaveNova, temperatura, systemPrompt, mcpInterno, maxRodadas, body.ativo !== false],
+       max_rodadas = EXCLUDED.max_rodadas, ativo = EXCLUDED.ativo,
+       memoria_turnos = EXCLUDED.memoria_turnos, verbatim_turnos = EXCLUDED.verbatim_turnos,
+       reserva_tokens = EXCLUDED.reserva_tokens, contexto_tokens = EXCLUDED.contexto_tokens,
+       atualizado_em = now()`,
+    [
+      escopo, tipo, baseUrl, modelo, chaveNova, temperatura, systemPrompt, mcpInterno, maxRodadas,
+      body.ativo !== false, memoriaTurnos, verbatimTurnos, reservaTokens, contextoTokens,
+    ],
   );
   /* devolve a linha que foi escrita (antes, salvar o global mostrava a própria e parecia "não configurado") */
-  return verProvider(user, usaGlobal ? GLOBAL : undefined);
+  /* devolve a linha que FOI ESCRITA (escopo), não a do usuário: a tela recarrega o mesmo alvo
+     que gravou, senão o texto salvo parece sumir quando o painel está num cliente selecionado. */
+  return verProvider(user, escopo);
 }
 
 type ChamadaTool = { id: string; type: "function"; function: { name: string; arguments: string } };
@@ -335,7 +413,8 @@ export async function chamarModelo(
 
 /** Botão "testar conexão": usa o que veio na tela, com a chave salva quando vier mascarada. */
 export async function testarProvider(user: Usuario, body: Record<string, unknown>) {
-  const atual = await resolverProvider(tenantFor(user));
+  const escopoAlvo = body.global ? GLOBAL : tenantFor(user, typeof body.tenant === "string" ? body.tenant : null);
+  const atual = await resolverProvider(escopoAlvo);
   const base = String(body.base_url ?? atual?.base_url ?? "").trim().replace(/\/+$/, "");
   const modelo = String(body.modelo ?? atual?.modelo ?? "").trim();
   const chaveBruta = body.chave === undefined || body.chave === null || body.chave === "***" ? "" : String(body.chave);
@@ -351,7 +430,34 @@ export async function testarProvider(user: Usuario, body: Record<string, unknown
     ],
     { timeoutMs: 20_000 },
   );
-  return { ok: true, ms: r.ms, modelo, resposta: r.texto.slice(0, 120) };
+  /* v3.0: aproveita a conexão que acabou de funcionar e pergunta a janela do modelo.
+     Detecção é conveniência, não requisito: a tela também aceita número digitado, e nada aqui
+     pode derrubar o teste de conexão. */
+  let contexto_detectado: number | null = null;
+  try {
+    const m = await fetch(`${base}/models`, {
+      headers: { ...(chave ? { authorization: `Bearer ${chave}` } : {}) },
+      signal: AbortSignal.timeout(8000),
+    });
+    if (m.ok) {
+      const lista: any = await m.json().catch(() => null);
+      const itens = Array.isArray(lista?.data) ? lista.data : Array.isArray(lista?.models) ? lista.models : [];
+      const escolhido = itens.find((x: any) => String(x?.id ?? x?.name ?? x?.model ?? "") === modelo) ?? itens[0];
+      const bruto = Number(escolhido?.context_length ?? escolhido?.max_model_len ?? escolhido?.n_ctx ?? 0);
+      if (Number.isFinite(bruto) && bruto >= 128) {
+        contexto_detectado = Math.floor(bruto);
+        /* grava na linha testada, sem nunca amassar o número que o humano digitou */
+        await q(
+          `UPDATE provider_config SET contexto_detectado = $2, atualizado_em = now()
+           WHERE escopo = $1 AND (contexto_tokens IS NULL OR contexto_tokens = 0)`,
+          [escopoAlvo, contexto_detectado],
+        );
+      }
+    }
+  } catch {
+    /* provider sem /models: segue sem detecção */
+  }
+  return { ok: true, ms: r.ms, modelo, resposta: r.texto.slice(0, 120), contexto_detectado };
 }
 
 /* ------------------------------------------------------------------- chat */
@@ -390,6 +496,20 @@ function ultimoResultadoTool(mensagens: Mensagem[]): string {
   return "";
 }
 
+/** as últimas mensagens gravadas desta gaveta, no formato que o modelo lê (v3.0) */
+async function mensagensDoHistorico(tenant: string, memoria: string, turnos: number): Promise<MsgChat[]> {
+  /* a gaveta PADRAO e string vazia: comprimir `!memoria` desligava a conversa justamente nela */
+  if (turnos <= 0) return [];
+  const r = await q<{ papel: string; texto: string }>(
+    `SELECT papel, texto FROM chat_mensagens
+     WHERE tenant = $1 AND memoria = $2 ORDER BY id DESC LIMIT $3`,
+    [tenant, memoria, Math.min(turnos, 100)],
+  );
+  return r.rows
+    .reverse()
+    .map((m: any) => ({ role: m.papel === "user" ? "user" : "assistant", content: String(m.texto ?? "") })) as MsgChat[];
+}
+
 export async function responderChat(
   user: Usuario,
   body: { pergunta: string; memoria?: string; tenant?: string | null },
@@ -406,10 +526,37 @@ export async function responderChat(
   }
 
   const pacote = await pacoteDeFerramentas(cfg.mcp_interno);
-  const mensagens: Mensagem[] = [];
-  /* regra v2.8: nenhuma instrução embutida — system prompt vazio = modelo conversa puro */
-  if (cfg.system_prompt.trim()) mensagens.push({ role: "system", content: cfg.system_prompt });
-  mensagens.push({ role: "user", content: pergunta });
+  const toolsTokens = custoDoPayload([], pacote.specs.length ? pacote.specs : undefined);
+
+  /* v3.0 — memória + orçamento. A conversa anterior volta para o modelo (por gaveta), e o payload
+     INTEIRO é cortado para caber na janela. A compactação é regra determinística, sem LLM e sem
+     custo: mensagem antiga vira linha curta, a cauda fica verbatim, resultado de ferramenta velho
+     é aparado antes de qualquer descarte, e o que ainda não couber cai do mais antigo — avisando
+     quantas foram, porque "sumiu sem dizer" é pior que sumir.
+     Regra v2.8 mantida: nenhuma instrução embutida — system prompt vazio = modelo conversa puro. */
+  const historico = await mensagensDoHistorico(tenant, memoria, cfg.memoria_turnos);
+  const plano = montarPayload({
+    system: cfg.system_prompt,
+    historico,
+    pergunta,
+    toolsTokens,
+    janela: cfg.janela,
+    reserva: cfg.reserva_tokens,
+    verbatim: cfg.verbatim_turnos,
+  });
+  const mensagens: Mensagem[] = plano.mensagens as Mensagem[];
+  const compactacao = {
+    memoria_turnos: cfg.memoria_turnos,
+    historico_lido: historico.length,
+    resumidas: plano.resumidas,
+    aparadas: plano.cortadas,
+    descartadas: plano.descartadas,
+    tokens: plano.tokens,
+    disponivel: plano.disponivel,
+    janela: cfg.janela,
+    origem_janela: cfg.origem_janela,
+    coube: plano.coube,
+  };
 
   const chamadas: ChamadaFerramenta[] = [];
   const inicio = Date.now();
@@ -421,6 +568,22 @@ export async function responderChat(
     rodadas++;
     const usaFerramentas = pacote.specs.length > 0 && cfg.max_rodadas > 0;
     let saiuTexto = false;
+    /* cada rodada coloca mais um resultado de ferramenta no payload: aperta ANTES de chamar */
+    if (rodadas > 1) {
+      const apertado = apertarRodada(mensagens as MsgChat[], {
+        janela: cfg.janela,
+        reserva: cfg.reserva_tokens,
+        toolsTokens,
+        verbatim: cfg.verbatim_turnos,
+      });
+      mensagens.length = 0;
+      mensagens.push(...(apertado.mensagens as Mensagem[]));
+      compactacao.aparadas += apertado.cortadas;
+      compactacao.descartadas += apertado.descartadas;
+      compactacao.tokens = apertado.tokens;
+      compactacao.disponivel = apertado.disponivel;
+      if (apertado.tokens > apertado.disponivel) compactacao.coube = false;
+    }
     const r = await chamarModelo(cfg, mensagens, {
       tools: usaFerramentas ? pacote.specs : undefined,
       stream: Boolean(emitir),
@@ -470,7 +633,14 @@ export async function responderChat(
         ms: Date.now() - antes,
       });
       emitir?.({ tipo: "ferramenta", servidor: exec.servidor, nome: exec.nome, ok: exec.ok, ms: exec.ms });
-      mensagens.push({ role: "tool", tool_call_id: c.id, content: paraTexto(exec.saida) });
+      /* o resultado entra já aparado: ferramenta gulosamente verbosa não pode estourar a janela */
+      const brutoTool = paraTexto(exec.saida);
+      mensagens.push({
+        role: "tool",
+        tool_call_id: c.id,
+        content: brutoTool.length > TETO_FERRAMENTA ? `${brutoTool.slice(0, TETO_FERRAMENTA)}\n…(cortado por orçamento de contexto)` : brutoTool,
+      });
+      if (brutoTool.length > TETO_FERRAMENTA) compactacao.aparadas++;
     }
   }
 
@@ -497,6 +667,7 @@ export async function responderChat(
     ferramentas_ligadas: pacote.specs.length,
     servidores: { interno: cfg.mcp_interno, externos: pacote.externos },
     tem_system_prompt: Boolean(cfg.system_prompt.trim()),
+    compactacao,
     ms: Date.now() - inicio,
     aviso,
   };
