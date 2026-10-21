@@ -37,7 +37,7 @@ import {
   testarProvider,
   verProvider,
 } from "./provider";
-import { criarTarefa, rodarTarefa } from "./tarefa";
+import { criarTarefa, listarTarefas, rodarTarefa, verTarefa } from "./tarefa";
 import multipart from "@fastify/multipart";
 import { LIMITE_BYTES } from "./conversor";
 import {
@@ -600,6 +600,25 @@ export function criarApp(): FastifyInstance {
     const id = await criarTarefa(u, { pergunta: pergunta.trim(), memoria: memoria.trim(), tenant: b.tenant ?? null }, rodarTarefa);
     void contarUso("chats"); // paridade de métrica com POST /chat
     reply.code(201).send({ id });
+  });
+
+  /** v3.3: consultas de tarefa (reanexar). Lista só as RODANDO da gaveta; estado
+   *  de uma pelo id SEM filtro de tenant = vazamento de parcial entre tenants. */
+  app.get("/chat/tarefas", async (req) => {
+    const u = usuario(req);
+    const s = req.query as Record<string, string>;
+    return listarTarefas(u, { memoria: (s.memoria ?? "").trim(), tenant: s.tenant ?? null });
+  });
+
+  app.get("/chat/tarefa/:id", async (req, reply) => {
+    const u = usuario(req);
+    const s = req.query as Record<string, string>;
+    const t = await verTarefa(u, String((req.params as Record<string, string>).id), s.tenant ?? null);
+    if (!t) {
+      reply.code(404).send({ detail: "tarefa não encontrada" });
+      return;
+    }
+    return { id: t.id, status: t.status, parcial: t.parcial, ferramentas: t.ferramentas, aviso: t.aviso };
   });
 
   /** Chat com streaming (SSE): o texto chega em pedaços, como o modelo escreve.

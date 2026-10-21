@@ -1967,6 +1967,17 @@ test("minirag v2 — suíte completa", async (t) => {
     const rv = await call("POST", "/chat/tarefa", { key: TESTKEY, corpo: { pergunta: "", memoria: GAV } });
     f.check("pergunta vazia: 422 (mesma regra do /chat)", rv.status === 422, rv.texto.slice(0, 120));
 
+    console.log("-- consultas de tarefa (Task 3)");
+    const rc = await call("POST", "/chat/tarefa", { key: TESTKEY, corpo: { pergunta: "lista por favor", memoria: GAV } });
+    f.check("cria a seu tarefa p/ consulta", rc.status === 201 && typeof rc.json?.id === "string", rc.texto.slice(0, 120));
+    const r1 = await call("GET", `/chat/tarefas?memoria=${GAV}`, { key: TESTKEY });
+    f.check("lista tarefas rodando", r1.status === 200 && Array.isArray(r1.json?.tarefas), r1.texto.slice(0, 120));
+    f.check("vê a tarefa rodando (com pergunta no payload)", r1.json?.tarefas?.some((t: any) => t.id === rc.json?.id && t.status === "rodando" && typeof t.pergunta === "string"), JSON.stringify(r1.json ?? r1.texto).slice(0, 200));
+    const r2 = await call("GET", `/chat/tarefa/${String(rc.json?.id ?? "")}`, { key: TESTKEY });
+    f.check("estado da tarefa", r2.status === 200 && typeof r2.json?.parcial === "string", r2.texto.slice(0, 120));
+    const r404 = await call("GET", `/chat/tarefa/nao-existe-999`, { key: TESTKEY });
+    f.check("id inexistente: 404", r404.status === 404, r404.texto.slice(0, 120));
+
     console.log("-- deixa a tarefa terminar SOZINHA (provedor lento: ~4 s de deltas)");
     let st = "";
     for (let i = 0; i < 60; i++) {

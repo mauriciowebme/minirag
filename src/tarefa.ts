@@ -55,6 +55,27 @@ export async function criarTarefa(
   return id;
 }
 
+/* ---- consultas (Task 3) — SQL mora no domínio, não em app.ts ---- */
+
+export async function listarTarefas(u: Usuario, opts: { memoria: string; tenant?: string | null }) {
+  const r = await q(
+    `SELECT id, pergunta, status, parcial, criado_em, atualizado_em FROM chat_tarefas
+     WHERE tenant = $1 AND memoria = $2 AND status = 'rodando' ORDER BY criado_em`,
+    [tenantFor(u, opts.tenant ?? null), opts.memoria],
+  );
+  return { tarefas: r.rows };
+}
+
+export async function verTarefa(u: Usuario, id: string, tenantArg?: string | null) {
+  /* filtro por tenant OBRIGATÓRIO: id só é 404 se não existir OU pertencer a outro
+   * tenant — senão vazaria `parcial` entre tenants no reanexar. */
+  const r = await q(
+    `SELECT * FROM chat_tarefas WHERE id = $1 AND tenant = $2`,
+    [id, tenantFor(u, tenantArg ?? null)],
+  );
+  return r.rows[0] ?? null;
+}
+
 /** Executa a tarefa: upsert de parcial a cada delta; responderChat já grava
  *  chat_mensagens no fim (provider.ts:750) — aqui só fechamos a tarefa.
  *  `tenant: t.tenant` (o da linha): operador criou para outro tenant → o arg é
