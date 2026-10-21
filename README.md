@@ -44,6 +44,15 @@ parecidos com a pergunta, com uma nota de 0 a 1.
   usuário → arquivos → editor, "Gavetas" permanece acesa).
 - **Versão**: `3.2.1`.
 
+### v3.2.2 — ordem do menu (Chat em cima, Usuários perto de Configurações)
+
+- Nova ordem do menu lateral, pedida pelo dono: **Painel · Chat · Buscar · Fila ·
+  Gavetas/Usuários · Configurações** — o Chat passa a ser o 2º item e Usuários fica
+  logo acima de Configurações.
+- Nada muda de rota: só a ordem dos botões. O destaque do item da tela aberta continua
+  seguindo a navegação (usuário → arquivos → editor mantém "Usuários/Gavetas" aceso).
+- **Versão**: `3.2.2`.
+
 ---
 
 ## v3.1 — A conversa para de puxar a tela e o recomeçar desceu para o pé (21/10/2026)
