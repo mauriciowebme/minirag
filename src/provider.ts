@@ -235,7 +235,7 @@ type Mensagem = {
 export async function chamarModelo(
   cfg: { base_url: string; modelo: string; chave: string; temperatura: number; tipo: TipoProvider },
   mensagens: Mensagem[],
-  opts: { tools?: unknown[]; timeoutMs?: number } = {},
+  opts: { tools?: unknown[]; timeoutMs?: number; stream?: boolean; onDelta?: (t: string) => void } = {},
 ): Promise<{ message: { role: "assistant"; content: string; tool_calls?: ChamadaTool[] }; texto: string; ms: number }> {
   const timeoutMs = opts.timeoutMs ?? 90_000;
   const inicio = Date.now();
@@ -245,7 +245,7 @@ export async function chamarModelo(
     model: cfg.modelo,
     messages: mensagens,
     temperature: cfg.temperatura,
-    stream: false,
+    stream: Boolean(opts.stream && opts.onDelta),
   };
   if (opts.tools?.length) corpo.tools = opts.tools;
   let r: Response;
@@ -261,8 +261,61 @@ export async function chamarModelo(
       (e as Error).name === "TimeoutError" ? `provider nao respondeu em ${timeoutMs / 1000}s` : (e as Error).message;
     throw erro422(`nao consegui falar com o provider: ${msg}`);
   }
+  if (!r.ok) {
+    const corpoErro = await r.text().catch(() => "");
+    throw erro422(`provider respondeu ${r.status}: ${corpoErro.slice(0, 200)}`);
+  }
+
+  /* caminho com streaming: SSE (`data: {...}` linha a linha) */
+  const tipoConteudo = r.headers.get("content-type") ?? "";
+  if (corpo.stream && tipoConteudo.includes("event-stream") && r.body) {
+    const pecas: string[] = [];
+    const chamadas: Record<number, { id: string; nome: string; args: string }> = {};
+    const leitor = r.body.getReader();
+    const dec = new TextDecoder();
+    let sobra = "";
+    for (;;) {
+      const { done, value } = await leitor.read();
+      if (done) break;
+      sobra += dec.decode(value, { stream: true });
+      const partes = sobra.split("\n");
+      sobra = partes.pop() ?? "";
+      for (const linha of partes) {
+        const dados = linha.startsWith("data:") ? linha.slice(5).trim() : "";
+        if (!dados || dados === "[DONE]") continue;
+        let j: any;
+        try {
+          j = JSON.parse(dados);
+        } catch {
+          continue; /* comentário de manutenção de conexão */
+        }
+        const delta = j?.choices?.[0]?.delta ?? {};
+        if (typeof delta.content === "string" && delta.content) {
+          pecas.push(delta.content);
+          opts.onDelta?.(delta.content);
+        }
+        for (const c of delta.tool_calls ?? []) {
+          const k = Number(c.index ?? 0);
+          const alvo = (chamadas[k] ??= { id: "", nome: "", args: "" });
+          if (c.id) alvo.id = c.id;
+          if (c.function?.name) alvo.nome += c.function.name;
+          if (c.function?.arguments) alvo.args += c.function.arguments;
+        }
+      }
+    }
+    const texto = pecas.join("");
+    const toolCalls: ChamadaTool[] = Object.values(chamadas)
+      .filter((c) => c.nome)
+      .map((c, n) => ({ id: c.id || `call_${Date.now()}_${n}`, type: "function", function: { name: c.nome, arguments: c.args || "{}" } }));
+    if (!texto && !toolCalls.length) throw erro422("provider respondeu sem texto e sem chamada de ferramenta");
+    return {
+      message: { role: "assistant", content: texto, ...(toolCalls.length ? { tool_calls: toolCalls } : {}) },
+      texto: texto.trim(),
+      ms: Date.now() - inicio,
+    };
+  }
+
   const texto = await r.text();
-  if (!r.ok) throw erro422(`provider respondeu ${r.status}: ${texto.slice(0, 200)}`);
   let json: any;
   try {
     json = JSON.parse(texto);
@@ -303,10 +356,44 @@ export async function testarProvider(user: Usuario, body: Record<string, unknown
 
 /* ------------------------------------------------------------------- chat */
 
-/** Conversa com o modelo. Ele tem as ferramentas do MCP ligado; sem nada ligado, conversa pura. */
+/** Evento do chat com streaming (rota /chat/stream). */
+export type EventoChat =
+  | { tipo: "delta"; texto: string }
+  | { tipo: "descartar" }
+  | { tipo: "ferramenta"; servidor: string; nome: string; ok: boolean; ms: number }
+  | { tipo: "fim"; dados: Record<string, unknown> }
+  | { tipo: "erro"; detalhe: string };
+
+/** Conversa com o provider. Ele tem as ferramentas do MCP ligado; sem nada ligado, conversa pura.
+ *  `emitir` (opcional) liga o modo streaming: o texto chega em pedaços, conforme o modelo escreve. */
+/* ---- raciocínio que vaza pelo `content` (medido 20/10 com modelo local) ----
+ * Alguns modelos de chat local (llama.cpp, vLLM com template de raciocínio) escrevem
+ * o pensamento DENTRO de `message.content` antes de chamar a ferramenta — e ainda
+ * repetem o mesmo texto em `reasoning_content`/`thinking`. Aquilo não é resposta:
+ * se a rodada pediu ferramenta, o texto dela é rascunho. */
+const MARCA_PENSO = /^(thinking|thought|reasoning|analysis|reflex[\u00e3a]o|racioc[\u00edi]nio|vou |deixa eu |primeiro |agora vou)/i;
+const LIMITE_RASCUNHO = 160;
+
+/** o texto desta rodada é rascunho de raciocínio? (com ferramenta na mesa, bloco longo também) */
+function textoDeRaciocinio(texto: string, pedindoFerramenta: boolean): boolean {
+  const t = String(texto ?? "").trim();
+  if (!t) return false;
+  if (MARCA_PENSO.test(t)) return true;
+  return pedindoFerramenta && (t.length > LIMITE_RASCUNHO || t.split("\n").length > 1);
+}
+
+/** último resultado de ferramenta disponível no histórico (usado quando o modelo trava) */
+function ultimoResultadoTool(mensagens: Mensagem[]): string {
+  for (let k = mensagens.length - 1; k >= 0; k--) {
+    if (mensagens[k].role === "tool") return String(mensagens[k].content ?? "");
+  }
+  return "";
+}
+
 export async function responderChat(
   user: Usuario,
   body: { pergunta: string; memoria?: string; tenant?: string | null },
+  emitir?: (e: EventoChat) => void,
 ) {
   const pergunta = body.pergunta.trim();
   const tenant = tenantFor(user, body.tenant ?? null);
@@ -333,18 +420,37 @@ export async function responderChat(
   for (;;) {
     rodadas++;
     const usaFerramentas = pacote.specs.length > 0 && cfg.max_rodadas > 0;
-    const r = await chamarModelo(cfg, mensagens, { tools: usaFerramentas ? pacote.specs : undefined });
+    let saiuTexto = false;
+    const r = await chamarModelo(cfg, mensagens, {
+      tools: usaFerramentas ? pacote.specs : undefined,
+      stream: Boolean(emitir),
+      onDelta: emitir
+        ? (t) => {
+            saiuTexto = true;
+            emitir({ tipo: "delta", texto: t });
+          }
+        : undefined,
+    });
     const pedidas = r.message.tool_calls ?? [];
     if (!pedidas.length) {
       texto = r.texto;
       break;
     }
+    /* a rodada chamou ferramenta: o texto que saiu junto NÃO é a resposta */
+    const rascunho = textoDeRaciocinio(r.texto, true);
+    if (emitir && saiuTexto) emitir({ tipo: "descartar" });
     if (rodadas > cfg.max_rodadas) {
-      texto = r.texto;
+      texto = rascunho ? ultimoResultadoTool(mensagens) || "" : r.texto;
       aviso = `o modelo ainda queria ferramenta e bateu o limite de ${cfg.max_rodadas} rodadas`;
       break;
     }
-    mensagens.push(r.message);
+    /* devolve ao histórico SEM o rascunho e SEM os campos internos de pensamento —
+     * se voltassem no contexto, o modelo repetiria o raciocínio na resposta final */
+    const eco: Record<string, unknown> = { ...r.message, content: rascunho ? "" : r.texto };
+    delete eco.reasoning_content;
+    delete eco.reasoning;
+    delete eco.thinking;
+    mensagens.push(eco as Mensagem);
     for (const c of pedidas) {
       const nome = String(c.function?.name ?? "");
       let args: Record<string, unknown> = {};
@@ -363,12 +469,16 @@ export async function responderChat(
         resumo: resumirSaida(exec.saida, exec.ok),
         ms: Date.now() - antes,
       });
+      emitir?.({ tipo: "ferramenta", servidor: exec.servidor, nome: exec.nome, ok: exec.ok, ms: exec.ms });
       mensagens.push({ role: "tool", tool_call_id: c.id, content: paraTexto(exec.saida) });
     }
   }
 
   if (!texto) {
-    texto = "o modelo chamou as ferramentas mas não devolveu resposta escrita";
+    const achado = ultimoResultadoTool(mensagens).trim();
+    texto = achado
+      ? `busquei, mas o modelo parou sem responder. O que a ferramenta achou: ${achado.slice(0, 600)}`
+      : "o modelo chamou as ferramentas mas não devolveu resposta escrita";
     aviso =
       aviso ??
       (pacote.specs.length

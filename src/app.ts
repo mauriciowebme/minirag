@@ -588,6 +588,65 @@ export function criarApp(): FastifyInstance {
     return r;
   });
 
+  /** Chat com streaming (SSE): o texto chega em pedaços, como o modelo escreve.
+   *  Depois de `hijack()` nada pode lançar erro — tudo vira evento `erro` no fluxo. */
+  app.post("/chat/stream", async (req, reply) => {
+    const u = usuario(req); // auth e validação ANTES de assumir a conexão crua
+    const b = corpo(req);
+    const pergunta = vString(b.pergunta, "pergunta", { obrigatorio: true, min: 1, max: CONFIG.maxQueryChars });
+    const memoria = vString(b.memoria, "memoria", { max: 128, def: "" });
+    const tenant = b.tenant ?? null;
+
+    reply.hijack();
+    const bruto = reply.raw;
+    bruto.writeHead(200, {
+      "content-type": "text/event-stream; charset=utf-8",
+      "cache-control": "no-cache, must-revalidate",
+      connection: "keep-alive",
+      "x-accel-buffering": "no",
+    });
+    /* NO `req.raw` para saber se ainda dá para escrever: em POST com corpo lido o
+     * "close" da requisição chega cedo e o fluxo inteiro seria jogado fora.
+     * O sinal certo é o "close" da RESPOSTA (conexão derrubada pelo navegador). */
+    let vivo = true;
+    bruto.on("close", () => {
+      vivo = false;
+    });
+    const enviar = (e: unknown): void => {
+      if (!vivo || bruto.writableEnded || bruto.destroyed) return;
+      try {
+        bruto.write(`data: ${JSON.stringify(e)}\n\n`);
+      } catch {
+        vivo = false;
+      }
+    };
+    /* espera do modelo local passa de 10 s; o pulso mantém a conexão viva nos proxies */
+    const pulso = setInterval(() => {
+      if (!vivo || bruto.writableEnded || bruto.destroyed) return;
+      try {
+        bruto.write(": ping\n\n");
+      } catch {
+        vivo = false;
+      }
+    }, 10_000);
+    try {
+      const dados = await responderChat(u, { pergunta, memoria, tenant }, enviar);
+      enviar({ tipo: "fim", dados });
+      void contarUso("chats");
+    } catch (e) {
+      enviar({ tipo: "erro", detalhe: (e as Error).message ?? "o chat falhou" });
+    } finally {
+      clearInterval(pulso);
+      if (!bruto.writableEnded) {
+        try {
+          bruto.end();
+        } catch {
+          /* conexão já caída */
+        }
+      }
+    }
+  });
+
   app.get("/chat", async (req) => {
     const u = usuario(req);
     const s = req.query as Record<string, string>;

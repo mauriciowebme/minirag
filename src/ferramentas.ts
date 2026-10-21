@@ -10,7 +10,7 @@
  *   - o que foi chamado fica registrado (painel "ferramentas chamadas" + histórico),
  *     com segredo mascarado e texto grande cortado.
  */
-import { Usuario } from "./config";
+import { CONFIG, Usuario } from "./config";
 import { q } from "./db";
 import { erro404, erro409, erro422 } from "./errors";
 
@@ -267,7 +267,7 @@ export async function atualizarFerramentas(nomeBruto: string, usuario?: Usuario)
     params: {
       protocolVersion: "2025-03-10",
       capabilities: {},
-      clientInfo: { name: "minirag-chat", version: "2.8.0" },
+      clientInfo: { name: "minirag-chat", version: CONFIG.versao },
     },
   });
   const problema = erroJsonRpc(ini.json);
@@ -371,7 +371,7 @@ export async function executarFerramenta(
       params: {
         protocolVersion: "2025-03-10",
         capabilities: {},
-        clientInfo: { name: "minirag-chat", version: "2.8.0" },
+        clientInfo: { name: "minirag-chat", version: CONFIG.versao },
       },
     }).catch(() => ({ json: null, sessionId: null }));
     if (ini.sessionId) {
