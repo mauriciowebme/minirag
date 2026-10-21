@@ -147,6 +147,21 @@ export async function initDb(dim: number): Promise<void> {
       PRIMARY KEY (tenant, memoria))`,
   );
 
+  /* v3.3: estado do em-andamento do chat (tarefa no servidor + reanexar). */
+  await q(
+    `CREATE TABLE IF NOT EXISTS chat_tarefas (
+      id TEXT PRIMARY KEY,
+      tenant TEXT NOT NULL,
+      memoria TEXT NOT NULL DEFAULT '',
+      pergunta TEXT NOT NULL,
+      status TEXT NOT NULL DEFAULT 'rodando',
+      parcial TEXT NOT NULL DEFAULT '',
+      ferramentas JSONB,
+      aviso TEXT,
+      criado_em TIMESTAMPTZ NOT NULL DEFAULT now(),
+      atualizado_em TIMESTAMPTZ NOT NULL DEFAULT now())`,
+  );
+
   // container pode ter morrido no meio de um job: devolve pra fila
   await q(`UPDATE ingest_jobs SET status = 'na_fila', chunks_feitos = 0 WHERE status = 'processando'`);
 
@@ -166,3 +181,9 @@ export async function initDb(dim: number): Promise<void> {
 }
 
 export { n };
+
+/** Boot: processo reiniciou = tarefa rodando virou falha; terminadas antigas saem. */
+export async function limparTarefas(): Promise<void> {
+  await q(`UPDATE chat_tarefas SET status = 'falhou', aviso = 'processo reiniciou' WHERE status = 'rodando'`);
+  await q(`DELETE FROM chat_tarefas WHERE status <> 'rodando' AND atualizado_em < now() - interval '10 minutes'`);
+}
