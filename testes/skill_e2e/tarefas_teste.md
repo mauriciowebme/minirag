@@ -1,7 +1,7 @@
 # Lista de Tarefas de Teste E2E — minirag (camada VISUAL: clique real na tela)
 
 > **Legenda**: `[ ]` pendente | `[x]` concluído | `[!]` falhou | `[-]` em progresso
-> **Última atualização**: 21/10/2026 10:50
+> **Última atualização**: 21/10/2026 11:20
 > **Escopo deste arquivo**: só o que exige **olho na tela** (render, ordem dos botões, clique que salva).
 > Rota, papel, isolamento e protocolo do provedor são da suíte de contrato (`tests/e2e.test.ts`,
 > alvo/modo em `docs/testes.md`) — não se repetem aqui.
@@ -32,6 +32,7 @@
 | G1T03 | [x] | `nova conversa` no pé | botão mudou para a linha do campo de digitação; nada de ação no topo | 21/10/2026 09:46 | `y=496` do botão == `y=496` do campo; barra do topo em `y=64` sem botão; sem corte horizontal (`scrollWidth <= clientWidth`). Visível no print de G1T01 |
 | G1T04 | [ ] | Selo `chegou coisa nova` | etiqueta no `↓ fim` quando chega conteúdo enquanto o usuário está lendo no meio | - | não disparado ao vivo (a suíte prova a chegada do conteúdo, não o selo) |
 | G1T05 | [ ] | Rolagem no celular | viewport estreita: rolar, botão de fim e campo sem cortar nada | - | testado só em 1280×720 |
+| G1T06 | [ ] | Menu lateral sem títulos de grupo (v3.2.1) | abrir o painel e conferir que a lista tem os 6 itens seguidos, sem "visão geral"/"memória", e que o item da tela fica destacado ao navegar | - | **não provado por clique**: confirmado por contagem no bundle servido (0 ocorrências do rótulo) e pelos blocos v2.7/v2.9 verdes. Rodada visual fica para quando o dono pedir |
 
 ## G2 - Configurações > Modelo (v3.2, o conserto do timeout)
 
@@ -53,11 +54,11 @@
 
 | Métrica | Valor |
 |---------|-------|
-| Total de Testes | 10 |
+| Total de Testes | 11 |
 | Concluídos | 3 |
-| Pendentes | 7 |
+| Pendentes | 8 |
 | Falharam | 0 |
-| Taxa de Sucesso | 30% (dos rodados: 3/3) |
+| Taxa de Sucesso | 27% (dos rodados: 3/3) |
 
 ---
 
