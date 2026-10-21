@@ -66,8 +66,10 @@ export async function initUsuarios(): Promise<void> {
   let novas = 0;
   for (const [nome, chave, papel] of sementes) {
     const r = await q(
+      // DO NOTHING sem alvo: se a MESMA chave já existe sob outro nome (rotação
+      // feita pelo painel), o que conflita é chave_hash — e o boot quebrava nesse caso
       `INSERT INTO usuarios (nome, chave_hash, chave_hint, papel)
-       VALUES ($1, $2, $3, $4) ON CONFLICT (nome) DO NOTHING`,
+       VALUES ($1, $2, $3, $4) ON CONFLICT DO NOTHING`,
       [nome, hashChave(chave), chave.slice(-4), papel],
     );
     novas += r.rowCount ?? 0;
