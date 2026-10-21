@@ -34,6 +34,12 @@ export const MEMORIA_PADRAO = 12; // turnos antigos que voltam ao modelo (0 = se
 export const VERBATIM_PADRAO = 4; // quantos deles ficam intactos na compactação
 export const RESERVA_PADRAO = 1024; // tokens livres para a resposta
 export const JANELA_PADRAO = 8192; // usada quando nem o painel nem a detecção informaram
+/* v3.2 — o que derruba uma conversa não é a resposta ser LONGA, é ela PARAR de vir.
+   Modelo local escreve por minutos e isso é legítimo; o teto total antigo de 90s cortava no meio
+   e o painel mostrava "The operation was aborted due to timeout" (visto em produção em 21/10).
+   Agora: orçamento de SILÊNCIO (renova a cada pedaço) + teto total de segurança. */
+export const SILENCIO_PADRAO_S = 180; // 3 minutos sem escrever nada = o provider morreu
+export const TETO_TOTAL_MS = 20 * 60_000; // mesmo escrevendo sem parar, 20 min é exagero
 export const TETO_FERRAMENTA = 6000; // caracteres de cada resultado de ferramenta que entra no payload
 
 type Linha = {
@@ -51,6 +57,7 @@ type Linha = {
   reserva_tokens: number | null;
   contexto_tokens: number | null;
   contexto_detectado: number | null;
+  silencio_s: number;
   ativo: boolean;
   atualizado_em: string;
 };
@@ -68,6 +75,8 @@ export type CfgResolvida = {
   memoria_turnos: number;
   verbatim_turnos: number;
   reserva_tokens: number;
+  /** v3.2: segundos que o provider pode ficar sem escrever nada antes de eu desistir (0 = padrão) */
+  silencio_s: number;
   /** janela efetiva em tokens (configurada > detectada > padrão) */
   janela: number;
   origem_janela: "configurada" | "detectada" | "padrao";
@@ -107,6 +116,9 @@ export async function initProvider(): Promise<void> {
   await q(`ALTER TABLE provider_config ADD COLUMN IF NOT EXISTS reserva_tokens INT NOT NULL DEFAULT ${RESERVA_PADRAO}`);
   await q(`ALTER TABLE provider_config ADD COLUMN IF NOT EXISTS contexto_tokens INT`);
   await q(`ALTER TABLE provider_config ADD COLUMN IF NOT EXISTS contexto_detectado INT`);
+  /* v3.2: 0 = usa o padrão do código (180s de silêncio). É o único tempo que o operador pode ajustar:
+     resposta longa que não para de escrever nunca é cortada antes do teto de 20 min. */
+  await q(`ALTER TABLE provider_config ADD COLUMN IF NOT EXISTS silencio_s INT NOT NULL DEFAULT 0`);
   await q(
     `CREATE TABLE IF NOT EXISTS chat_mensagens (
        id BIGSERIAL PRIMARY KEY,
@@ -159,6 +171,7 @@ export async function resolverProvider(tenant: string): Promise<CfgResolvida | n
     memoria_turnos: Number(l.memoria_turnos ?? MEMORIA_PADRAO),
     verbatim_turnos: Number(l.verbatim_turnos ?? VERBATIM_PADRAO),
     reserva_tokens: Number(l.reserva_tokens ?? RESERVA_PADRAO),
+    silencio_s: Number(l.silencio_s ?? 0),
     ...planoDeJanela(l),
     ativo: l.ativo,
   };
@@ -191,6 +204,8 @@ export async function verProvider(user: Usuario, tenantArg?: string | null) {
     memoria_turnos: l ? Number(l.memoria_turnos ?? MEMORIA_PADRAO) : MEMORIA_PADRAO,
     verbatim_turnos: l ? Number(l.verbatim_turnos ?? VERBATIM_PADRAO) : VERBATIM_PADRAO,
     reserva_tokens: l ? Number(l.reserva_tokens ?? RESERVA_PADRAO) : RESERVA_PADRAO,
+    silencio_s: l ? Number(l.silencio_s ?? 0) : 0,
+    silencio_efetivo_s: l && Number(l.silencio_s) > 0 ? Number(l.silencio_s) : SILENCIO_PADRAO_S,
     contexto_tokens: l?.contexto_tokens === null || l?.contexto_tokens === undefined ? null : Number(l.contexto_tokens),
     contexto_detectado: l?.contexto_detectado === null || l?.contexto_detectado === undefined ? null : Number(l.contexto_detectado),
     janela_efetiva: plano.janela,
@@ -217,6 +232,7 @@ export async function salvarProvider(
     verbatim_turnos?: unknown;
     reserva_tokens?: unknown;
     contexto_tokens?: unknown;
+    silencio_s?: unknown;
     tenant?: unknown;
     ativo?: unknown;
     global?: unknown;
@@ -277,11 +293,14 @@ export async function salvarProvider(
   const reservaTokens = inteiro(body.reserva_tokens, linhaAnterior?.reserva_tokens ?? RESERVA_PADRAO, "reserva_tokens", 1, 200000);
   const contextoBruta = inteiro(body.contexto_tokens, linhaAnterior?.contexto_tokens ?? 0, "contexto_tokens", 0, 4000000);
   const contextoTokens = contextoBruta > 0 ? contextoBruta : null;
+  /* v3.2: silêncio em segundos (0 = padrão do código). Não confundir com "tempo total da resposta":
+     resposta que não para de escrever tem quanto tempo quiser. */
+  const silencioS = inteiro(body.silencio_s, linhaAnterior?.silencio_s ?? 0, "silencio_s", 0, 1800);
 
   await q(
     `INSERT INTO provider_config (escopo, tipo, base_url, modelo, chave, temperatura, system_prompt, mcp_interno, max_rodadas,
-       ativo, memoria_turnos, verbatim_turnos, reserva_tokens, contexto_tokens, atualizado_em)
-     VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14, now())
+       ativo, memoria_turnos, verbatim_turnos, reserva_tokens, contexto_tokens, silencio_s, atualizado_em)
+     VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14, $15, now())
      ON CONFLICT (escopo) DO UPDATE SET
        tipo = EXCLUDED.tipo, base_url = EXCLUDED.base_url, modelo = EXCLUDED.modelo,
        chave = EXCLUDED.chave, temperatura = EXCLUDED.temperatura,
@@ -289,10 +308,11 @@ export async function salvarProvider(
        max_rodadas = EXCLUDED.max_rodadas, ativo = EXCLUDED.ativo,
        memoria_turnos = EXCLUDED.memoria_turnos, verbatim_turnos = EXCLUDED.verbatim_turnos,
        reserva_tokens = EXCLUDED.reserva_tokens, contexto_tokens = EXCLUDED.contexto_tokens,
+       silencio_s = EXCLUDED.silencio_s,
        atualizado_em = now()`,
     [
       escopo, tipo, baseUrl, modelo, chaveNova, temperatura, systemPrompt, mcpInterno, maxRodadas,
-      body.ativo !== false, memoriaTurnos, verbatimTurnos, reservaTokens, contextoTokens,
+      body.ativo !== false, memoriaTurnos, verbatimTurnos, reservaTokens, contextoTokens, silencioS,
     ],
   );
   /* devolve a linha que foi escrita (antes, salvar o global mostrava a própria e parecia "não configurado") */
@@ -309,13 +329,77 @@ type Mensagem = {
   tool_call_id?: string;
 };
 
+/** Sinal de abort que vence no SILÊNCIO, não na duração total: renova a cada pedaço que chega.
+ *  Assim um modelo local que escreve devagar por 6 minutos conversa normal, e um provider morto
+ *  é cortado cedo com nome na etiqueta (antes morriam ambos com a mesma mensagem crua do fetch). */
+function vigiaSilencio(silencioMs: number, tetoMs: number) {
+  const ctrl = new AbortController();
+  const inicio = Date.now();
+  let porque = "";
+  let t: ReturnType<typeof setTimeout> | undefined;
+  const armar = (): void => {
+    if (t) clearTimeout(t);
+    const resto = tetoMs - (Date.now() - inicio);
+    if (resto <= 0) {
+      porque = `nao terminou em ${Math.round(tetoMs / 60000)} min`;
+      ctrl.abort();
+      return;
+    }
+    t = setTimeout(() => {
+      porque = `ficou sem mandar nada por ${Math.round(silencioMs / 1000)}s`;
+      ctrl.abort();
+    }, Math.min(silencioMs, resto));
+    /* unref: se a deriva sair por um caminho de erro, este relógio não segura o processo vivo */
+    t.unref?.();
+  };
+  armar();
+  return {
+    signal: ctrl.signal,
+    renovar: armar,
+    fechar: (): void => {
+      if (t) clearTimeout(t);
+    },
+    /** motivo do meu próprio abort ("" quando quem abortou foi outra coisa) */
+    porque: (): string => porque,
+    silencioMs,
+  };
+}
+
+/** Erro de rede/abort vira frase que o humano entende; o motivo técnico nunca some do log. */
+function etiquetaQueda(e: unknown, vigia: { porque(): string; silencioMs: number }, fallback: string): string {
+  if (vigia.porque()) return vigia.porque();
+  const nome = (e as Error)?.name ?? "";
+  if (nome === "TimeoutError" || nome === "AbortError") return `não respondeu em ${Math.round(vigia.silencioMs / 1000)}s`;
+  return (e as Error)?.message || fallback;
+}
+
+/** Lê um pedaço do corpo do provider. Se a queda foi minha (silêncio/teto), a etiqueta é minha:
+ *  sem isso o abort estourava no meio do stream e o painel mostrava a frase crua do fetch —
+ *  foi exatamente o "The operation was aborted due to timeout" reportado em 21/10. */
+async function lerPedaco<T>(
+  leitor: { read(): Promise<T> },
+  vigia: ReturnType<typeof vigiaSilencio>,
+): Promise<T> {
+  try {
+    const p = await leitor.read();
+    vigia.renovar();
+    return p;
+  } catch (e) {
+    throw erro422(`a resposta do provider parou: ${etiquetaQueda(e, vigia, "a conexão caiu no meio")}`);
+  }
+}
+
 /** Chama o provider (OpenAI-compatível) sem streaming; devolve a mensagem crua para ver tool_calls. */
 export async function chamarModelo(
-  cfg: { base_url: string; modelo: string; chave: string; temperatura: number; tipo: TipoProvider },
+  cfg: { base_url: string; modelo: string; chave: string; temperatura: number; tipo: TipoProvider; silencio_s?: number },
   mensagens: Mensagem[],
-  opts: { tools?: unknown[]; timeoutMs?: number; stream?: boolean; onDelta?: (t: string) => void } = {},
+  opts: { tools?: unknown[]; timeoutMs?: number; tetoMs?: number; stream?: boolean; onDelta?: (t: string) => void } = {},
 ): Promise<{ message: { role: "assistant"; content: string; tool_calls?: ChamadaTool[] }; texto: string; ms: number }> {
-  const timeoutMs = opts.timeoutMs ?? 90_000;
+  /* v3.2: `timeoutMs` deixou de ser "tempo total da resposta" e virou ORÇAMENTO DE SILÊNCIO.
+     O valor da tela (provider_config.silencio_s) manda em cima do padrão do código. */
+  const silencioMs =
+    Number(cfg.silencio_s) > 0 ? Number(cfg.silencio_s) * 1000 : opts.timeoutMs ?? SILENCIO_PADRAO_S * 1000;
+  const vigia = vigiaSilencio(silencioMs, opts.tetoMs ?? TETO_TOTAL_MS);
   const inicio = Date.now();
   const headers: Record<string, string> = { "content-type": "application/json" };
   if (cfg.chave) headers.authorization = "B" + "earer " + cfg.chave;
@@ -332,12 +416,10 @@ export async function chamarModelo(
       method: "POST",
       headers,
       body: JSON.stringify(corpo),
-      signal: AbortSignal.timeout(timeoutMs),
+      signal: vigia.signal,
     });
   } catch (e) {
-    const msg =
-      (e as Error).name === "TimeoutError" ? `provider nao respondeu em ${timeoutMs / 1000}s` : (e as Error).message;
-    throw erro422(`nao consegui falar com o provider: ${msg}`);
+    throw erro422(`nao consegui falar com o provider: ${etiquetaQueda(e, vigia, "sem conexão com o provider")}`);
   }
   if (!r.ok) {
     const corpoErro = await r.text().catch(() => "");
@@ -353,7 +435,7 @@ export async function chamarModelo(
     const dec = new TextDecoder();
     let sobra = "";
     for (;;) {
-      const { done, value } = await leitor.read();
+      const { done, value } = await lerPedaco(leitor, vigia);
       if (done) break;
       sobra += dec.decode(value, { stream: true });
       const partes = sobra.split("\n");
@@ -382,6 +464,7 @@ export async function chamarModelo(
       }
     }
     const texto = pecas.join("");
+    vigia.fechar();
     const toolCalls: ChamadaTool[] = Object.values(chamadas)
       .filter((c) => c.nome)
       .map((c, n) => ({ id: c.id || `call_${Date.now()}_${n}`, type: "function", function: { name: c.nome, arguments: c.args || "{}" } }));
@@ -393,7 +476,15 @@ export async function chamarModelo(
     };
   }
 
-  const texto = await r.text();
+  /* sem streaming: o corpo chega inteiro de uma vez; silêncio aqui é modelo travado no meio do caminho */
+  let texto: string;
+  try {
+    texto = await r.text();
+  } catch (e) {
+    throw erro422(`a resposta do provider parou: ${etiquetaQueda(e, vigia, "o corpo da resposta não chegou")}`);
+  } finally {
+    vigia.fechar();
+  }
   let json: any;
   try {
     json = JSON.parse(texto);
@@ -428,7 +519,7 @@ export async function testarProvider(user: Usuario, body: Record<string, unknown
       { role: "system", content: "responda apenas: ok" },
       { role: "user", content: "teste de conexao" },
     ],
-    { timeoutMs: 20_000 },
+    { timeoutMs: 20_000, tetoMs: 60_000 },
   );
   /* v3.0: aproveita a conexão que acabou de funcionar e pergunta a janela do modelo.
      Detecção é conveniência, não requisito: a tela também aceita número digitado, e nada aqui

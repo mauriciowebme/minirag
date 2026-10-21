@@ -222,7 +222,11 @@ async function chamarServidor(
     const msg = (e as Error).name === "TimeoutError" ? `não respondeu em ${timeoutMs / 1000}s` : (e as Error).message;
     throw erro422(`o servidor MCP não respondeu: ${msg}`);
   }
-  const texto = await r.text();
+  const texto = await r.text().catch((e: unknown) => {
+    /* o corpo pode morrer no meio (servidor fala devagar): mesma regra do provider, sem frase crua */
+    const msg = (e as Error)?.name === "AbortError" || (e as Error)?.name === "TimeoutError" ? `não respondeu em ${timeoutMs / 1000}s` : (e as Error)?.message ?? String(e);
+    throw erro422(`o servidor MCP não respondeu: ${msg}`);
+  });
   if (!r.ok) throw erro422(`o servidor MCP respondeu ${r.status}: ${texto.slice(0, 200)}`);
   const sid = r.headers.get("mcp-session-id") ?? null;
   const tipo = (r.headers.get("content-type") ?? "").toLowerCase();
