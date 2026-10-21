@@ -1708,6 +1708,23 @@ test("minirag v2 — suíte completa", async (t) => {
     r = await call("GET", "/config/provider", { key: OPKEY });
     f.check("janela detectada virou a efetiva (sem o humano digitar)", r.json?.janela_efetiva === 16000 && r.json?.origem_janela === "detectada" && r.json?.contexto_detectado === 16000, { janela: r.json?.janela_efetiva, origem: r.json?.origem_janela });
 
+    /* ---------------------------------------------- 5b. v3.2: tempo de SILÊNCIO do provider.
+       O que corta a conversa é o modelo parar de escrever, não a resposta ser longa. */
+    r = await call("PUT", "/config/provider", { key: OPKEY, corpo: { ...base, silencio_s: 5000 } });
+    f.check("silêncio fora do limite -> 422", r.status === 422, r.status);
+    r = await call("PUT", "/config/provider", { key: OPKEY, corpo: { ...base, silencio_s: 45 } });
+    f.check(
+      "silêncio aceito e devolvido pela tela",
+      r.status === 200 && r.json?.silencio_s === 45 && r.json?.silencio_efetivo_s === 45,
+      r.texto.slice(0, 200),
+    );
+    r = await call("PUT", "/config/provider", { key: OPKEY, corpo: { ...base, silencio_s: 0 } });
+    f.check(
+      "silêncio 0 volta ao padrão do sistema (180s)",
+      r.status === 200 && r.json?.silencio_s === 0 && r.json?.silencio_efetivo_s === 180,
+      r.texto.slice(0, 200),
+    );
+
     /* ---------------------------------------------- 6. escopo: o que a tela mostra é onde grava */
     r = await call("PUT", "/config/provider", { key: OPKEY, corpo: { ...semGlobal, tenant: CLI, system_prompt: "PROBE-CLI-30", contexto_tokens: 4000 } });
     f.check("operador salvando com tenant grava NA LINHA DO CLIENTE", r.status === 200 && r.json?.escopo === CLI && r.json?.system_prompt === "PROBE-CLI-30", r.texto.slice(0, 200));
