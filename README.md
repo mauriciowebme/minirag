@@ -10,6 +10,29 @@ parecidos com a pergunta, com uma nota de 0 a 1.
 
 ---
 
+## v3.1 — A conversa para de puxar a tela e o recomeçar desceu para o pé (21/10/2026)
+
+- **Você manda na rolagem**: enquanto o modelo pensa, a caixa de mensagens descia sozinha a
+  cada tique do cronômetro — não dava para ler o que já tinha chegado nem digitar a próxima.
+  A causa era dupla: a área de mensagens não tinha altura limitada (`flex-1 overflow-auto`
+  sem `min-h-0` faz a caixa **crescer** em vez de rolar, então quem andava era a página
+  inteira) e o `scrollIntoView` era chamado em todo tique de 500 ms. Agora a caixa tem altura
+  própria, a página não se mexe mais, e o acompanhamento automático só acontece **se você
+  estiver a menos de 80 px do fim**.
+- **Botão de descer**: quando você sobe para reler, aparece `↓ fim` (com
+  `· chegou coisa nova` quando a resposta cresceu enquanto você estava em cima de um trecho
+  antigo). O clique salta na hora para o fim da conversa e o botão some.
+- **Recomeçar no pé, como no Open WebUI**: o botão estava na barra do topo (chamado
+  `limpar`). Agora é `nova conversa`, na mesma linha do campo de pergunta — apaga a conversa
+  da gaveta atual e recomeça, pedindo confirmação antes. A barra do topo ficou só com o
+  seletor de gaveta.
+- **Boot que não quebra mais**: a semente de usuários do ambiente usava
+  `ON CONFLICT (nome)`, que não cobre o caso de a **mesma chave** já existir registrada sob
+  **outro nome** (acontece depois de uma rotação de chave pelo painel). Nesse caso o boot
+  morria em `usuarios_chave_hash_key` e o serviço não subia. Passou a `ON CONFLICT DO
+  NOTHING`. A suíte tem um bloco que reproduz a situação e reinicia a API de verdade.
+- **Versão**: `3.1.0`.
+
 ## v3.0 — O chat lembra da conversa, cabe na janela e trabalha em segundo plano (21/10/2026)
 
 - **Memória de verdade**: até aqui o modelo recebia só as instruções + a pergunta — cada
