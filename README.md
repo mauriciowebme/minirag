@@ -29,8 +29,12 @@ parecidos com a pergunta, com uma nota de 0 a 1.
 - **Ferramentas MCP**: mesmo vazamento corrigido — se o servidor MCP morre no meio do corpo,
   a etiqueta agora é `o servidor MCP não respondeu: ...`, nunca a frase crua do fetch.
 - **Versão**: `3.2.0`.
-- **Testes**: 3 checagens novas na suíte (limite fora da faixa → 422, valor round-trip pela
-  tela, `0` volta ao padrão e aparece como efetivo).
+- **Testes**: bloco novo na suíte (`v3.2`, 9 checagens) com dois provedores falsos dentro do
+  container — um que **goteja** 1 pedaço por segundo por ~15 s (tem que sobreviver com orçamento
+  de silêncio de 4 s: duração não é defeito) e um que **trava** depois do primeiro pedaço (tem que
+  ser cortado em ~4 s com a etiqueta `ficou sem mandar nada por 4s`, nunca a frase crua do fetch).
+  Mais 3 checagens de limites do campo no bloco `v3.0` (fora da faixa → 422, round-trip pela tela,
+  `0` volta ao padrão e aparece como efetivo).
 
 ---
 
