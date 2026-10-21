@@ -77,6 +77,10 @@ function Provider({ operador, tenant, onIrPainel }: { operador: boolean; tenant:
   const [temperatura, setTemperatura] = useState("0.2");
   const [prompt, setPrompt] = useState("");
   const [rodadas, setRodadas] = useState("5");
+  const [memoria, setMemoria] = useState("12");
+  const [verbatim, setVerbatim] = useState("4");
+  const [reserva, setReserva] = useState("1024");
+  const [contexto, setContexto] = useState("0");
   const [ativo, setAtivo] = useState(false);
   const [global, setGlobal] = useState(false);
   const [teste, setTeste] = useState<{ ok: boolean; msg: string } | null>(null);
@@ -92,6 +96,10 @@ function Provider({ operador, tenant, onIrPainel }: { operador: boolean; tenant:
       setTemperatura(String(r.temperatura));
       setPrompt(r.system_prompt ?? "");
       setRodadas(String(r.max_rodadas));
+      setMemoria(String(r.memoria_turnos ?? 12));
+      setVerbatim(String(r.verbatim_turnos ?? 4));
+      setReserva(String(r.reserva_tokens ?? 1024));
+      setContexto(String(r.contexto_tokens ?? 0));
       setAtivo(r.configurado || r.ativo);
       setChave("");
     } catch (e) {
@@ -111,6 +119,13 @@ function Provider({ operador, tenant, onIrPainel }: { operador: boolean; tenant:
       temperatura: Number(temperatura),
       system_prompt: prompt,
       max_rodadas: Number(rodadas),
+      memoria_turnos: Number(memoria),
+      verbatim_turnos: Number(verbatim),
+      reserva_tokens: Number(reserva),
+      contexto_tokens: Number(contexto),
+      /* para onde este corpo vai: o painel está MOSTRANDO o cliente selecionado, então é nele
+         que tem que gravar (defeito da v2.9: o tenant era ignorado e salvava na linha do operador) */
+      ...(operador && tenant ? { tenant } : {}),
       ativo,
       global,
       ...(chave ? { chave } : {}),
@@ -122,8 +137,14 @@ function Provider({ operador, tenant, onIrPainel }: { operador: boolean; tenant:
     setOcupado(true);
     setTeste(null);
     try {
-      const r = await post<{ ok: boolean; ms: number; modelo: string }>("/config/provider/testar", corpo());
-      setTeste({ ok: true, msg: `conexão ok · respondeu em ${r.ms} ms · modelo ${r.modelo}` });
+      const r = await post<{ ok: boolean; ms: number; modelo: string; contexto_detectado?: number | null }>(
+        "/config/provider/testar",
+        corpo(),
+      );
+      const janela = r.contexto_detectado
+        ? ` · janela detectada: ${r.contexto_detectado.toLocaleString("pt-BR")} tokens`
+        : " · o provider não informou a janela (digite o número abaixo se quiser)";
+      setTeste({ ok: true, msg: `conexão ok · respondeu em ${r.ms} ms · modelo ${r.modelo}${janela}` });
     } catch (e) {
       setTeste({ ok: false, msg: (e as Error).message });
     } finally {
@@ -148,7 +169,11 @@ function Provider({ operador, tenant, onIrPainel }: { operador: boolean; tenant:
   return (
     <div className="cartao">
       <h2 className="mb-3 text-[13px] font-semibold text-txt2">
-        Provider do chat <span className="sub2">— é o único pré-requisito do Chat</span>
+        Provider do chat{" "}
+        <span className="sub2">
+          — é o único pré-requisito do Chat · editando:{" "}
+          {p?.escopo === "*" || global ? "padrão global (todos os clientes)" : p?.escopo ? `“${p.escopo}” (${p.origem === "global" ? "herdado do global" : "linha própria"})` : "nada salvo ainda"}
+        </span>
       </h2>
       <div className="flex max-w-[620px] flex-col gap-3" id="formProvider">
         <div className="grade-2 !gap-3">
@@ -207,6 +232,34 @@ function Provider({ operador, tenant, onIrPainel }: { operador: boolean; tenant:
             rodadas de ferramenta
             <input id="provRodadas" className="campo mt-1" value={rodadas} onChange={(e) => setRodadas(e.target.value)} />
             <span className="dica mt-1 block">0 = nunca chamar ferramenta (0 a 10)</span>
+          </label>
+        </div>
+        <div className="grade-2 !gap-3">
+          <label className="rotulo m-0">
+            memória da conversa (mensagens)
+            <input id="provMemoria" className="campo mt-1" value={memoria} onChange={(e) => setMemoria(e.target.value)} />
+            <span className="dica mt-1 block">quantas mensagens antigas desta gaveta voltam ao modelo · 0 = sem memória</span>
+          </label>
+          <label className="rotulo m-0">
+            últimas intactas na compactação
+            <input id="provVerbatim" className="campo mt-1" value={verbatim} onChange={(e) => setVerbatim(e.target.value)} />
+            <span className="dica mt-1 block">o resto vira uma linha curta (regra, sem custo; nada é resumido por IA)</span>
+          </label>
+        </div>
+        <div className="grade-2 !gap-3">
+          <label className="rotulo m-0">
+            janela de contexto (tokens)
+            <input id="provContexto" className="campo mt-1" value={contexto} onChange={(e) => setContexto(e.target.value)} />
+            <span className="dica mt-1 block" id="provJanelaDica">
+              0 = automático · em uso: {(p?.janela_efetiva ?? 0).toLocaleString("pt-BR")} tokens (
+              {p?.origem_janela === "configurada" ? "você digitou" : p?.origem_janela === "detectada" ? "detectada no testar conexão" : "padrão do sistema"})
+              {p?.contexto_detectado ? ` · detectado: ${p.contexto_detectado.toLocaleString("pt-BR")}` : ""}
+            </span>
+          </label>
+          <label className="rotulo m-0">
+            reserva para a resposta (tokens)
+            <input id="provReserva" className="campo mt-1" value={reserva} onChange={(e) => setReserva(e.target.value)} />
+            <span className="dica mt-1 block">espaço deixado livre para o modelo escrever</span>
           </label>
         </div>
         <div className="flex flex-wrap items-center gap-3 border-t border-borda pt-3">

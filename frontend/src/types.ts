@@ -157,6 +157,13 @@ export type ProviderResp = {
   tem_system_prompt: boolean;
   mcp_interno: boolean;
   max_rodadas: number;
+  memoria_turnos: number;
+  verbatim_turnos: number;
+  reserva_tokens: number;
+  contexto_tokens: number | null;
+  contexto_detectado: number | null;
+  janela_efetiva: number;
+  origem_janela: "configurada" | "detectada" | "padrao";
   ativo: boolean;
   tem_chave: boolean;
   chave_mascarada: string;
@@ -183,8 +190,23 @@ export type ChatResp = {
   ferramentas_ligadas: number;
   servidores: { interno: boolean; externos: number };
   tem_system_prompt: boolean;
+  compactacao?: Compactacao | null;
   ms: number;
   aviso: string | null;
+};
+
+/** O que a compactação determinística (v3.0) fez com o histórico antes de mandar ao modelo. */
+export type Compactacao = {
+  memoria_turnos: number;
+  historico_lido: number;
+  resumidas: number;
+  aparadas: number;
+  descartadas: number;
+  tokens: number;
+  disponivel: number;
+  janela: number;
+  origem_janela: "configurada" | "detectada" | "padrao";
+  coube: boolean;
 };
 export type ChatHistorico = {
   tenant: string;

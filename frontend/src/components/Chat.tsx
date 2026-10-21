@@ -2,27 +2,36 @@ import { useCallback, useEffect, useRef, useState } from "react";
 import { del, get, post, postStream, qs, type ApiErro } from "../services/api";
 import { useToast } from "./Toast";
 import { mdParaHtml } from "../lib/md";
-import type { ChamadaFerramenta, ChatHistorico, ChatResp, GavetasResp, ProviderResp } from "../types";
+import {
+  assinar,
+  cancelar,
+  chaveConversa,
+  estado,
+  enviar as enviarNaConversa,
+  limpar as limparConversa,
+  semear,
+  type Estado,
+  type Transportar,
+} from "../lib/conversa";
+import type { ChatHistorico, ChatResp, Compactacao, GavetasResp, ProviderResp } from "../types";
 
-type Msg = {
-  papel: "user" | "assistant";
-  texto: string;
-  ferramentas: ChamadaFerramenta[];
-  aviso?: string | null;
-  id?: number | string;
-  /** fila local: ainda não foi para o modelo */
-  naFila?: boolean;
-  /** erro de envio (provider desligado, rede) */
-  falha?: boolean;
-  /** ainda chegando em pedaços */
-  escrevendo?: boolean;
-};
-
-let seq = 0;
-const proximoId = () => `l${Date.now().toString(36)}-${++seq}`;
+/** traduz o que a compactação fez em uma linha honesta (nada de "resumido por IA") */
+function textoCompacto(c?: Compactacao | null): string | undefined {
+  if (!c) return undefined;
+  const partes: string[] = [];
+  if (c.resumidas) partes.push(`${c.resumidas} mensagem(ns) antigas viraram 1 linha`);
+  if (c.aparadas) partes.push(`${c.aparadas} resultado(s) de ferramenta cortado(s)`);
+  if (c.descartadas) partes.push(`${c.descartadas} descartada(s) do mais antigo`);
+  if (!c.coube) partes.push("nem assim coube: enviou só instruções + pergunta");
+  if (!partes.length) return undefined;
+  return `histórico compactado: ${partes.join(" · ")} · ${c.tokens}/${c.disponivel} tokens (${c.origem_janela})`;
+}
 
 /** Chat: conversa com o provider; as ferramentas vêm do MCP ligado e ficam registradas na mensagem.
- *  Você pode emendar perguntas: entram na fila e saem uma por vez, na ordem. */
+ *  Você pode emendar perguntas: entram na fila e saem uma por vez, na ordem.
+ *  v3.0: a conversa mora em `lib/conversa` (fora do React). Você troca de página no painel, vai
+ *  olhar a Busca ou outra gaveta, e o que o agente está fazendo NÃO é interrompido por isso —
+ *  ao voltar, a bolha está lá, maior, com o tempo certo desde o começo. */
 export function Chat({
   escopo,
   operador,
@@ -35,26 +44,25 @@ export function Chat({
   const { toast } = useToast();
   const [gavetas, setGavetas] = useState<string[]>([""]);
   const [memoria, setMemoria] = useState(escopo.memoria);
-  const [msgs, setMsgs] = useState<Msg[]>([]);
   const [pergunta, setPergunta] = useState("");
-  const [rodando, setRodando] = useState(false);
-  const [espera, setEspera] = useState(0);
   const [provider, setProvider] = useState<ProviderResp | null>(null);
+  const [espera, setEspera] = useState(0);
   const fim = useRef<HTMLDivElement>(null);
-  const ocupado = useRef(false);
-  const filaRef = useRef<{ id: string; texto: string }[]>([]);
-  const bruto = useRef("");
-  const vivoId = useRef<string>("");
-  const memoriaRef = useRef(memoria);
-  memoriaRef.current = memoria;
-  const tenantRef = useRef(operador && escopo.tenant ? { tenant: escopo.tenant } : {});
-  tenantRef.current = operador && escopo.tenant ? { tenant: escopo.tenant } : {};
 
-  const tenantParams = tenantRef.current;
+  const tenantParam = operador && escopo.tenant ? escopo.tenant : undefined;
+  const chave = chaveConversa(escopo.tenant, memoria);
+  const [snap, setSnap] = useState<Estado>(() => estado(chave));
 
   useEffect(() => {
     setMemoria(escopo.memoria);
   }, [escopo.memoria]);
+
+  /* a tela é só uma janela para a conversa: assina, mostra, e pode fechar sem matar o trabalho */
+  useEffect(() => {
+    const gritar = () => setSnap(estado(chave));
+    gritar();
+    return assinar(chave, gritar);
+  }, [chave]);
 
   useEffect(() => {
     void (async () => {
@@ -76,130 +84,84 @@ export function Chat({
 
   const carregarHistorico = useCallback(async () => {
     try {
-      const h = await get<ChatHistorico>("/chat?" + qs({ memoria, ...tenantParams }));
-      setMsgs(h.mensagens.map((m) => ({ id: m.id, papel: m.papel, texto: m.texto, ferramentas: m.ferramentas ?? [] })));
+      const h = await get<ChatHistorico>("/chat?" + qs({ memoria, ...(tenantParam ? { tenant: tenantParam } : {}) }));
+      semear(
+        chave,
+        h.mensagens.map((m) => ({
+          id: `h${m.id}`,
+          papel: m.papel as "user" | "assistant",
+          texto: m.texto,
+          ferramentas: m.ferramentas ?? [],
+        })),
+      );
     } catch (e) {
       toast("histórico: " + (e as Error).message);
     }
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [memoria, escopo.tenant, operador, toast]);
+  }, [chave, memoria, tenantParam, toast]);
 
   useEffect(() => {
-    /* trocar de gaveta derruba o que ainda não saiu (a fila é da gaveta anterior) */
-    filaRef.current = [];
-    setMsgs((m) => m.filter((x) => !x.naFila));
     void carregarHistorico();
   }, [carregarHistorico]);
 
   useEffect(() => {
     fim.current?.scrollIntoView({ block: "end" });
-  }, [msgs.length, rodando, espera]);
+  }, [snap.msgs.length, snap.rodando, espera]);
 
-  /* cronômetro da espera: o modelo local leva segundos e a tela precisa mostrar vida */
+  /* cronômetro honesto: conta desde QUANDO a tarefa começou (voltar para a tela não zera o tempo) */
   useEffect(() => {
-    if (!rodando) {
+    if (!snap.rodando || !snap.inicio) {
       setEspera(0);
       return;
     }
-    const t = setInterval(() => setEspera((s) => s + 1), 1000);
+    const marcar = () => setEspera(Math.max(0, Math.round((Date.now() - snap.inicio) / 1000)));
+    marcar();
+    const t = setInterval(marcar, 500);
     return () => clearInterval(t);
-  }, [rodando]);
+  }, [snap.rodando, snap.inicio]);
 
-  /** dispara a próxima da fila quando estiver livre */
-  const bombear = useCallback(async () => {
-    if (ocupado.current) return;
-    const item = filaRef.current.shift();
-    if (!item) return;
-    ocupado.current = true;
-    setRodando(true);
-    setMsgs((m) => m.map((x) => (x.id === item.id ? { ...x, naFila: false } : x)));
-    const gaveta = memoriaRef.current;
-    try {
-      /* resposta ao vivo: a bolha nasce vazia e cresce com os pedaços do modelo */
-      vivoId.current = proximoId();
-      bruto.current = "";
-      setMsgs((m) => [...m, { papel: "assistant", texto: "", ferramentas: [], id: vivoId.current, escrevendo: true }]);
-      let resultado: ChatResp | null = null;
-      let detalheErro = "";
+  /** o transporte sabe falar com o servidor; a conversa não precisa de tela aberta para existir */
+  const transportar = useCallback<Transportar>(
+    async (pedido, onEvent) => {
+      let dados: Record<string, unknown> | null = null;
       try {
-        await postStream("/chat/stream", { pergunta: item.texto, memoria: gaveta, ...tenantRef.current }, (e) => {
-          if (e.tipo === "delta") {
-            bruto.current += String(e.texto ?? "");
-            setMsgs((m) => m.map((x) => (x.id === vivoId.current ? { ...x, texto: bruto.current } : x)));
-          } else if (e.tipo === "descartar") {
-            bruto.current = "";
-            setMsgs((m) => m.map((x) => (x.id === vivoId.current ? { ...x, texto: "" } : x)));
-          } else if (e.tipo === "ferramenta") {
-            setMsgs((m) =>
-              m.map((x) =>
-                x.id === vivoId.current
-                  ? { ...x, ferramentas: [...x.ferramentas, { servidor: e.servidor, nome: e.nome, ok: e.ok, ms: e.ms, args: {}, resumo: "" }] }
-                  : x,
-              ),
-            );
-          } else if (e.tipo === "fim") {
-            resultado = e.dados as ChatResp;
-          } else if (e.tipo === "erro") {
-            detalheErro = String(e.detalhe ?? "o chat falhou");
-          }
+        await postStream("/chat/stream", pedido, (e) => {
+          if (e.tipo === "fim") dados = e.dados as Record<string, unknown>;
+          else onEvent(e);
         });
       } catch (e) {
-        /* servidor antigo, sem /chat/stream: volta para a resposta inteira de uma vez */
+        /* servidor antigo, sem /chat/stream: a resposta inteira de uma vez */
         if ((e as ApiErro).status === 404) {
-          resultado = await post<ChatResp>("/chat", { pergunta: item.texto, memoria: gaveta, ...tenantRef.current });
+          dados = (await post<ChatResp>("/chat", pedido)) as unknown as Record<string, unknown>;
         } else {
           throw e;
         }
       }
-      if (detalheErro) throw new Error(detalheErro);
-      const r = (resultado as ChatResp) ?? { resposta: bruto.current, ferramentas: [] };
-      setMsgs((m) =>
-        m.map((x) =>
-          x.id === vivoId.current
-            ? { ...x, texto: r.resposta ?? bruto.current, ferramentas: r.ferramentas ?? x.ferramentas, aviso: r.aviso ?? null, escrevendo: false }
-            : x,
-        ),
-      );
-      setProvider((p) => (p ? { ...p, configurado: true } : p));
-    } catch (e) {
-      const err = e as Error;
-      setMsgs((m) => {
-        const semCursor = m.map((x) => (x.id === vivoId.current ? { ...x, escrevendo: false, falha: !x.texto } : x));
-        return [
-          ...semCursor,
-          { papel: "assistant", texto: "não consegui responder: " + err.message, ferramentas: [], falha: true, id: proximoId() },
-        ];
-      });
-      if (err.message.includes("provider")) setProvider((p) => (p ? { ...p, configurado: false } : p));
-    } finally {
-      ocupado.current = false;
-      setRodando(false);
-      if (filaRef.current.length) void bombear();
-    }
-  }, []);
+      const d = (dados ?? {}) as Record<string, unknown>;
+      const aviso = textoCompacto(d.compactacao as Compactacao | undefined);
+      if (aviso) d.compacto = aviso;
+      if (d.resposta) setProvider((p) => (p ? { ...p, configurado: true } : p));
+      return d;
+    },
+    [],
+  );
 
   function enviar() {
     const texto = pergunta.trim();
     if (!texto) return;
     setPergunta("");
-    const id = proximoId();
-    filaRef.current.push({ id, texto });
-    setMsgs((m) => [...m, { papel: "user", texto, ferramentas: [], naFila: true, id }]);
-    void bombear();
+    enviarNaConversa(chave, texto, memoria, tenantParam, transportar);
   }
 
   function tirarDaFila(id?: number | string) {
-    if (id === undefined) return;
-    filaRef.current = filaRef.current.filter((x) => x.id !== id);
-    setMsgs((m) => m.filter((x) => x.id !== id));
+    if (typeof id === "string") cancelar(chave, id);
   }
 
   async function limpar() {
     if (!confirm("apagar a conversa desta gaveta?")) return;
     try {
-      await del("/chat?" + qs({ memoria, ...tenantParams }));
-      filaRef.current = [];
-      setMsgs([]);
+      await del("/chat?" + qs({ memoria, ...(tenantParam ? { tenant: tenantParam } : {}) }));
+      limparConversa(chave);
       toast("conversa apagada");
     } catch (e) {
       toast("apagar: " + (e as Error).message);
@@ -208,7 +170,9 @@ export function Chat({
 
   const semProvider = provider && !provider.configurado;
   const semFerramenta = provider && provider.configurado && !provider.mcp_interno;
-  const naFila = msgs.filter((m) => m.naFila).length;
+  const naFila = snap.fila.length;
+  const msgs = snap.msgs;
+  const rodando = snap.rodando;
 
   return (
     <section className="flex flex-col gap-3" id="telaChat">
@@ -216,6 +180,11 @@ export function Chat({
         <h2>
           Chat <span className="sub2">— conversa com o modelo e as ferramentas do MCP</span>
         </h2>
+        {rodando && (
+          <span className="sub2" id="chatSegundoPlano" title="a tarefa continua mesmo se você for ver outra página">
+            · trabalhando em segundo plano
+          </span>
+        )}
         <span className="flex-1" />
         <label className="sub2 flex items-center gap-2">
           gaveta
@@ -290,6 +259,7 @@ export function Chat({
                 </details>
               )}
               {m.aviso && <div className="sub2 mt-1">aviso: {m.aviso}</div>}
+              {m.compacto && <div className="sub2 mt-1">{m.compacto}</div>}
             </div>
           ))}
           {rodando && !msgs.some((m) => m.escrevendo) && (
@@ -325,7 +295,8 @@ export function Chat({
           modelo <span className="mono">{provider.modelo}</span> · provider {provider.origem === "global" ? "global" : "seu"}
           {provider.chave_mascarada ? ` · chave ${provider.chave_mascarada}` : ""} ·{" "}
           {provider.tem_system_prompt ? "com instruções do modelo" : "sem instruções (conversa pura)"} ·{" "}
-          {provider.mcp_interno ? "MCP do minirag ligado" : "MCP do minirag desligado"} · até {provider.max_rodadas} rodada(s)
+          {provider.mcp_interno ? "MCP do minirag ligado" : "MCP do minirag desligado"} · até {provider.max_rodadas} rodada(s) · memória{" "}
+          {provider.memoria_turnos} · janela {provider.janela_efetiva.toLocaleString("pt-BR")} tokens ({provider.origem_janela})
         </p>
       )}
     </section>
