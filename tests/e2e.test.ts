@@ -1799,6 +1799,79 @@ test("minirag v2 — suíte completa", async (t) => {
     f.fechar("v3.1 boot/chave repetida");
   });
 
+  await bloco(t, "v3.2: o que corta a resposta é silêncio, não duração", async () => {
+    const f = fiscal();
+    const CONTAINER = process.env.CONTAINER ?? "";
+    if (!CONTAINER || !OPKEY) {
+      f.check("v3.2 precisa do container (provedores falsos dentro dele)", true, "sem CONTAINER: bloco não executável");
+      f.fechar("v3.2 silêncio");
+      return;
+    }
+    /* Um falso que GOTEJA (1 pedaço por segundo, ~15 s no total) e um que TRAVA (escreve um
+       pedaço e nunca mais manda nada). Com orçamento de silêncio de 4 s: o gotejante tem que
+       sobreviver (a duração não é defeito) e o travado tem que cair em segundos com etiqueta
+       em português — era ele que morria em "The operation was aborted due to timeout". */
+    const cod = [
+      "const http=require('http');",
+      "const s=http.createServer((req,res)=>{let b='';req.on('data',c=>b+=c);req.on('end',()=>{",
+      "let j={};try{j=JSON.parse(b||'{}');}catch(e){}",
+      "const nome=j.model||'';",
+      "res.setHeader('content-type','text/event-stream');",
+      "const p=(o)=>res.write('data: '+JSON.stringify(o)+'\\n\\n');",
+      "if(nome==='goteja'){let k=0;const t=setInterval(()=>{if(k<14){p({choices:[{delta:{content:'g'+k+' '}}]});k++;return;}clearInterval(t);p({choices:[{delta:{content:'[fim-goteja]'}}]});res.write('data: [DONE]\\n\\n');res.end();},1000);return;}",
+      "if(nome==='trava'){p({choices:[{delta:{content:'comecei'}}]});return;}",
+      "res.end();",
+      "});});",
+      "s.listen(9917,'127.0.0.1');setTimeout(()=>process.exit(0),200000);",
+    ].join("");
+    execFileSync("docker", ["exec", "-d", CONTAINER, "node", "-e", cod]);
+    await dormir(1200);
+
+    const baseV32 = {
+      tipo: "litellm",
+      base_url: "http://127.0.0.1:9917/v1",
+      temperatura: 0,
+      system_prompt: "",
+      mcp_interno: false,
+      max_rodadas: 0,
+      silencio_s: 4,
+      ativo: true,
+      global: true,
+    };
+    let r = await call("PUT", "/config/provider", { key: OPKEY, corpo: { ...baseV32, modelo: "goteja" } });
+    f.check("provedor gotejante armado com silêncio de 4s", r.status === 200 && r.json?.silencio_efetivo_s === 4, r.texto.slice(0, 160));
+
+    const iniG = Date.now();
+    const got = await fluxo(OPKEY, { pergunta: "goteja devagar por favor", memoria: "suite-v32" });
+    const durG = Date.now() - iniG;
+    const tiposG = got.eventos.map((e: any) => e.tipo);
+    const textoG = got.eventos.filter((e: any) => e.tipo === "delta").map((e: any) => String(e.texto ?? "")).join("");
+    f.check("resposta que escreve devagar por ~15s NÃO é cortada", tiposG.includes("fim") && !tiposG.includes("erro"), tiposG.join(","));
+    f.check("todos os pedaços do gotejamento chegaram", textoG.includes("g13") && textoG.includes("[fim-goteja]"), textoG.slice(0, 80));
+    f.check("durou muito mais que o orçamento de silêncio (prova de que duração não mata)", durG > 8000, `${durG}ms com silencio=4s`);
+
+    r = await call("PUT", "/config/provider", { key: OPKEY, corpo: { ...baseV32, modelo: "trava" } });
+    f.check("provedor travado armado", r.status === 200 && r.json?.modelo === "trava", r.texto.slice(0, 120));
+    const iniT = Date.now();
+    const trv = await fluxo(OPKEY, { pergunta: "trava no meio por favor", memoria: "suite-v32" });
+    const durT = Date.now() - iniT;
+    const evErro = trv.eventos.find((e: any) => e.tipo === "erro") ?? {};
+    const detalhe = String(evErro.detalhe ?? "");
+    f.check("o que para de escrever é cortado em segundos (não em minutos)", durT >= 3500 && durT < 12000, `${durT}ms`);
+    f.check("a queda chega como evento erro do fluxo (nunca conexão quebrada)", detalhe.length > 0, trv.bruto.slice(0, 120));
+    f.check(
+      "a etiqueta diz o que aconteceu, em português",
+      /ficou sem mandar nada por 4s/.test(detalhe) && !/aborted due to timeout/i.test(detalhe),
+      detalhe,
+    );
+
+    /* limpeza: desliga e devolve o silêncio ao padrão do sistema */
+    await call("PUT", "/config/provider", { key: OPKEY, corpo: { ...baseV32, modelo: "goteja", silencio_s: 0, ativo: false } });
+    r = await call("GET", "/config/provider", { key: OPKEY });
+    f.check("limpeza: silêncio voltou ao padrão (180s) e o provedor falso desligou", r.json?.silencio_s === 0 && r.json?.silencio_efetivo_s === 180 && r.json?.ativo === false, { s: r.json?.silencio_s, e: r.json?.silencio_efetivo_s, a: r.json?.ativo });
+    f.fechar("v3.2 silêncio");
+  });
+
   await bloco(t, "freio de força bruta (último: bloqueia o IP)", async () => {
     const f = fiscal();
     for (let i = 0; i < 10; i++) {
