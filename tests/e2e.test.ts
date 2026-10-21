@@ -26,6 +26,11 @@ const OPKEY = process.env.OPKEY ?? "";
 if (!TESTKEY || !OPKEY) {
   throw new Error("defina TESTKEY e OPKEY no ambiente");
 }
+/* BASE vazia ou sem protocolo NÃO é "alvo local padrão": derruba cedo. Sem isso a suíte
+   inteira falha em menos de 1s por URL inválida e o relatório parece defeito do serviço. */
+if (!/^https?:\/\/.+/.test(BASE)) {
+  throw new Error(`BASE inválida ou vazia (${JSON.stringify(BASE)}) — rode scripts/up-test.sh e exporte o arquivo dele`);
+}
 
 type Resp = {
   status: number;
@@ -87,13 +92,20 @@ async function ingerir(
 }
 
 /** SO_BLOCOS filtra por trecho do nome (separado por vírgula). A suíte inteira custa ~5min; rodar
- *  só os blocos afetados pela mudança custa ~1min — é isso que se roda antes de pedir OK pro deploy. */
+ *  só os blocos afetados pela mudança custa ~1min — é isso que se roda antes de pedir OK pro deploy.
+ *  Bloco pulado aparece NOMINALMENTE no relatório final (regra 8 / verde falso é o pior defeito). */
+const FILTRO = (process.env.SO_BLOCOS ?? "").trim();
+const blocosRodados: string[] = [];
+const blocosPulados: string[] = [];
 function bloco(t: any, nome: string, fn: () => Promise<void>) {
-  const filtro = (process.env.SO_BLOCOS ?? "").trim();
-  if (filtro) {
-    const alvos = filtro.split(",").map((s) => s.trim()).filter(Boolean);
-    if (!alvos.some((p) => nome.includes(p))) return;
+  if (FILTRO) {
+    const alvos = FILTRO.split(",").map((s) => s.trim()).filter(Boolean);
+    if (!alvos.some((p) => nome.includes(p))) {
+      blocosPulados.push(nome);
+      return;
+    }
   }
+  blocosRodados.push(nome);
   return t.test(nome, fn);
 }
 
@@ -1882,5 +1894,31 @@ test("minirag v2 — suíte completa", async (t) => {
     r = await call("GET", "/gavetas", { key: TESTKEY });
     f.check("chave BOA também barrada enquanto bloqueado", r.status === 429, r.status);
     f.fechar("rate-limit");
+  });
+
+  /* ---------------- cobertura declarada (regra 8 da skill `suite-de-testes`) ----------------
+     Dentro de t.after(): imprime TAMBÉM quando um bloco falha, senão a rodada vermelha
+     fica sem dizer o que foi rodado e o que não foi. */
+  t.after(() => {
+    console.log("\n== COBERTURA DESTA RODADA ==");
+    console.log(`escopo: ${FILTRO ? "filtrado por SO_BLOCOS=" + FILTRO : "SUÍTE COMPLETA"}`);
+    console.log(`blocos: ${blocosRodados.length} rodados | ${blocosPulados.length} pulados`);
+    if (blocosPulados.length) console.log("NÃO RODOU (o verde desta rodada não cobre isto):\n  - " + blocosPulados.join("\n  - "));
+    console.log("COBRE: contrato pela porta HTTP pública, papéis (sem chave / papel errado), isolamento por escopo,"
+      + " efeito lido de volta no banco, provedor FALSO obedecendo o protocolo (stream e não-stream),"
+      + " freio de força bruta, e prova de versão no /health.");
+    console.log("NÃO COBRE (nem na suíte completa):");
+    for (const b of [
+      "tela real: clique, render, ordem visual, fila do chat (camada visual — references/visual.md)",
+      "provedor de IA real (o seu modelo atrás do gateway): aqui é falso por regra",
+      "SSE atrás do proxy de produção (buffering do Caddy) — smoke no domínio depois do deploy",
+      "pertinência do resultado: o trecho certo ficou no topo? a resposta está certa?",
+      "carga, concorrência e latência por etapa (modelo × ferramenta × compactação)",
+      "matriz completa rota × papel (só as rotas críticas são varridas)",
+      "degradação: disco cheio, banco cai no meio do job, payload gigante",
+      "infra: build em host limpo sem cache, backup/restore, migração entre versões",
+      "segurança de cadeia: dependências, CSP/CORS, rotação de credencial",
+    ]) console.log("  - " + b);
+    console.log("alvo, escopo e como fechar cada lacuna: docs/testes.md");
   });
 });
