@@ -114,18 +114,9 @@ export default function App() {
         <span className="text-verde">◆</span> minirag
       </div>
 
-      <div className="px-2 pb-1 text-[10.5px] uppercase tracking-[0.9px] text-txt3">visão geral</div>
-      {MENU.slice(0, 1).map((m) => (
-        <button key={m.id} data-menu={m.id} className={"nav-item" + (vista === m.id ? " nav-item-on" : "")} onClick={() => navegar(m.id)}>
-          <span className="w-4 text-center opacity-90" aria-hidden="true">
-            {m.icone}
-          </span>
-          {m.rotulo}
-        </button>
-      ))}
-
-      <div className="px-2 pb-1 pt-2.5 text-[10.5px] uppercase tracking-[0.9px] text-txt3">memória</div>
-      {MENU.slice(1).map((m) => {
+      {/* Um menu só, na ordem do caminho: sem títulos de grupo (o dono mandou tirar
+          "visão geral" e "memória" — a divisão não ajudava a achar nada). */}
+      {MENU.map((m) => {
         const ativo = m.id === "gavetas" ? DENTRO_DO_CAMINHO.has(vista) : vista === m.id;
         const rotulo = m.id === "gavetas" ? (operador ? "Usuários" : "Gavetas") : m.rotulo;
         return (
