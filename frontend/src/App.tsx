@@ -12,14 +12,15 @@ import { Config } from "./components/Config";
 import { get } from "./services/api";
 import type { HealthResp, Vista } from "./types";
 
-/* O menu é o TOPO do caminho, não um índice de telas: Arquivos e Editor são
-   passos internos (usuário → gaveta → arquivos → nota) e não aparecem aqui. */
+/* A ordem é do dono (21/10, v3.2.2): Chat logo depois de Painel; Usuários/Gavetas
+   em cima de Configurações. Arquivos e Editor são passos internos (usuário → gaveta
+   → arquivos → nota) e não aparecem aqui. */
 const MENU: { id: Vista; rotulo: string; icone: string }[] = [
   { id: "painel", rotulo: "Painel", icone: "▦" },
-  { id: "gavetas", rotulo: "Gavetas", icone: "👤" },
   { id: "chat", rotulo: "Chat", icone: "💬" },
   { id: "buscar", rotulo: "Buscar", icone: "⌕" },
   { id: "jobs", rotulo: "Fila", icone: "≡" },
+  { id: "gavetas", rotulo: "Gavetas", icone: "👤" },
   { id: "config", rotulo: "Configurações", icone: "⚙" },
 ];
 
@@ -114,8 +115,8 @@ export default function App() {
         <span className="text-verde">◆</span> minirag
       </div>
 
-      {/* Um menu só, na ordem do caminho: sem títulos de grupo (o dono mandou tirar
-          "visão geral" e "memória" — a divisão não ajudava a achar nada). */}
+      {/* Um menu só, na ordem definida pelo dono (sem títulos de grupo: "visão geral"
+          e "memória" saíram — a divisão não ajudava a achar nada). */}
       {MENU.map((m) => {
         const ativo = m.id === "gavetas" ? DENTRO_DO_CAMINHO.has(vista) : vista === m.id;
         const rotulo = m.id === "gavetas" ? (operador ? "Usuários" : "Gavetas") : m.rotulo;
