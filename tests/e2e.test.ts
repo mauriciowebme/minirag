@@ -11,6 +11,8 @@
  */
 import { inflateRawSync } from "node:zlib";
 import { execFileSync } from "node:child_process";
+import { readFileSync } from "node:fs";
+import { join } from "node:path";
 import test from "node:test";
 import assert from "node:assert/strict";
 
@@ -144,7 +146,7 @@ test("minirag v2 — suíte completa", async (t) => {
 
     console.log("-- health e painel");
     const h = await call("GET", "/health");
-    f.check("health 200 + versao 2.8.1", h.status === 200 && h.json?.versao === "2.8.1", h.json);
+    f.check("health 200 + versao 2.9.0", h.status === 200 && h.json?.versao === "2.9.0", h.json);
     f.check("health operador ativo", h.json?.operador === true, h.json);
     f.check("health embedder ok", h.json?.embedder === "ok", h.json);
     const p = await call("GET", "/painel/");
@@ -1053,7 +1055,7 @@ test("minirag v2 — suíte completa", async (t) => {
 
     r = await call("PUT", "/config/provider", {
       key: OPKEY,
-      corpo: { tipo: "litellm", base_url: provFalso || "http://127.0.0.1:9911/v1", modelo: "modelo-de-teste", chave: "sk-teste-1234", temperatura: 0.2, system_prompt: "", max_rodadas: 3, ativo: true, global: true },
+      corpo: { tipo: "litellm", base_url: provFalso || "http://127.0.0.1:9911/v1", modelo: "modelo-de-teste", chave: "sk-teste-1234", temperatura: 0.2, system_prompt: "", mcp_interno: false, max_rodadas: 3, ativo: true, global: true },
     });
     f.check("salvar provider global", r.status === 200 && r.json?.tem_system_prompt === false, r.texto.slice(0, 160));
     f.check("resposta mascara a chave", r.json?.chave_mascarada === "••••1234" && !/sk-teste-1234/.test(r.texto), r.json?.chave_mascarada);
@@ -1109,7 +1111,7 @@ test("minirag v2 — suíte completa", async (t) => {
     /* sem provider o chat recusa com mensagem clara */
     r = await call("PUT", "/config/provider", {
       key: OPKEY,
-      corpo: { tipo: "litellm", base_url: "http://127.0.0.1:9911/v1", modelo: "modelo-de-teste", temperatura: 0.2, max_rodadas: 3, ativo: false, global: true },
+      corpo: { tipo: "litellm", base_url: "http://127.0.0.1:9911/v1", modelo: "modelo-de-teste", temperatura: 0.2, mcp_interno: false, max_rodadas: 3, ativo: false, global: true },
     });
     f.check("provider desligado", r.status === 200, r.texto.slice(0, 120));
     r = await call("POST", "/chat", { key: TESTKEY, corpo: { pergunta: "qualquer coisa", memoria: GAV } });
@@ -1349,12 +1351,197 @@ test("minirag v2 — suíte completa", async (t) => {
     f.check("tool MCP apaga servidor", !r.json?.result?.isError && /removido/.test(r.json?.result?.content?.[0]?.text ?? ""), r.json?.result?.content?.[0]?.text);
 
     /* ---- limpeza ---- */
-    r = await call("PUT", "/config/provider", { key: OPKEY, corpo: { tipo: "litellm", base_url: "http://127.0.0.1:9913/v1", modelo: "eco", system_prompt: "", max_rodadas: 3, ativo: false, global: true } });
+    r = await call("PUT", "/config/provider", { key: OPKEY, corpo: { tipo: "litellm", base_url: "http://127.0.0.1:9913/v1", modelo: "eco", system_prompt: "", mcp_interno: false, max_rodadas: 3, ativo: false, global: true } });
     f.check("provider desligado no fim", r.status === 200 && r.json?.configurado === false, r.texto.slice(0, 120));
     await call("DELETE", `/gavetas/${GAV}`, { key: TESTKEY });
     await call("DELETE", `/chat?memoria=${GAV}`, { key: OPKEY });
 
     f.fechar("v2.8 prompt/MCP interno/externo/rodadas/segredo");
+  });
+
+  /* ------------------------------------------------------------------ v2.9 */
+
+  /** carrega o convertedor de markdown DO FRONTEND sem build: TS -> JS puro */
+  function mdDoFrontend(): (md: string) => string {
+    const fonte = readFileSync(join(__dirname, "..", "frontend", "src", "lib", "md.ts"), "utf8");
+    const { transformSync } = require("esbuild") as { transformSync: (c: string, o: any) => { code: string } };
+    const js = transformSync(fonte, { loader: "ts", format: "cjs" }).code;
+    const modulo = { exports: {} as Record<string, unknown> };
+    new Function("module", "exports", js)(modulo, modulo.exports);
+    return modulo.exports.mdParaHtml as (md: string) => string;
+  }
+
+  /** chama /chat/stream e devolve os eventos na ordem em que chegaram */
+  async function fluxo(key: string, corpo: Record<string, unknown>): Promise<{ ctype: string; eventos: any[]; bruto: string }> {
+    const r = await fetch(`${BASE}/chat/stream`, {
+      method: "POST",
+      headers: { authorization: `Bearer ${key}`, "content-type": "application/json" },
+      body: JSON.stringify(corpo),
+      /* um servidor que prender a conexão não pode travar a suíte inteira */
+      signal: AbortSignal.timeout(120_000),
+    });
+    const texto = await r.text();
+    const eventos = texto
+      .split("\n\n")
+      .map((bloco) => bloco.split("\n").find((l) => l.startsWith("data:")))
+      .filter((l): l is string => !!l)
+      .map((l) => {
+        try {
+          return JSON.parse(l.slice(5).trim());
+        } catch {
+          return null;
+        }
+      })
+      .filter(Boolean);
+    return { ctype: r.headers.get("content-type") ?? "", eventos, bruto: texto };
+  }
+
+  await t.test("v2.9: markdown na tela, resposta em pedaços e fila", async () => {
+    const f = fiscal();
+    const CONTAINER = process.env.CONTAINER ?? "";
+    const GAV = "suite-v29";
+
+    console.log("-- convertedor de markdown (o mesmo arquivo que o painel usa)");
+    const md = mdDoFrontend();
+    f.check("markdown: negrito e código inline", md("**total** `R$ 10`") === "<p><b>total</b> <code>R$ 10</code></p>", md("**total** `R$ 10`"));
+    f.check(
+      "markdown: lista numerada vira ol",
+      md("1. um\n2. dois\n") === "<ol><li>um</li><li>dois</li></ol>",
+      md("1. um\n2. dois\n"),
+    );
+    f.check(
+      "markdown: sub-lista mora DENTRO do item do pai",
+      md("- pai\n  - filho\n- volta\n") === "<ul><li>pai<ul><li>filho</li></ul></li><li>volta</li></ul>",
+      md("- pai\n  - filho\n- volta\n"),
+    );
+    const tabela = md("| doc | valor |\n|---|---|\n| nota-1 | R$ 10 |\n| nota-2 | R$ 20 |\n");
+    f.check(
+      "markdown: tabela com cabeçalho e corpo",
+      tabela.includes("<table>") && tabela.includes("<th>doc</th>") && tabela.includes("<td>nota-2</td>") && tabela.includes('class="rola"'),
+      tabela,
+    );
+    f.check("markdown: citação", md("> citado") === "<blockquote>citado</blockquote>", md("> citado"));
+    f.check("markdown: link só para http", /<a href="https:\/\/a\.b"/.test(md("[x](https://a.b)")) && !md("[x](javascript:alert(1))").includes("<a"), md("[x](javascript:alert(1))"));
+    f.check("markdown: HTML escrito vira texto, nunca tag", !md("<script>alert(1)</script>").includes("<script>"), md("<script>alert(1)</script>"));
+    f.check("markdown: dentro do bloco de código nada é marca", md("```\nconst a = **b**;\n```") === "<pre>const a = **b**;</pre>", md("```\nconst a = **b**;\n```"));
+    f.check("markdown: parágrafo com quebra simples", md("linha um\nlinha dois") === "<p>linha um<br>linha dois</p>", md("linha um\nlinha dois"));
+    f.check("markdown: texto vazio não quebra", md("") === "" && md("   ") === "", [md(""), md("   ")]);
+
+    if (!CONTAINER) {
+      f.check("v2.9 streaming precisa do container (provedor falso dentro dele)", true, "sem CONTAINER: partes de fluxo não executáveis");
+      f.fechar("v2.9 markdown/fila/streaming (parcial)");
+      return;
+    }
+
+    console.log("-- provedor falso que escreve em pedaços (SSE)");
+    const codFluxo = [
+      "const http=require('http');",
+      "const s=http.createServer((req,res)=>{let b='';req.on('data',c=>b+=c);req.on('end',()=>{",
+      "let j={};try{j=JSON.parse(b||'{}');}catch(e){}",
+      "const m=j.messages||[];",
+      "const comFerramenta=m.filter(x=>x.role==='tool').length>0;const nome=j.model||'';",
+      /* o modelo pensa em voz alta ANTES da ferramenta: o servidor tem que jogar isso fora */
+      "if(j.stream&&(!comFerramenta||nome==='limite')){",
+      "res.setHeader('content-type','text/event-stream');",
+      "const pecas=['Thinking:',' vou consultar',' a gaveta'];",
+      "let k=0;",
+      "const t=setInterval(()=>{",
+      "if(k<pecas.length){res.write('data: '+JSON.stringify({choices:[{delta:{content:pecas[k]}}]})+'\\n\\n');k++;return;}",
+      "clearInterval(t);",
+      "res.write('data: '+JSON.stringify({choices:[{delta:{tool_calls:[{index:0,id:'f1',type:'function',function:{name:'search',arguments:JSON.stringify({query:'nota fiscal',k:3})}}]}}]})+'\\n\\n');",
+      "res.write('data: [DONE]\\n\\n');res.end();},4);",
+      "return;",
+      "}",
+      "res.setHeader('content-type','application/json');",
+      "if(comFerramenta)return res.end(JSON.stringify({choices:[{message:{role:'assistant',content:'A nota 5512 da Beta soma R$ 9.876,54 [fluxo].'}}]}));",
+      "res.end(JSON.stringify({choices:[{message:{role:'assistant',content:'resposta sem streaming [fluxo].'}}]}));",
+      "});});",
+      "s.listen(9914,'127.0.0.1');setTimeout(()=>process.exit(0),240000);",
+    ].join("");
+    execFileSync("docker", ["exec", "-d", CONTAINER, "node", "-e", codFluxo]);
+    await dormir(1200);
+
+    let r = await call("POST", "/ingest", {
+      key: TESTKEY,
+      corpo: { doc_id: "suite-v29-nota", content: "Nota fiscal 5512 da empresa Beta. Total R$ 9.876,54 com vencimento em 05/12/2026.", memoria: GAV },
+    });
+    const job = await esperarJob(TESTKEY, r.json?.job_id);
+    f.check("documento da v2.9 indexado", job.status === "concluido", job);
+
+    r = await call("PUT", "/config/provider", {
+      key: OPKEY,
+      corpo: {
+        tipo: "litellm",
+        base_url: "http://127.0.0.1:9914/v1",
+        modelo: "fluxo",
+        temperatura: 0,
+        system_prompt: "",
+        mcp_interno: true,
+        max_rodadas: 3,
+        ativo: true,
+        global: true,
+      },
+    });
+    f.check("provider do fluxo salvo com MCP interno", r.status === 200 && r.json?.mcp_interno === true, r.texto.slice(0, 160));
+
+    console.log("-- /chat/stream");
+    const fluxoRes = await fluxo(TESTKEY, { pergunta: "qual o total da nota da Beta?", memoria: GAV });
+    f.check("content-type é text/event-stream", /text\/event-stream/.test(fluxoRes.ctype), fluxoRes.ctype);
+    const tipos = fluxoRes.eventos.map((e) => e.tipo);
+    f.check("pedaços chegaram um a um (>=2 delta)", fluxoRes.eventos.filter((e) => e.tipo === "delta").length >= 2, tipos.join(","));
+    f.check("o pensamento do modelo foi descartado antes da resposta", tipos.includes("descartar"), tipos.join(","));
+    f.check("a chamada de ferramenta aparece ainda durante o fluxo", tipos.indexOf("ferramenta") < tipos.indexOf("fim") && tipos.includes("ferramenta"), tipos.join(","));
+    f.check("o fluxo termina com fim", tipos[tipos.length - 1] === "fim", tipos[tipos.length - 1]);
+    const dados = fluxoRes.eventos.find((e) => e.tipo === "fim")?.dados ?? {};
+    f.check("resposta final veio da ferramenta", /9\.876,54/.test(String(dados.resposta ?? "")), dados.resposta);
+    f.check("nada de 'Thinking:' na resposta", !/Thinking:/.test(String(dados.resposta ?? "")), dados.resposta);
+    /* o reducer do navegador, replicado aqui: o que a bolha mostra ao fim do fluxo */
+    let tela = "";
+    for (const e of fluxoRes.eventos) {
+      if (e.tipo === "delta") tela += String(e.texto ?? "");
+      else if (e.tipo === "descartar") tela = "";
+      else if (e.tipo === "fim") tela = String(e.dados?.resposta ?? tela);
+    }
+    f.check("a bolha termina limpa: o que foi descartado sumiu da tela", tela === String(dados.resposta ?? "") && !/Thinking:/.test(tela), tela.slice(0, 140));
+    const busca = (dados.ferramentas ?? [])[0] ?? {};
+    f.check("a ferramenta registrada mostra o documento achado na gaveta", /suite-v29-nota/.test(String(busca.resumo ?? "")), String(busca.resumo ?? "").slice(0, 200));
+    f.check("os argumentos da busca chegaram inteiros (e na gaveta certa)", busca.args?.query === "nota fiscal" && busca.args?.k === 3 && busca.args?.memoria === GAV, busca.args);
+    const evFe = fluxoRes.eventos.find((e) => e.tipo === "ferramenta") ?? {};
+    f.check("o evento de ferramenta ao vivo traz servidor, nome e tempo", evFe.servidor === "minirag" && evFe.nome === "search" && evFe.ok === true && Number(evFe.ms) > 0, evFe);
+    f.check("2 rodadas: pensar + responder", dados.rodadas === 2 && dados.mcp_interno === true, { rodadas: dados.rodadas, mcp: dados.mcp_interno });
+
+    /* o modelo que nunca termina: pensa, pede ferramenta, pensa de novo... até o freio */
+    await call("PUT", "/config/provider", {
+      key: OPKEY,
+      corpo: { tipo: "litellm", base_url: "http://127.0.0.1:9914/v1", modelo: "limite", mcp_interno: true, max_rodadas: 2, ativo: true, global: true },
+    });
+    const fluxoLimite = await fluxo(TESTKEY, { pergunta: "sem limite por favor", memoria: GAV });
+    const dadosLimite = fluxoLimite.eventos.find((e) => e.tipo === "fim")?.dados ?? {};
+    f.check("freio de rodadas avisou", /limite de 2 rodadas/.test(String(dadosLimite.aviso ?? "")), dadosLimite.aviso);
+    f.check("no estouro de rodadas o raciocínio vazado não vira resposta", !/Thinking:/.test(String(dadosLimite.resposta ?? "")), String(dadosLimite.resposta ?? "").slice(0, 160));
+    await call("PUT", "/config/provider", {
+      key: OPKEY,
+      corpo: { tipo: "litellm", base_url: "http://127.0.0.1:9914/v1", modelo: "fluxo", mcp_interno: true, max_rodadas: 3, ativo: true, global: true },
+    });
+
+    r = await call("GET", `/chat?memoria=${GAV}`, { key: TESTKEY });
+    f.check("o histórico do fluxo gravado (pergunta + resposta limpa)", (r.json?.mensagens ?? []).length >= 2 && !(r.json?.mensagens ?? []).some((x: any) => /Thinking:/.test(String(x.texto ?? ""))), (r.json?.mensagens ?? []).length);
+
+    console.log("-- /chat sem streaming continua igual");
+    r = await call("POST", "/chat", { key: TESTKEY, corpo: { pergunta: "e sem streaming?", memoria: GAV } });
+    f.check("resposta inteira de uma vez", r.status === 200 && /sem streaming \[fluxo\]/.test(String(r.json?.resposta)), r.texto.slice(0, 160));
+
+    console.log("-- erros do fluxo viram evento, nunca conexão quebrada");
+    await call("PUT", "/config/provider", { key: OPKEY, corpo: { tipo: "litellm", base_url: "http://127.0.0.1:9914/v1", modelo: "fluxo", mcp_interno: true, max_rodadas: 3, ativo: false, global: true } });
+    const fluxoErro = await fluxo(TESTKEY, { pergunta: "com provider desligado", memoria: GAV });
+    f.check("erro antes do primeiro pedaço chega como evento erro", fluxoErro.eventos.length === 1 && fluxoErro.eventos[0]?.tipo === "erro" && /provider/i.test(String(fluxoErro.eventos[0]?.detalhe)), fluxoErro.eventos);
+
+    /* limpeza */
+    await call("PUT", "/config/provider", { key: OPKEY, corpo: { tipo: "litellm", base_url: "http://127.0.0.1:9914/v1", modelo: "fluxo", system_prompt: "", mcp_interno: false, max_rodadas: 3, ativo: false, global: true } });
+    await call("DELETE", `/gavetas/${GAV}`, { key: TESTKEY });
+    await call("DELETE", `/chat?memoria=${GAV}`, { key: OPKEY });
+
+    f.fechar("v2.9 markdown/streaming/fila");
   });
 
   await t.test("freio de força bruta (último: bloqueia o IP)", async () => {
