@@ -10,6 +10,53 @@ parecidos com a pergunta, com uma nota de 0 a 1.
 
 ---
 
+## v3.0 — O chat lembra da conversa, cabe na janela e trabalha em segundo plano (21/10/2026)
+
+- **Memória de verdade**: até aqui o modelo recebia só as instruções + a pergunta — cada
+  mensagem era, para ele, a primeira da conversa. Agora as últimas rodadas da gaveta
+  (`memoria_turnos`, padrão 12) vão junto, e o tamanho da memória é configurável **por
+  cliente** em Configurações → Modelo. `0` volta ao comportamento antigo (conversa pura).
+- **Orçamento de contexto**: o "testar conexão" pergunta ao provedor a janela dele
+  (`GET /v1/models` → `context_length`) e passa a usá-la sem ninguém digitar. Três campos
+  mandam nisso: **janela de contexto** (`0` = usa a detectada, e sem detecção cai no padrão
+  8192), **reserva para a resposta** (tokens que sobram para o modelo escrever) e
+  **rodadas verbatim** (quantas mensagens recentes vão inteiras).
+- **Compactação determinística** (`src/compactar.ts`, sem gastar LLM): quando o histórico
+  não cabe, a regra age — as rodadas antigas viram uma linha curta por mensagem
+  (`papel · trecho do texto`), resultado de ferramenta é aparado, e o que ainda não coube é
+  descartado **do mais antigo**. System prompt e a pergunta atual nunca são comprimidos.
+  Se nem assim couber, o histórico vai vazio e a resposta avisa (`coube: false`) — nada de
+  estourar o provedor. Não é resumo semântico: é corte com forma, e isso é dito na tela.
+- **Contabilidade honesta**: toda resposta de `/chat` traz `compactacao` com
+  `historico_lido`, `resumidas`, `aparadas`, `descartadas`, `tokens`, `disponivel`, `janela`,
+  `origem_janela` e `coube`. O Chat mostra uma linha embaixo da bolha quando a compactação
+  mexeu naquela rodada.
+- **Escopo do provider**: a tela agora grava e lê **no mesmo lugar que mostra** — salvar o
+  padrão global devolve a linha padrão, e a linha de um cliente só vale se for completa
+  (incompleta herda o padrão; regra nascida na v2.8.1 e que a v2.9 ainda não aplicava na
+  leitura). `GET/PUT /config/provider` respondem `escopo`, `memoria_turnos`,
+  `verbatim_turnos`, `reserva_tokens`, `contexto_tokens`, `contexto_detectado`,
+  `janela_efetiva` e `origem_janela`.
+- **Segundo plano no painel**: a conversa saiu do estado do componente e vive em
+  `frontend/src/lib/conversa.ts`, uma fila por cliente + gaveta. Trocar para a Busca, os
+  Documentos ou outra gaveta no meio de uma resposta **não interrompe** nada: ao voltar, a
+  bolha está maior, a fila está lá e o cronômetro conta desde o início real da tarefa.
+- **O que não é resolvido aqui**: estimativa de tokens é heurística (4 caracteres ≈ 1
+  token), não tokenizador do modelo; a detecção só funciona se o provedor anunciar
+  `context_length` (o gateway litellm anuncia — mas exige a chave salva, e é ela que o teste
+  de conexão já usa); compactar não lembra o sentido das rodadas antigas, só o formato; e
+  apagar a conversa na tela apaga a memória (o banco é a fonte, nada é reescrito pela
+  compactação).
+
+**API**: mesmas rotas, campos novos em `/chat` (`compactacao`) e `/config/provider` (memória e
+janela). **Versão**: `3.0.0`.
+
+**Suíte**: bloco `v3.0` com 28 checagens (o que chega ao modelo com e sem memória, gaveta
+padrão, orçamento estourado, contabilidade da compactação e escopo por cliente). Para rodar
+só os blocos afetados: `SO_BLOCOS=v3.0 npm test` (~1min em vez de ~5min da suíte inteira).
+
+---
+
 ## v2.9 — Chat que escreve em pedaços, markdown de verdade e fila de perguntas (20/10/2026)
 
 - **Markdown na bolha do chat**: o texto que o modelo devolve é convertido na tela
@@ -459,9 +506,9 @@ outros logins nem de outras gavetas.
 | `PATCH /usuarios/{nome}` | operador | `{ativo?, papel?}` — não deixa desativar/rebaixar o último operador |
 | `POST /usuarios/{nome}/chave` | operador (qualquer) ou o próprio | gera chave nova e devolve uma vez |
 | `DELETE /usuarios/{nome}` | operador | só sem documentos (`409` se tiver) |
-| `GET/PUT /config/provider` | qualquer login | provider do chat (`tipo`, `base_url`, `modelo`, `chave`, `temperatura`, `system_prompt`, `mcp_interno`, `max_rodadas`, `ativo`); `global: true` (só operador) grava o padrão de todos. Chave e cabeçalho voltam **mascarados** |
-| `POST /config/provider/testar` | qualquer login | manda um "teste de conexao" ao modelo e devolve `{ok, ms, modelo}` |
-| `POST /chat` | qualquer login | `{pergunta, memoria}` → `{resposta, ferramentas[], rodadas, modelo, ms, aviso}`; roda as ferramentas do MCP ligado **direto**, sem confirmar; sem provider → `409` |
+| `GET/PUT /config/provider` | qualquer login | provider do chat (`tipo`, `base_url`, `modelo`, `chave`, `temperatura`, `system_prompt`, `mcp_interno`, `max_rodadas`, `ativo`); `global: true` (só operador) grava o padrão de todos. Desde a v3.0 também `memoria_turnos`, `verbatim_turnos`, `reserva_tokens`, `contexto_tokens`, `contexto_detectado`, `janela_efetiva`, `origem_janela` e `escopo` (onde a chamada mexeu). Chave e cabeçalho voltam **mascarados** |
+| `POST /config/provider/testar` | qualquer login | manda um "teste de conexao" ao modelo e devolve `{ok, ms, modelo, contexto_detectado}` — a janela anunciada pelo provedor vira a janela efetiva |
+| `POST /chat` | qualquer login | `{pergunta, memoria}` → `{resposta, ferramentas[], rodadas, modelo, ms, aviso, compactacao}`; manda as últimas `memoria_turnos` rodadas da gaveta (compactadas se não couberem na janela) e roda as ferramentas do MCP ligado **direto**, sem confirmar; sem provider → `409` |
 | `GET/DELETE /chat?memoria=` | qualquer login | histórico da conversa (com as ferramentas chamadas) / apagar a conversa |
 | `GET /config/mcp` | qualquer login | servidores MCP cadastrados (endereço, ativo, nº de ferramentas, cabeçalho mascarado) |
 | `POST /config/mcp` | operador | `{nome, url, cabecalho?}` — cadastra e já lista as ferramentas do servidor |
