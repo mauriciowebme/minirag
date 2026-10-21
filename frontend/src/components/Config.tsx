@@ -80,6 +80,9 @@ function Provider({ operador, tenant, onIrPainel }: { operador: boolean; tenant:
   const [memoria, setMemoria] = useState("12");
   const [verbatim, setVerbatim] = useState("4");
   const [reserva, setReserva] = useState("1024");
+  /* v3.2: o tempo que o modelo pode ficar SEM ESCREVER nada antes de eu desistir (0 = padrão 180s).
+     Não é limite de duração da resposta: resposta longa que não para de escrever tem todo o tempo. */
+  const [silencio, setSilencio] = useState("0");
   const [contexto, setContexto] = useState("0");
   const [ativo, setAtivo] = useState(false);
   const [global, setGlobal] = useState(false);
@@ -99,6 +102,7 @@ function Provider({ operador, tenant, onIrPainel }: { operador: boolean; tenant:
       setMemoria(String(r.memoria_turnos ?? 12));
       setVerbatim(String(r.verbatim_turnos ?? 4));
       setReserva(String(r.reserva_tokens ?? 1024));
+      setSilencio(String(r.silencio_s ?? 0));
       setContexto(String(r.contexto_tokens ?? 0));
       setAtivo(r.configurado || r.ativo);
       setChave("");
@@ -122,6 +126,7 @@ function Provider({ operador, tenant, onIrPainel }: { operador: boolean; tenant:
       memoria_turnos: Number(memoria),
       verbatim_turnos: Number(verbatim),
       reserva_tokens: Number(reserva),
+      silencio_s: Number(silencio),
       contexto_tokens: Number(contexto),
       /* para onde este corpo vai: o painel está MOSTRANDO o cliente selecionado, então é nele
          que tem que gravar (defeito da v2.9: o tenant era ignorado e salvava na linha do operador) */
@@ -260,6 +265,14 @@ function Provider({ operador, tenant, onIrPainel }: { operador: boolean; tenant:
             reserva para a resposta (tokens)
             <input id="provReserva" className="campo mt-1" value={reserva} onChange={(e) => setReserva(e.target.value)} />
             <span className="dica mt-1 block">espaço deixado livre para o modelo escrever</span>
+          </label>
+          <label className="rotulo m-0">
+            espera sem sinal do modelo (segundos)
+            <input id="provSilencio" className="campo mt-1" value={silencio} onChange={(e) => setSilencio(e.target.value)} />
+            <span className="dica mt-1 block" id="provSilencioDica">
+              0 = {p?.silencio_efetivo_s ?? 180} s · é o tempo que o modelo pode passar sem escrever nada antes de eu
+              desistir; resposta longa que não para de escrever nunca é cortada por tempo
+            </span>
           </label>
         </div>
         <div className="flex flex-wrap items-center gap-3 border-t border-borda pt-3">

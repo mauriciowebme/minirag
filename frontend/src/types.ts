@@ -160,6 +160,9 @@ export type ProviderResp = {
   memoria_turnos: number;
   verbatim_turnos: number;
   reserva_tokens: number;
+  /** v3.2: 0 = padrão do sistema; silencio_efetivo_s é o número que está valendo de fato */
+  silencio_s: number;
+  silencio_efetivo_s: number;
   contexto_tokens: number | null;
   contexto_detectado: number | null;
   janela_efetiva: number;
