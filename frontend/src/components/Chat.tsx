@@ -47,7 +47,12 @@ export function Chat({
   const [pergunta, setPergunta] = useState("");
   const [provider, setProvider] = useState<ProviderResp | null>(null);
   const [espera, setEspera] = useState(0);
-  const fim = useRef<HTMLDivElement>(null);
+  /* rolagem respeitando quem manda: a tela SÓ desce sozinha se você já estiver no fim.
+     (antes descia a cada tique do cronômetro e não deixava ler a resposta nem digitar) */
+  const area = useRef<HTMLDivElement>(null);
+  const colado = useRef(true);
+  const [noFundo, setNoFundo] = useState(true);
+  const [novoAbaixo, setNovoAbaixo] = useState(false);
 
   const tenantParam = operador && escopo.tenant ? escopo.tenant : undefined;
   const chave = chaveConversa(escopo.tenant, memoria);
@@ -104,9 +109,38 @@ export function Chat({
     void carregarHistorico();
   }, [carregarHistorico]);
 
+  /* trocar de gaveta/conversa: começa no fim da lista, sem puxar a página inteira */
   useEffect(() => {
-    fim.current?.scrollIntoView({ block: "end" });
-  }, [snap.msgs.length, snap.rodando, espera]);
+    irParaOFim();
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [chave]);
+
+  /** medir é o que decide: folga menor que 80px = você está acompanhando de baixo */
+  function medirRolagem() {
+    const a = area.current;
+    if (!a) return;
+    colado.current = a.scrollHeight - a.scrollTop - a.clientHeight < 80;
+    setNoFundo(colado.current);
+    if (colado.current) setNovoAbaixo(false);
+  }
+
+  function irParaOFim() {
+    const a = area.current;
+    if (!a) return;
+    /* salto imediato: suave em travessia longa parece que nao fez nada */
+    a.scrollTo({ top: a.scrollHeight, behavior: "auto" });
+    colado.current = true;
+    setNoFundo(true);
+    setNovoAbaixo(false);
+  }
+
+  /* o texto chega em pedaços: desce junto se (e somente se) o usuário estiver no fim.
+     NAO depende do cronômetro — era ele que puxava a tela a cada 500 ms. */
+  const rastro = snap.msgs.length + ":" + (snap.msgs[snap.msgs.length - 1]?.texto.length ?? 0);
+  useEffect(() => {
+    if (colado.current) irParaOFim();
+    else setNovoAbaixo(true);
+  }, [rastro, snap.rodando]);
 
   /* cronômetro honesto: conta desde QUANDO a tarefa começou (voltar para a tela não zera o tempo) */
   useEffect(() => {
@@ -196,9 +230,6 @@ export function Chat({
             ))}
           </select>
         </label>
-        <button className="btn btn-sutil" title="apagar esta conversa" onClick={() => void limpar()}>
-          limpar
-        </button>
       </div>
 
       {semProvider && (
@@ -210,8 +241,10 @@ export function Chat({
         </div>
       )}
 
-      <div className="cartao flex min-h-[62vh] flex-col gap-0 p-0">
-        <div className="flex-1 overflow-auto p-4" id="chatMsgs">
+      <div className="cartao relative flex h-[68dvh] min-h-[380px] flex-col gap-0 p-0">
+        {/* min-h-0 e o que falta para a caixa rolar por dentro: sem isso ela crescia
+            e quem andava era a pagina inteira */}
+        <div className="min-h-0 flex-1 overflow-auto p-4" id="chatMsgs" ref={area} onScroll={medirRolagem}>
           {msgs.length === 0 && !rodando && (
             <p className="dica">
               {semFerramenta
@@ -268,9 +301,28 @@ export function Chat({
               {naFila > 0 && <span className="sub2"> · {naFila} na fila</span>}
             </div>
           )}
-          <div ref={fim} />
+          {/* botão para descer: aparece só quando você subiu para ler algo */}
+          {!noFundo && (
+            <button
+              id="chatIrAoFim"
+              className="btn btn-mini absolute bottom-[76px] left-1/2 z-10 -translate-x-1/2 rounded-full px-3 shadow-md"
+              title="rolar até o fim da conversa"
+              onClick={irParaOFim}
+            >
+              {"↓ fim"}
+              {novoAbaixo ? " · chegou coisa nova" : ""}
+            </button>
+          )}
         </div>
         <div className="flex gap-2 border-t border-borda p-3">
+          <button
+            id="chatNovaConversa"
+            className="btn btn-sutil shrink-0"
+            title="apagar esta conversa e recomeçar do zero"
+            onClick={() => void limpar()}
+          >
+            nova conversa
+          </button>
           <input
             id="chatPergunta"
             className="campo flex-1"
