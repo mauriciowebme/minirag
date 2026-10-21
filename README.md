@@ -36,6 +36,14 @@ parecidos com a pergunta, com uma nota de 0 a 1.
   Mais 3 checagens de limites do campo no bloco `v3.0` (fora da faixa → 422, round-trip pela tela,
   `0` volta ao padrão e aparece como efetivo).
 
+### v3.2.1 — menu do painel sem títulos de grupo
+
+- Saem do lado esquerdo os rótulos **"visão geral"** e **"memória"**: a divisão não ajudava a achar
+  nada. O menu vira uma lista só, na ordem do caminho (Painel · Gavetas/Usuários · Chat · Buscar ·
+  Fila · Configurações), e o item destacado continua seguindo a navegação real (dentro de
+  usuário → arquivos → editor, "Gavetas" permanece acesa).
+- **Versão**: `3.2.1`.
+
 ---
 
 ## v3.1 — A conversa para de puxar a tela e o recomeçar desceu para o pé (21/10/2026)
@@ -951,13 +959,21 @@ MINIRAG_USERS="teste:chave" node dist/index.js
 ### Testes
 
 ```bash
-# com a stack de teste no ar (porta 8002 no exemplo)
-BASE=http://127.0.0.1:8002 TESTKEY=... OPKEY=... npm test
+# subida limpa do ambiente DESCARTÁVEL (derruba, apaga volume, reconstrói a imagem,
+# gera chaves novas, espera /health e escreve o arquivo de ambiente da rodada)
+scripts/up-test.sh
+set -a; . /opt/data/cache/scratch/minirag_test_keys.env; set +a
+
+SO_BLOCOS="v3.2" npm test    # só os blocos afetados, antes de pedir OK do deploy
+npm test                     # suíte COMPLETA, uma vez antes do push
 ```
 
-A suíte (`tests/e2e.test.ts`, ~72 checagens) roda por HTTP: é juiz de
-**contrato**, não de implementação. O último bloco testa o freio de força
-bruta e bloqueia o IP por 5 minutos — por isso ele é o último.
+A suíte (`tests/e2e.test.ts`, **255 checagens em 12 blocos**) roda por HTTP contra a instância de
+teste: é juiz de **contrato**, não de implementação, e imprime no fim a tabela de cobertura da
+rodada (blocos pulados por `SO_BLOCOS` aparecem nominalmente). O último bloco testa o freio de
+força bruta e bloqueia o IP por 5 minutos — por isso ele é o último, e fica fora do portão de CI.
+Modo/alvo, papéis reais, prova de versão e como fechar cada lacuna: **`docs/testes.md`**
+(método na skill canônica `suite-de-testes`).
 
 ### Produção (qualquer plataforma Docker)
 
