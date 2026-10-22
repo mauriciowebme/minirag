@@ -20,7 +20,7 @@ export function Maquinas({ operador }: { operador: boolean }) {
   const { toast } = useToast();
   const [maquinas, setMaquinas] = useState<MaquinaLinha[]>([]);
   const [log, setLog] = useState<MaquinasLogLinha[]>([]);
-  const [nomeNovo, setNomeNovo] = useState("");
+  const [nomeNovo, setNomeNovo] = useState(`maq-${new Date().toTimeString().slice(0, 5).replace(":", "")}`);
   const [tenantNovo, setTenantNovo] = useState("");
   const [criando, setCriando] = useState(false);
   const [pareamento, setPareamento] = useState<PareamentoResp | null>(null);
@@ -88,35 +88,47 @@ export function Maquinas({ operador }: { operador: boolean }) {
       {pareamento && (
         <div className="rounded-lg border border-amber-500/40 bg-amber-500/10 p-3" id="maqTokenCaixa">
           <div className="mb-1 text-[12px] font-semibold text-amber-300">
-            Token de pareamento — aparece só esta vez, vale {Math.round((pareamento.segundos ?? 900) / 60)} min, uso único
+            Cole este comando no PowerShell da máquina — vale {Math.round((pareamento.segundos ?? 900) / 60)} min, uma vez só
           </div>
+          <div className="mb-1 text-[11px] text-txt3">Windows (na pasta onde salvou o .exe):</div>
           <div className="flex items-center gap-2">
-            <code className="flex-1 select-all break-all rounded bg-black/40 p-2 text-[12px]" id="maqTokenTexto">
-              {pareamento.token}
+            <code className="flex-1 select-all break-all rounded bg-black/40 p-2 text-[12px]" id="maqComandoWin">
+              {`.\minirag-cliente-win.exe --token ${pareamento.token}`}
             </code>
             <button
               className="btn self-start"
               onClick={() => {
                 void navigator.clipboard
-                  ?.writeText(pareamento.token)
-                  .then(() => toast("token copiado"))
+                  ?.writeText(`.\minirag-cliente-win.exe --token ${pareamento.token}`)
+                  .then(() => toast("comando copiado"))
                   .catch(() => toast("copie manualmente"));
               }}
             >
               copiar
             </button>
+          </div>
+          <div className="mb-1 mt-2 text-[11px] text-txt3">Linux:</div>
+          <div className="flex items-center gap-2">
+            <code className="flex-1 select-all break-all rounded bg-black/40 p-2 text-[12px]" id="maqComandoLinux">
+              {`./minirag-cliente-linux --token ${pareamento.token}`}
+            </code>
+            <button
+              className="btn self-start"
+              onClick={() => {
+                void navigator.clipboard
+                  ?.writeText(`./minirag-cliente-linux --token ${pareamento.token}`)
+                  .then(() => toast("comando copiado"))
+                  .catch(() => toast("copie manualmente"));
+              }}
+            >
+              copiar
+            </button>
+          </div>
+          <div className="mt-2 flex items-center justify-between text-[11px] text-txt3">
+            <span>depois de colar, a máquina aparece na lista abaixo em segundos e religa sozinha para sempre</span>
             <button className="btn self-start" onClick={() => setPareamento(null)}>
               fechei
             </button>
-          </div>
-          <div className="mt-2 flex items-center gap-3 text-[11px] text-txt3">
-            <span>cliente na máquina (dê duplo clique ou rode no terminal):</span>
-            <a id="baixarClienteWin" className="text-azul underline" href="/maquina/cliente/win" download>
-              ⬓ baixar para Windows
-            </a>
-            <a id="baixarClienteLinux" className="text-azul underline" href="/maquina/cliente/linux" download>
-              ⬓ baixar para Linux
-            </a>
           </div>
         </div>
       )}
@@ -124,7 +136,7 @@ export function Maquinas({ operador }: { operador: boolean }) {
       <div className="cartao">
         <h3 className="mb-1 text-[13px] font-semibold text-txt2">Binários do cliente</h3>
         <p className="dica mt-0 mb-2">
-          rode na máquina que você quer controlar, com um token gerado abaixo. Clientes desta versão se
+          rode na máquina que você quer controlar, com o comando gerado no cartão abaixo. Clientes desta versão se
           auto-atualizam: quando sair versão nova, a máquina baixa e religa sozinha.
         </p>
         <div className="flex flex-wrap gap-2">
@@ -142,12 +154,16 @@ export function Maquinas({ operador }: { operador: boolean }) {
       </div>
 
       <div className="cartao">
-        <h3 className="mb-2 text-[13px] font-semibold text-txt2">Adicionar máquina</h3>
+        <h3 className="mb-1 text-[13px] font-semibold text-txt2">Conectar máquina nova</h3>
+        <p className="dica mt-0 mb-2">
+          <b>1.</b> baixe o cliente no cartão acima e salve na máquina · <b>2.</b> gere o comando · <b>3.</b> cole no
+          PowerShell da máquina (uma vez só). Ela aparece na lista e depois religa sozinha.
+        </p>
         <div className="flex flex-wrap items-center gap-2">
           <input
             id="maqNome"
             className="campo w-40"
-            placeholder="nome (opcional)"
+            placeholder="nome da máquina"
             value={nomeNovo}
             onChange={(e) => setNomeNovo(e.target.value)}
           />
@@ -155,17 +171,14 @@ export function Maquinas({ operador }: { operador: boolean }) {
             <input
               id="maqTenant"
               className="campo w-40"
-              placeholder="tenant (só admin)"
+              placeholder="dar a outro usuário (opcional)"
               value={tenantNovo}
               onChange={(e) => setTenantNovo(e.target.value)}
             />
           )}
-          <button id="btnParear" className="btn btn-primario" disabled={criando || !nomeNovo.trim()} onClick={() => void parear()}>
-            {criando ? "gerando…" : "＋ gerar token"}
+          <button id="btnParear" className="btn btn-primario" disabled={criando} onClick={() => void parear()}>
+            {criando ? "gerando…" : "＋ gerar comando"}
           </button>
-        </div>
-        <div className="mt-2 text-[11px] text-txt3">
-          o cliente da máquina se conecta com este token uma vez; depois passa a usar o token de máquina que recebe na resposta
         </div>
       </div>
 
