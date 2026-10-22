@@ -43,6 +43,15 @@ Mesmo código, três portas — igual ao resto da casa.
   (decisão de orçamento); até lá, vale o caminho do túnel — exceção na
   máquina que confiar no cliente.
 
+### Interruptor global de controle (3.6.1)
+
+Configurações → Ferramentas (MCP) → cartão **Controle das máquinas**. Desligado pelo
+operador, NINGUÉM executa comandos: o chat perde a ferramenta da lista, o MCP externo
+esconde `rodar_comando` no `tools/list` e recusa a chamada (409), e a rota REST
+`POST /maquinas/<host>/run` devolve 409 apontando o cartão. As máquinas continuam
+conectadas e online na tela, listagem e histórico seguem lendo; o estado vive na tabela
+`maquinas_cfg` (`controle_ativo`) com cache em memória relido no boot.
+
 ## v3.5 — Esquecimento com régua na tela e apagar usuário com carência (22/10/2026)
 
 - **Três números, todos configuráveis** (antes só existia o primeiro, preso em 30 dias e
