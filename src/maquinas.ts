@@ -83,6 +83,35 @@ export async function initMaquinas(): Promise<void> {
        criado_em TIMESTAMPTZ NOT NULL DEFAULT now()
      )`,
   );
+  await q(
+    `CREATE TABLE IF NOT EXISTS maquinas_cfg (
+       chave         TEXT PRIMARY KEY,
+       valor         TEXT NOT NULL,
+       atualizado_em TIMESTAMPTZ NOT NULL DEFAULT now()
+     )`,
+  );
+  const cfg = await q<{ valor: string }>(`SELECT valor FROM maquinas_cfg WHERE chave = 'controle_ativo'`);
+  controleCache = cfg.rows[0]?.valor !== "0";
+}
+
+/* Interruptor GLOBAL de controle (Configurações → Ferramentas (MCP)): desligado,
+   NINGUÉM executa — nem chat, nem MCP externo, nem REST — porque o gate mora no
+   `rodar`, que é o funil único dos três. A cache é lida em boot e toda escrita;
+   o tools/list e o pacote do chat filtram a tool `rodar_comando` para o modelo
+   nem sonhar que ela existe. */
+let controleCache = true;
+
+export function controleDeMaquinaAtivo(): boolean {
+  return controleCache;
+}
+
+export async function gravarControleDeMaquina(v: boolean): Promise<void> {
+  await q(
+    `INSERT INTO maquinas_cfg (chave, valor, atualizado_em) VALUES ('controle_ativo', $1, now())
+     ON CONFLICT (chave) DO UPDATE SET valor = $1, atualizado_em = now()`,
+    [v ? "1" : "0"],
+  );
+  controleCache = v;
 }
 
 /* ------------------------------------------------------------------ REST ---- */
@@ -176,6 +205,7 @@ export async function rodar(
 ): Promise<{ exit: number; stdout: string; stderr: string; ms: number; host: string }> {
   if (typeof cmd !== "string" || !cmd.trim()) throw new HttpError(422, "cmd é obrigatório");
   if (cmd.length > 4000) throw new HttpError(422, "cmd longo demais (máx 4000)");
+  if (!controleCache) throw new HttpError(409, "controle das maquinas DESLIGADO (Configuracoes > Ferramentas (MCP)) — nenhuma execucao aceita: chat, MCP ou REST");
   const espera = Math.min(TIMEOUT_MAX, Math.max(1, Number(timeoutSeg ?? TIMEOUT_PADRAO) || TIMEOUT_PADRAO));
   const chave = chaveDe(alvo, host);
   const l = ligacoes.get(chave);

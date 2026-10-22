@@ -21,7 +21,7 @@ import { CONFIG } from "./config";
 import { healthAtual } from "./ferramentas";
 import { criarUsuario, listarUsuarios, exigirOperador, removerUsuario } from "./usuarios";
 import { escreverEsquecimento, lerEsquecimento } from "./esquecimento";
-import { alvoMaquina, criarPareamento, listarMaquinas, rodar } from "./maquinas";
+import { alvoMaquina, criarPareamento, controleDeMaquinaAtivo, listarMaquinas, rodar } from "./maquinas";
 import { responderChat, salvarProvider, testarProvider, verProvider } from "./provider";
 import {
   atualizarFerramentas,
@@ -33,7 +33,8 @@ import {
 
 /** As ferramentas que o Chat pode chamar: todas do MCP, menos o próprio chat (recursivo). */
 export function toolsParaChat(): Tool[] {
-  return TOOLS.filter((t) => t.name !== "chat");
+  // com o controle de maquinas desligado, nem o chat sonha que existe rodar_comando
+  return TOOLS.filter((t) => t.name !== "chat" && (controleDeMaquinaAtivo() || t.name !== "rodar_comando"));
 }
 
 /** Executa uma ferramenta interna no MESMO processo — é o mesmo caminho do POST /mcp, sem HTTP. */
@@ -622,7 +623,7 @@ export async function despachar(msg: any, deps: McpDeps): Promise<unknown | null
   if (method.startsWith("notifications/")) return null;
   if (method === "initialize") return ok(id, initialize(params));
   if (method === "ping") return ok(id, {});
-  if (method === "tools/list") return ok(id, { tools: TOOLS });
+  if (method === "tools/list") return ok(id, { tools: controleDeMaquinaAtivo() ? TOOLS : TOOLS.filter((t) => t.name !== "rodar_comando") });
 
   if (method === "tools/call") {
     let user: Usuario;

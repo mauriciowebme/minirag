@@ -6,7 +6,9 @@ import { CONFIG, tenantFor } from "./config";
 import {
   alvoMaquina,
   apagarMaquina,
+  controleDeMaquinaAtivo,
   criarPareamento,
+  gravarControleDeMaquina,
   listarLog,
   listarMaquinas,
   mudarMaquina,
@@ -656,7 +658,17 @@ export function criarApp(): FastifyInstance {
 
   app.get("/config/mcp", async (req) => {
     usuario(req);
-    return { servidores: await listarServidores() };
+    return { servidores: await listarServidores(), controle_maquinas: controleDeMaquinaAtivo() };
+  });
+
+  // interruptor GLOBAL do controle de máquina: desliga chat + MCP externo + REST de uma vez
+  app.patch("/config/mcp/maquinas", async (req) => {
+    const u = usuario(req);
+    exigirOperador(u);
+    const b = corpo(req);
+    if (typeof b.ativo !== "boolean") throw new HttpError(422, "ativo (true/false) é obrigatório");
+    await gravarControleDeMaquina(b.ativo);
+    return { controle_maquinas: b.ativo };
   });
 
   app.post("/config/mcp", async (req) => {
