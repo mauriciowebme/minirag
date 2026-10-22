@@ -375,6 +375,7 @@ test("minirag v2 — suíte completa", async (t) => {
     r = await rpc(4, "tools/list");
     const nomes = (r.json?.result?.tools ?? []).map((x: any) => x.name).sort();
     const ESPERADAS = [
+      "apagar_usuario",
       "archive_doc",
       "chat",
       "config_provider",
@@ -383,6 +384,7 @@ test("minirag v2 — suíte completa", async (t) => {
       "delete_doc",
       "delete_gaveta",
       "edit_doc",
+      "esquecimento",
       "get_file",
       "health",
       "ingest",
@@ -397,7 +399,7 @@ test("minirag v2 — suíte completa", async (t) => {
       "search",
       "upload_file",
     ].sort();
-    f.check("tools/list tem 21 tools (paridade com a REST)", JSON.stringify(nomes) === JSON.stringify(ESPERADAS.sort()), nomes.length);
+    f.check("tools/list tem 23 tools (paridade com a REST)", JSON.stringify(nomes) === JSON.stringify(ESPERADAS.sort()), nomes.length);
 
     r = await rpc(5, "tools/call", { name: "health" }, null);
     f.check("tools/call sem Bearer -> 401", r.status === 401 && "error" in (r.json ?? {}), r.texto.slice(0, 150));
@@ -1160,10 +1162,10 @@ test("minirag v2 — suíte completa", async (t) => {
     const chaveOp2 = r.json?.chave ?? "";
     f.check("criar segundo operador pela tela/API", r.status === 201 && String(chaveOp2).length > 20, r.texto.slice(0, 140));
     r = await call("DELETE", "/usuarios/suite-op2", { key: OPKEY });
-    f.check("com outro operador sobrando, apagar operador ok", r.status === 200 && r.json?.removido === true, r.texto.slice(0, 140));
+    f.check("com outro operador sobrando, apagar operador ok (v3.5: agenda)", r.status === 200 && r.json?.agendado === true && r.json?.removido === false, r.texto.slice(0, 140));
 
     r = await call("DELETE", "/usuarios/suite-novo", { key: OPKEY });
-    f.check("remover usuário sem documentos", r.status === 200 && r.json?.removido === true, r.texto.slice(0, 120));
+    f.check("remover usuário sem documentos (v3.5: vira agendamento)", r.status === 200 && r.json?.agendado === true, r.texto.slice(0, 120));
     await call("DELETE", `/gavetas/${GAV}`, { key: TESTKEY });
 
     f.fechar("v2.7 painel/usuarios/chat");
@@ -2070,6 +2072,125 @@ test("minirag v2 — suíte completa", async (t) => {
     r = await call("GET", "/gavetas", { key: TESTKEY });
     f.check("comum lista as próprias gavetas (o seletor do Chat precisa)", r.status === 200, r.status);
     f.fechar("v3.4 perfis");
+  });
+
+  await bloco(t, "v3.5: esquecimento configurável + apagar com carência + faxina", async () => {
+    const f = fiscal();
+    const CONTAINER = process.env.CONTAINER ?? "";
+    const DB = process.env.DBCONTAINER ?? CONTAINER.replace("-api-", "-db-");
+    const psql = (sql: string) =>
+      execFileSync("docker", ["exec", DB, "sh", "-c", `psql -U \"$POSTGRES_USER\" -d \"$POSTGRES_DB\" -tAc \"${sql}\"`], { encoding: "utf8" }).trim();
+
+    /* ---- 1. defaults efetivos sem nada gravado na tela ---- */
+    let r = await call("GET", "/config", { key: OPKEY });
+    const e0 = r.json?.esquecimento ?? {};
+    f.check(
+      "defaults efetivos: arquiva 180d, mata arquivado 365d, carência 30d (origem ambiente)",
+      e0.dias_arquivar === 180 && e0.dias_excluir_arquivado === 365 && e0.dias_carencia === 30 &&
+        e0.origem?.dias_arquivar === "ambiente",
+      { dias_arquivar: e0.dias_arquivar, excluir: e0.dias_excluir_arquivado, car: e0.dias_carencia, origem: e0.origem },
+    );
+
+    /* ---- 2-4. escrita é do admin; valor esquisito barra; gravar na tela vence ---- */
+    r = await call("PUT", "/config/esquecimento", { key: TESTKEY, corpo: { dias_arquivar: 90 } });
+    f.check("comum não escreve esquecimento (403)", r.status === 403, r.json?.detail ?? r.status);
+
+    r = await call("PUT", "/config/esquecimento", { key: OPKEY, corpo: { dias_arquivar: -5 } });
+    f.check("dias negativos -> 422", r.status === 422, r.texto.slice(0, 140));
+
+    r = await call("PUT", "/config/esquecimento", { key: OPKEY, corpo: { dias_arquivar: 181, dias_excluir_arquivado: 366, dias_carencia: 30 } });
+    const okEscrita = r.status === 200 && r.json?.efetivos?.dias_arquivar === 181;
+    r = await call("GET", "/config", { key: OPKEY });
+    f.check(
+      "admin grava e a releitura bate (tela vence ambiente)",
+      okEscrita && r.json?.esquecimento?.dias_arquivar === 181 && r.json?.esquecimento?.origem?.dias_arquivar === "tela",
+      { write: r.status, efetivo: r.json?.esquecimento?.dias_arquivar, origem: r.json?.esquecimento?.origem },
+    );
+
+    /* ---- 5-9. ciclo do apagar-agendar-desfazer ---- */
+    r = await call("POST", "/usuarios", { key: OPKEY, corpo: { nome: "suite-v35", papel: "usuario" } });
+    const k35 = String(r.json?.chave ?? "");
+    f.check("cria usuário da v3.5", r.status === 201 && k35.length > 20, r.texto.slice(0, 120));
+
+    r = await call("POST", "/ingest", { key: k35, corpo: { doc_id: "nota-v35", content: "Nota fiscal 7788 da suíte v3.5, total R$ 3.210,00.", memoria: "suite-v35" } });
+    const fimIngest = r.status === 202 ? await esperarJob(k35, Number(r.json?.job_id)) : {};
+    f.check("documento entra na gaveta do suite-v35", fimIngest.status === "concluido", fimIngest.status);
+
+    r = await call("DELETE", "/usuarios/suite-v35", { key: OPKEY });
+    const agendado = r.status === 200 && r.json?.agendado === true && r.json?.removido === false && Number(r.json?.carencia_dias) === 30;
+    r = await call("GET", "/usuarios", { key: OPKEY });
+    const linha35 = (r.json?.usuarios ?? []).find((u: any) => u.nome === "suite-v35");
+    f.check("apagar AGENDA (login off, prazo no ar, linha segue na lista)", agendado && linha35?.agendado_exclusao_em, { agendado, expira: linha35?.agendado_exclusao_em });
+
+    r = await call("GET", "/docs?memoria=suite-v35", { key: k35 });
+    f.check("chave do agendado não entra mais (401)", r.status === 401, r.status);
+
+    r = await call("POST", "/usuarios", { key: OPKEY, corpo: { nome: "suite-v35", papel: "usuario" } });
+    const k35b = String(r.json?.chave ?? "");
+    f.check("recriar o nome DESFAZ a exclusão", r.status === 201 && /DESFEITA/.test(String(r.json?.aviso ?? "")), r.texto.slice(0, 160));
+    r = await call("GET", "/docs?memoria=suite-v35", { key: k35b });
+    f.check("acervo sobreviveu ao desfazer", r.status === 200 && JSON.stringify(r.json?.docs ?? r.json).includes("nota-v35"), r.texto.slice(0, 140));
+
+    /* ---- 10. faxina: carência vencida apaga conta + dados inteiros ---- */
+    await call("DELETE", "/usuarios/suite-v35", { key: OPKEY });
+    psql(`UPDATE usuarios SET agendado_exclusao_em = now() - interval '1 hour' WHERE nome = 'suite-v35'`);
+    r = await call("POST", "/decay", { key: OPKEY, corpo: {} });
+    const exp1 = r.json?.expurgo ?? {};
+    const sumiu = (exp1.usuarios_apagados ?? []).includes("suite-v35");
+    f.check("decay força faxina e expurga conta vencida", r.status === 200 && sumiu, { expurgo: exp1, detalhe: r.json?.detail });
+    f.check(
+      "expurgado: zero sobra (usuarios, chunks, documents, jobs)",
+      CONTAINER !== "" &&
+        psql(`SELECT (SELECT count(*) FROM usuarios WHERE nome='suite-v35') || '|' || (SELECT count(*) FROM chunks WHERE tenant='suite-v35') || '|' || (SELECT count(*) FROM documents WHERE tenant='suite-v35') || '|' || (SELECT count(*) FROM ingest_jobs WHERE tenant='suite-v35')`) === "0|0|0|0",
+      CONTAINER ? psql(`SELECT count(*) FROM usuarios WHERE nome='suite-v35'`) : "sem container",
+    );
+
+    /* ---- 11-12. arquivado morre além da janela; dentro dela fica ---- */
+    const GAVX = "suite-v35-exp";
+    for (const id of ["expira-morto", "expira-janela", "expira-vivo"]) {
+      r = await call("POST", "/ingest", { key: TESTKEY, corpo: { doc_id: id, content: `Documento ${id} da prova de expurgo v3.5 com valor 4455.`, memoria: GAVX } });
+      if (r.status === 202) await esperarJob(TESTKEY, Number(r.json?.job_id));
+    }
+    await call("PATCH", `/documents/expira-morto/arquivado?memoria=${GAVX}`, { key: TESTKEY, corpo: { arquivado: true } });
+    await call("PATCH", `/documents/expira-janela/arquivado?memoria=${GAVX}`, { key: TESTKEY, corpo: { arquivado: true } });
+    psql(`UPDATE chunks SET archived_at = now() - interval '400 days' WHERE tenant='teste' AND memoria='${GAVX}' AND doc_id='expira-morto'`);
+    r = await call("POST", "/decay", { key: OPKEY, corpo: {} });
+    const exp2 = r.json?.expurgo ?? {};
+    f.check("arquivado fora da janela (400d > 366d) é apagado de vez", Number(exp2.docs_expurgados ?? 0) >= 1, exp2);
+    f.check(
+      "morto some das três tabelas; janela (arquivado hoje) e vivo ficam",
+      CONTAINER !== "" &&
+        psql(`SELECT (SELECT count(*) FROM documents WHERE tenant='teste' AND memoria='${GAVX}' AND doc_id='expira-morto') || '|' || (SELECT count(*) FROM documents WHERE tenant='teste' AND memoria='${GAVX}' AND doc_id='expira-janela') || '|' || (SELECT count(*) FROM documents WHERE tenant='teste' AND memoria='${GAVX}' AND doc_id='expira-vivo')`) === "0|1|1",
+      CONTAINER ? psql(`SELECT doc_id FROM documents WHERE tenant='teste' AND memoria='${GAVX}'`) : "sem container",
+    );
+    f.check(
+      "morto não deixa nem chunk (embedding some junto); vivo mantém os seus",
+      CONTAINER !== "" &&
+        psql(`SELECT (SELECT count(*) FROM chunks WHERE tenant='teste' AND memoria='${GAVX}' AND doc_id='expira-morto') || '|' || ((SELECT count(*) FROM chunks WHERE tenant='teste' AND memoria='${GAVX}' AND doc_id='expira-vivo') > 0)::int`) === "0|1",
+      CONTAINER ? psql(`SELECT count(*) FROM chunks WHERE tenant='teste' AND memoria='${GAVX}' AND doc_id='expira-morto'`) : "sem container",
+    );
+
+    /* ---- 13. MCP espelho: apagar_usuario + esquecimento ---- */
+    const mcp = (id: unknown, name: string, args: unknown, key: string) =>
+      call("POST", "/mcp", { key, corpo: { jsonrpc: "2.0", id, method: "tools/call", params: { name, arguments: args } } });
+    r = await call("POST", "/usuarios", { key: OPKEY, corpo: { nome: "suite-v35c", papel: "usuario" } });
+    f.check("usuário MCP-alvo criado", r.status === 201, r.texto.slice(0, 100));
+    r = await mcp(1, "apagar_usuario", { nome: "suite-v35c" }, OPKEY);
+    f.check("MCP apagar_usuario agenda", JSON.parse(r.json?.result?.content?.[0]?.text ?? "{}").agendado === true, r.texto.slice(0, 160));
+    r = await mcp(2, "esquecimento", { acao: "ver" }, OPKEY);
+    const esqMcp = JSON.parse(r.json?.result?.content?.[0]?.text ?? "{}");
+    f.check("MCP esquecimento ver devolve efetivos da tela", esqMcp?.efetivos?.dias_arquivar === 181, r.texto.slice(0, 160));
+    r = await mcp(3, "esquecimento", { acao: "definir", dias_arquivar: 60 }, TESTKEY);
+    const negado = r.json?.result?.isError === true || r.json?.error;
+    f.check("comum pelo MCP não escreve esquecimento", negado === true || Boolean(negado), r.texto.slice(0, 160));
+
+    /* limpeza: desfaz o agendamento do v35c para não deixar lixo e volta defaults da tela */
+    await call("DELETE", "/usuarios/suite-v35c", { key: OPKEY });
+    await call("PATCH", "/usuarios/suite-v35c", { key: OPKEY, corpo: { ativo: true } });
+    await call("DELETE", "/usuarios/suite-v35c", { key: OPKEY });
+    await call("DELETE", `/gavetas/${encodeURIComponent(GAVX)}`, { key: TESTKEY });
+
+    f.fechar("v3.5 esquecimento-faxina");
   });
 
   await bloco(t, "freio de força bruta (último: bloqueia o IP)", async () => {
