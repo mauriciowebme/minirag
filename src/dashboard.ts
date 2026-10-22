@@ -1,5 +1,6 @@
 /** Painel (dashboard): números do acervo em UMA chamada + contador diário de uso. */
 import { CONFIG, Usuario, isOperador } from "./config";
+import { lerEsquecimento } from "./esquecimento";
 import { q } from "./db";
 import { embedderDim, embedderDisponivel } from "./embed";
 import { ocrDisponivel } from "./ocr";
@@ -105,7 +106,8 @@ export async function dadosPainel(user: Usuario, tenantArg?: string | null) {
 }
 
 /** Configuração exposta na tela (sem segredo): limites e esquecimento. */
-export function configPublica() {
+export async function configPublica() {
+  const esq = await lerEsquecimento();
   return {
     versao: CONFIG.versao,
     limites: {
@@ -120,7 +122,12 @@ export function configPublica() {
     },
     esquecimento: {
       ativo: CONFIG.decayAtivo,
-      dias: CONFIG.decayDias,
+      // v3.5: valores EFETIVOS (o que a tela gravou vence o ambiente; sem gravação,
+      // os defaults: arquiva 180d, mata arquivado 365d, carência 30d)
+      dias_arquivar: esq.efetivos.dias_arquivar,
+      dias_excluir_arquivado: esq.efetivos.dias_excluir_arquivado,
+      dias_carencia: esq.efetivos.dias_carencia,
+      origem: esq.origem,
       min_acessos: CONFIG.decayMinAcessos,
       intervalo_minutos: CONFIG.decayIntervaloMinutos,
     },

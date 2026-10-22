@@ -2,6 +2,7 @@
 import { PoolClient } from "pg";
 import { CONFIG } from "./config";
 import { q } from "./db";
+import { lerEsquecimento } from "./esquecimento";
 
 export type DecayResultado = {
   arquivados_agora: number;
@@ -12,14 +13,16 @@ export type DecayResultado = {
 
 /**
  * A decisão é POR DOCUMENTO: soma dos acessos dos chunks do doc; o doc inteiro
- * vira arquivado. dias/min_acessos null = CONFIG. tenant null = global.
+ * vira arquivado. dias/min_acessos null = valor EFETIVO (tela > ambiente > código).
+ * tenant null = global.
  */
 export async function runDecay(
   dias?: number | null,
   minAcessos?: number | null,
   tenant?: string | null,
 ): Promise<DecayResultado> {
-  const d = dias ?? CONFIG.decayDias;
+  const { efetivos } = await lerEsquecimento();
+  const d = dias ?? efetivos.dias_arquivar;
   const m = minAcessos ?? CONFIG.decayMinAcessos;
   const escopo = tenant !== null && tenant !== undefined ? " AND c.tenant = $3" : "";
   const params: unknown[] = [m, d];

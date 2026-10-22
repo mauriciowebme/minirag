@@ -19,7 +19,8 @@ import {
 import { enqueueIngest } from "./ingest";
 import { CONFIG } from "./config";
 import { healthAtual } from "./ferramentas";
-import { criarUsuario, listarUsuarios, exigirOperador } from "./usuarios";
+import { criarUsuario, listarUsuarios, exigirOperador, removerUsuario } from "./usuarios";
+import { escreverEsquecimento, lerEsquecimento } from "./esquecimento";
 import { responderChat, salvarProvider, testarProvider, verProvider } from "./provider";
 import {
   atualizarFerramentas,
@@ -273,6 +274,31 @@ export const TOOLS: Tool[] = [
     },
   },
   {
+    name: "apagar_usuario",
+    description:
+      "Agenda a exclusao de um usuario: login desliga na hora, os dados dele somem depois da carencia configuravel (default 30 dias). Recriar o nome dentro da janela desfaz. Somente operador.",
+    inputSchema: {
+      type: "object",
+      properties: { nome: { type: "string" } },
+      required: ["nome"],
+    },
+  },
+  {
+    name: "esquecimento",
+    description:
+      "Numeros do esquecimento (dias_arquivar, dias_excluir_arquivado, dias_carencia). acao=ver | definir. Somente operador.",
+    inputSchema: {
+      type: "object",
+      properties: {
+        acao: { type: "string", enum: ["ver", "definir"] },
+        dias_arquivar: { type: "integer", description: "sem uso ha N dias vira ARQUIVADO (default 180 = 6 meses)" },
+        dias_excluir_arquivado: { type: "integer", description: "arquivado ha mais de N dias e apagado de verdade (default 365)" },
+        dias_carencia: { type: "integer", description: "janela para desfazer o apagar de um usuario (default 30)" },
+      },
+      required: ["acao"],
+    },
+  },
+  {
     name: "config_provider",
     description:
       "Provider de linguagem do chat (LiteLLM/OpenAI/Ollama). acao=ver | salvar | testar. A chave nunca volta em claro.",
@@ -477,6 +503,17 @@ async function executarTool(
       exigirOperador(user);
       if (typeof args.nome !== "string") throw new Error("parametros invalidos: campo obrigatorio: nome");
       return criarUsuario(args.nome, args.papel);
+    case "apagar_usuario":
+      exigirOperador(user);
+      if (typeof args.nome !== "string") throw new Error("parametros invalidos: campo obrigatorio: nome");
+      return removerUsuario(args.nome);
+    case "esquecimento": {
+      exigirOperador(user);
+      const acao = String(args.acao ?? "ver");
+      if (acao === "ver") return lerEsquecimento();
+      if (acao === "definir") return escreverEsquecimento(args);
+      throw new Error("acao invalida: use ver | definir");
+    }
     case "config_provider": {
       const acao = String(args.acao ?? "ver");
       if (acao === "ver") return verProvider(user, args.tenant ?? null);

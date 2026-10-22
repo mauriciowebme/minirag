@@ -9,6 +9,8 @@ import { embedderDim, embedderDisponivel } from "./embed";
 import { detectarOcr, ocrDisponivel } from "./ocr";
 import { enqueueIngest, IngestBody } from "./ingest";
 import { runDecay } from "./decay";
+import { faxina } from "./faxina";
+import { escreverEsquecimento } from "./esquecimento";
 import {
   atualizarFerramentas,
   atualizarServidor,
@@ -465,7 +467,11 @@ export function criarApp(): FastifyInstance {
       ? null
       : vInt(b.min_acessos, "min_acessos", 0, 0, 1_000_000);
     const alvo = (await import("./config")).isOperador(u) ? null : u.tenant;
-    return runDecay(dias, min, alvo);
+    const res = await runDecay(dias, min, alvo);
+    // v3.5: "forçar agora" também roda a faxina (contas com carência vencida e
+    // arquivados mortos pela janela). Mesmo escopo do decay.
+    const expurgo = await faxina(alvo);
+    return { ...res, expurgo };
   });
 
   /* ------------------------------------------------------------- painel */
@@ -483,6 +489,13 @@ export function criarApp(): FastifyInstance {
   app.get("/config", async (req) => {
     usuario(req);
     return configPublica();
+  });
+
+  /** v3.5: os três números do esquecimento, graváveis só pelo ADMIN. */
+  app.put("/config/esquecimento", async (req) => {
+    const u = usuario(req);
+    exigirOperador(u);
+    return escreverEsquecimento(corpo(req));
   });
 
   /* ----------------------------------------------------------- usuários */

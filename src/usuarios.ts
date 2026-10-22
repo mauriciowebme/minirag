@@ -11,6 +11,7 @@ import crypto from "node:crypto";
 import { OPERADOR, USERS, Usuario, log } from "./config";
 import { erro409, erro422, erro404, erro403 } from "./errors";
 import { q } from "./db";
+import { dataCarencia, lerEsquecimento } from "./esquecimento";
 
 export type Papel = "usuario" | "operador";
 
@@ -22,6 +23,7 @@ type Linha = {
   ativo: boolean;
   criado_em: string;
   atualizado_em: string;
+  agendado_exclusao_em: string | null;
 };
 
 /** cache por hash da chave -> usuário (autenticação é O(1) e não bate no banco) */
@@ -57,6 +59,9 @@ export async function initUsuarios(): Promise<void> {
        criado_em TIMESTAMPTZ NOT NULL DEFAULT now(),
        atualizado_em TIMESTAMPTZ NOT NULL DEFAULT now())`,
   );
+  // v3.5: apagar usuário agora é AGENDAR a exclusão (carência configurável); a coluna
+  // marca quando a faxina pode apagar conta + dados. NULL = conta viva normalmente.
+  await q(`ALTER TABLE usuarios ADD COLUMN IF NOT EXISTS agendado_exclusao_em TIMESTAMPTZ`);
 
   // semente do env: entra só uma vez (ON CONFLICT não mexe em quem já existe)
   const sementes: Array<[string, string, Papel]> = [
@@ -127,6 +132,8 @@ export type UsuarioPublico = {
   gavetas: number;
   documentos: number;
   ultimo: string | null;
+  /** v3.5: quando preenchido, a conta está desligada À ESPERA da faxina (recriar o nome desfaz) */
+  agendado_exclusao_em: string | null;
 };
 
 export async function listarUsuarios(): Promise<UsuarioPublico[]> {
@@ -152,6 +159,7 @@ export async function listarUsuarios(): Promise<UsuarioPublico[]> {
       gavetas: Number(d?.gavetas ?? 0),
       documentos: Number(d?.docs ?? 0),
       ultimo: d?.ultimo ?? null,
+      agendado_exclusao_em: u.agendado_exclusao_em ?? null,
     };
   });
 }
@@ -162,8 +170,28 @@ export async function criarUsuario(
 ): Promise<{ nome: string; papel: Papel; chave: string; aviso: string }> {
   const nome = validarNome(nomeBruto);
   const papel: Papel = papelBruto === "operador" ? "operador" : "usuario";
-  const existe = await q(`SELECT 1 FROM usuarios WHERE nome = $1`, [nome]);
-  if (existe.rowCount) throw erro409(`usuario '${nome}' ja existe`);
+  const existe = await q<Linha>(`SELECT * FROM usuarios WHERE nome = $1`, [nome]);
+  if (existe.rowCount) {
+    const atual = existe.rows[0];
+    // v3.5: recriar um nome AGENDADO desfaz a exclusão — a conta volta ativa, com
+    // chave nova (a antiga não revalida: quem agenda um apagar não quer a chave vazando),
+    // e o acervo inteiro continua onde estava porque a faxina ainda não tocou nele.
+    if (!atual.agendado_exclusao_em) throw erro409(`usuario '${nome}' ja existe`);
+    const chave = gerarChave();
+    await q(
+      `UPDATE usuarios SET chave_hash = $2, chave_hint = $3, papel = $4, ativo = true,
+              agendado_exclusao_em = NULL, atualizado_em = now()
+       WHERE nome = $1`,
+      [nome, hashChave(chave), chave.slice(-4), papel],
+    );
+    await recarregarUsuarios();
+    return {
+      nome,
+      papel,
+      chave,
+      aviso: `exclusao DESFEITA: '${nome}' voltou com todos os dados dele; chave nova (a anterior nao vale mais)`,
+    };
+  }
   const chave = gerarChave();
   await q(
     `INSERT INTO usuarios (nome, chave_hash, chave_hint, papel) VALUES ($1, $2, $3, $4)`,
@@ -200,9 +228,14 @@ export async function atualizarUsuario(
     throw erro409("este e o ultimo operador ativo: crie outro antes de rebaixar ou desativar");
   }
 
+  // v3.5: reativar pela tela DEFAZ um agendamento de exclusão (mesmo efeito de recriar
+  // o nome); desligar sozinho NÃO agenda nada — são botões diferentes com sentidos diferentes.
+  const desfazAgenda = ativo === true;
   await q(
-    `UPDATE usuarios SET ativo = $2, papel = $3, atualizado_em = now() WHERE nome = $1`,
-    [nome, ativo, papel],
+    `UPDATE usuarios SET ativo = $2, papel = $3, atualizado_em = now(),
+            agendado_exclusao_em = CASE WHEN $4::boolean THEN NULL ELSE agendado_exclusao_em END
+     WHERE nome = $1`,
+    [nome, ativo, papel, desfazAgenda],
   );
   await recarregarUsuarios();
   return { nome, ativo, papel };
@@ -223,27 +256,59 @@ export async function novaChaveUsuario(nomeBruto: string): Promise<{ nome: strin
 }
 
 /** Apaga só usuário sem documento (senão o acervo fica órfão). */
-export async function removerUsuario(nomeBruto: string): Promise<{ nome: string; removido: boolean }> {
+// ^ REESCRITO na v3.5 (dono, 21/10): "apagar" agora AGENDA a exclusão — a conta
+// desliga na hora e os dados morrem de verdade daqui à carência configurável.
+// Dentro da janela, recriar o MESMO nome (ou PATCH ativo=true) desfaz tudo, com o
+// acervo intacto. O último operador ativo segue irremovível (guarda da v3.2.3).
+export async function removerUsuario(
+  nomeBruto: string,
+): Promise<{ nome: string; removido: boolean; agendado: boolean; expira_em: string | null; carencia_dias: number; aviso: string }> {
   const nome = nomeBruto.trim().toLowerCase();
-  const docs = await q(`SELECT count(*) AS n FROM chunks WHERE tenant = $1`, [nome]);
-  if (Number(docs.rows[0]?.n ?? 0) > 0) {
-    throw erro409("usuario tem documentos: apague as gavetas dele antes de remover");
-  }
-
+  const linha = await q<{ papel: Papel; ativo: boolean; agendado_exclusao_em: string | null }>(
+    `SELECT papel, ativo, agendado_exclusao_em FROM usuarios WHERE nome = $1`,
+    [nome],
+  );
+  if (!linha.rowCount) throw erro404(`usuario '${nome}' nao existe`);
+  const alvo = linha.rows[0];
   // v3.2.3: mesma guarda do PATCH. Sem isto, apagar o último operador deixava a
   // plataforma sem admin — e como a política passou a ser "só o admin vem do env",
   // não haveria mais semente para recriá-lo no próximo boot.
-  const linha = await q(`SELECT papel, ativo FROM usuarios WHERE nome = $1`, [nome]);
-  if (!linha.rowCount) throw erro404(`usuario '${nome}' nao existe`);
-  const alvo = linha.rows[0] as { papel: Papel; ativo: boolean };
   if (alvo.papel === "operador" && alvo.ativo && operadores.filter((o) => o !== nome).length === 0) {
     throw erro409("este e o ultimo operador ativo: crie outro antes de apagar");
   }
 
-  const r = await q(`DELETE FROM usuarios WHERE nome = $1`, [nome]);
-  if (!r.rowCount) throw erro404(`usuario '${nome}' nao existe`);
-  await recarregarUsuarios();
-  return { nome, removido: true };
+  const { efetivos } = await lerEsquecimento();
+  const carencia = efetivos.dias_carencia;
+
+  // já agendado: idempotente — devolve a janela em curso, não empurra a data
+  if (alvo.agendado_exclusao_em) {
+    return {
+      nome,
+      removido: false,
+      agendado: true,
+      expira_em: alvo.agendado_exclusao_em,
+      carencia_dias: carencia,
+      aviso: "ja estava agendado; recriar o nome dentro da janela desfaz",
+    };
+  }
+
+  await q(
+    `UPDATE usuarios
+     SET ativo = false,
+         agendado_exclusao_em = now() + make_interval(days => $2),
+         atualizado_em = now()
+     WHERE nome = $1`,
+    [nome, carencia],
+  );
+  await recarregarUsuarios(); // desliga o login imediatamente (cache só tem ativos)
+  return {
+    nome,
+    removido: false,
+    agendado: true,
+    expira_em: dataCarencia(carencia),
+    carencia_dias: carencia,
+    aviso: `login desligado; os dados dele serao apagados em ${carencia} dia(s). Recriar o nome dentro da janela desfaz`,
+  };
 }
 
 /** Guarda de rota: usuário comum não mexe em contas. */

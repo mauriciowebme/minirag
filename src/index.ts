@@ -9,6 +9,8 @@ import { pararWorker, workerLoop } from "./ingest";
 import { iniciarDecayLoop, pararDecayLoop } from "./decay";
 import { criarApp } from "./app";
 import { initUsuarios } from "./usuarios";
+import { criarTabelaEsquecimento, lerEsquecimento } from "./esquecimento";
+import { iniciarFaxinaLoop, pararFaxinaLoop } from "./faxina";
 import { initProvider } from "./provider";
 import { initFerramentas } from "./ferramentas";
 import { initMetricas } from "./dashboard";
@@ -72,13 +74,16 @@ async function main(): Promise<void> {
   await initDb(embedderDim());
   await limparTarefas(); // v3.3: rodando órfã vira falhou; terminadas antigas saem
   await initUsuarios(); // v2.7: env semeia, banco manda
+  await criarTabelaEsquecimento(); // v3.5: números do esquecimento graváveis na tela
   await initProvider();
   await initFerramentas(); // v2.8: servidores MCP que dão ferramentas ao chat
   await initMetricas();
+  const esq = await lerEsquecimento();
   log(
     `limites: content<=${CONFIG.maxContentChars} chars, query<=${CONFIG.maxQueryChars} chars, ` +
       `${CONFIG.maxChunksTenant} chunks/usuario; decay=${CONFIG.decayAtivo ? "ON" : "OFF"} ` +
-      `(${CONFIG.decayDias} dias, min ${CONFIG.decayMinAcessos} acessos, a cada ${CONFIG.decayIntervaloMinutos} min)`,
+      `(arquiva em ${esq.efetivos.dias_arquivar}d, mata arquivado em ${esq.efetivos.dias_excluir_arquivado}d, ` +
+      `carência ${esq.efetivos.dias_carencia}d, a cada ${CONFIG.decayIntervaloMinutos} min)`,
   );
 
   if (CONFIG.workerAtivo) {
@@ -86,6 +91,7 @@ async function main(): Promise<void> {
     log("worker de ingestao ativo");
   }
   iniciarDecayLoop((n) => log(`decay arquivou ${n} chunk(s)`));
+  iniciarFaxinaLoop((nomes) => log(`faxina apagou conta(s): ${nomes.join(", ")}`)); // v3.5
 
   // vigia do embedder: se ele cair depois do boot, a fila pausa e volta sozinha
   setInterval(async () => {
@@ -107,6 +113,7 @@ async function main(): Promise<void> {
     log(`recebido ${sinal}; encerrando`);
     pararWorker();
     pararDecayLoop();
+    pararFaxinaLoop();
     encerrarFilho();
     try {
       await app.close();

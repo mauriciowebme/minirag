@@ -22,7 +22,7 @@ function bool(name: string, def: boolean): boolean {
 }
 
 export const CONFIG = {
-  versao: "3.4.0",
+  versao: "3.5.0",
   model: process.env.MINIRAG_MODEL ?? "nomic-ai/nomic-embed-text-v1.5",
   modelDir: process.env.MINIRAG_MODEL_DIR ?? "/app/models",
 
@@ -44,7 +44,12 @@ export const CONFIG = {
   maxChunksTenant: int("MINIRAG_MAX_CHUNKS_TENANT", 10_000),
 
   decayAtivo: bool("MINIRAG_DECAY_ATIVO", true),
-  decayDias: int("MINIRAG_DECAY_DIAS", 30),
+  // v3.5 (dono, 21/10): o esquecimento padrão passou de 30 dias para 6 MESES, e os três
+  // números (arquivar / morte do arquivado / carência do apagar usuário) podem ser
+  // gravados na tela — a tabela `esquecimento_cfg` tem precedência sobre estes defaults.
+  decayDias: int("MINIRAG_DECAY_DIAS", 180),
+  expurgoArquivadoDias: int("MINIRAG_EXPURGO_ARQUIVADO_DIAS", 365),
+  carenciaDias: int("MINIRAG_CARENCIA_DIAS", 30),
   decayMinAcessos: int("MINIRAG_DECAY_MIN_ACESSOS", 2),
   decayIntervaloMinutos: int("MINIRAG_DECAY_INTERVALO_MINUTOS", 60),
 
