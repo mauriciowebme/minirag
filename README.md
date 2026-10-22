@@ -10,6 +10,39 @@ parecidos com a pergunta, com uma nota de 0 a 1.
 
 ---
 
+## v3.6 — Máquinas por usuário: o túnel virou recurso do minirag (22/10/2026)
+
+Cada usuário pode ter máquinas suas conectadas (o seu PC, o servidor dele), e o
+chat / API / MCP executam comandos **apenas nas máquinas daquele usuário**.
+Mesmo código, três portas — igual ao resto da casa.
+
+- **Hub WebSocket**: `/maquina/ws` no MESMO servidor da app (Traefik com a
+  receita de heartbeat 25s provada no agent-tunel; tags do wire intactas:
+  `oi`, `cmd/{cmd,rotulo,espera}`, resposta `{exit,stdout,stderr}`).
+- **Tabelas**: `maquinas` (dono = tenant; token em hash), `pareamentos`
+  (uso único, ~15 min), `comandos_log` (auditoria SEM máscara — shell exige
+  rastro completo). Apagar o usuário (carência v3.5) derruba as três.
+- **REST** (chave do usuário; admin mira com `?tenant=`):
+  `GET /maquinas` · `POST /maquinas {nome}` → token uma-vez ·
+  `PATCH /maquinas/:host {ativo}` · `DELETE /maquinas/:host` ·
+  `POST /maquinas/:host/run {cmd,timeout}` · `GET /maquinas/log`.
+- **MCP**: 23 → 26 tools (`maquinas_online`, `rodar_comando`,
+  `gerar_pareamento`) — o chat herda as três pelo pacote interno.
+- **Cliente** (Go e PyInstaller ficaram para trás — antivírus): Node SEA,
+  um arquivo sem instalação (`minirag-cliente-win.exe` / `minirag-cliente-linux`),
+  assado na própria imagem (estágio `cliente` do Dockerfile, `scripts/build-cliente.sh`).
+  Adota e guarda o token de máquina (`~/.minirag-maquina.json`), reconecta com
+  backoff, mata ÁRVORE no timeout e se auto-atualiza comparando a versão do
+  build com `GET /maquina/atualizacao`. Download na tela (`GET /maquina/cliente/win`).
+- **Tela**: aba **Máquinas** (também para o usuário comum — é o "cada usuário
+  com seu cliente" do dono): chip online, ＋ token uma-vez com copiar, botão de
+  download, interruptor ativa/desativa e histórico de execução.
+- **Honestidade antivírus**: exe não assinado que abre WebSocket de saída e
+  espelha comandos é o comportamento que o heuristic marca, em qualquer
+  linguagem. A cura definitiva é certificado de assinatura de código
+  (decisão de orçamento); até lá, vale o caminho do túnel — exceção na
+  máquina que confiar no cliente.
+
 ## v3.5 — Esquecimento com régua na tela e apagar usuário com carência (22/10/2026)
 
 - **Três números, todos configuráveis** (antes só existia o primeiro, preso em 30 dias e
