@@ -2372,6 +2372,89 @@ test("minirag v2 — suíte completa", async (t) => {
     f.fechar("v3.6 maquinas");
   });
 
+  await bloco(t, "v3.7: cliente com chave assada — gerar, ativar, queimar, cortar", async () => {
+    const f = fiscal();
+    const CONTAINER = process.env.CONTAINER ?? "";
+    const BASE = process.env.BASE ?? "";
+    let r: Awaited<ReturnType<typeof call>>;
+    const execD = (sh: string) => execFileSync("docker", ["exec", CONTAINER, "sh", "-c", sh], { encoding: "utf8" });
+    const leArq = (p2: string) => {
+      try {
+        return execD("cat " + p2);
+      } catch {
+        return "";
+      }
+    };
+    const ate = async (cond: () => Promise<boolean>, tetoMs = 15000) => {
+      const fim = Date.now() + tetoMs;
+      for (;;) {
+        if (await cond()) return true;
+        if (Date.now() > fim) return false;
+        await dormir(400);
+      }
+    };
+
+    const rGen = await fetch(BASE + "/maquinas/cliente/linux?nome=s37", {
+      headers: { authorization: "Bearer " + TESTKEY },
+      signal: AbortSignal.timeout(30000),
+    });
+    const bufGen = Buffer.from(await rGen.arrayBuffer());
+    const rBase = await fetch(BASE + "/maquina/cliente/linux", { method: "HEAD", signal: AbortSignal.timeout(20000) });
+    const lenBase = Number(rBase.headers.get("content-length") ?? 0);
+    f.check("gerar cliente: 200 com trailer assado (base + payload pequeno)", rGen.status === 200 && lenBase > 1_000_000 && bufGen.length > lenBase && bufGen.length - lenBase < 500, { status: rGen.status, lenBase, lenGen: bufGen.length });
+    const dispo = rGen.headers.get("content-disposition") ?? "";
+    f.check("nome do arquivo carrega o usuário", dispo.includes("minirag-cliente-teste"), dispo.slice(0, 90));
+    execFileSync("docker", ["exec", "-i", CONTAINER, "sh", "-c", "cat > /tmp/cli37 && chmod 755 /tmp/cli37"], { input: bufGen });
+    execD("rm -f /tmp/c37*.json /tmp/c37*.log; nohup /tmp/cli37 --url http://127.0.0.1:8000 --conf /tmp/c37.json >/tmp/c37.out 2>&1 & sleep 1; echo ido");
+    const ativou = await ate(async () => {
+      const r = await call("GET", "/maquinas", { key: TESTKEY });
+      const ch = (r.json?.chaves ?? []).find((c: any) => c.nome === "s37");
+      return ch?.usada === true && !!ch?.host_ativado;
+    }, 20000);
+    r = await call("GET", "/maquinas", { key: TESTKEY });
+    const chS37 = (r.json?.chaves ?? []).find((c: any) => c.nome === "s37") ?? {};
+    const maqS37 = (r.json?.maquinas ?? []).find((m: any) => m.host === chS37.host_ativado) ?? {};
+    f.check("dois cliques: chave ativou máquina online com o nome dado", ativou && maqS37.online === true && maqS37.nome === "s37", { ativou, host: chS37.host_ativado, nome: maqS37.nome });
+
+    const confJson = JSON.parse(leArq("/tmp/c37.json") || "{}");
+    f.check("cliente adotou a chave definitiva no conf (trailer queimou atrás)", typeof confJson.token === "string" && confJson.token.length === 40, Object.keys(confJson).join(","));
+
+    execD("nohup /tmp/cli37 --url http://127.0.0.1:8000 --conf /tmp/c37b.json >/tmp/c37b.out 2>&1 & sleep 4; echo ido");
+    const logB = await ate(async () => leArq("/tmp/c37b.log").includes("já usada") || leArq("/tmp/c37b.out").includes("já usada"), 12000);
+    f.check("cópia do mesmo arquivo em outra config é recusada (chave queimada)", logB, (leArq("/tmp/c37b.log") + leArq("/tmp/c37b.out")).slice(-160));
+
+    execFileSync("docker", ["exec", CONTAINER, "sh", "-c", "pkill -f cli37 || true"]);
+    await ate(async () => {
+      const x = await call("GET", "/maquinas", { key: TESTKEY });
+      return (x.json?.maquinas ?? []).every((m: any) => !m.online);
+    }, 12000);
+    r = await call("DELETE", `/maquinas/chave/${String(chS37.id ?? "nao")}`, { key: TESTKEY });
+    f.check("cortar chave ativada apaga a máquina junto", r.status === 200 && r.json?.maquina_removida === true, r.texto.slice(0, 140));
+    r = await call("GET", "/maquinas", { key: TESTKEY });
+    f.check("máquina e chave sumiram da lista", (r.json?.maquinas ?? []).every((m: any) => m.nome !== "s37") && (r.json?.chaves ?? []).every((c: any) => c.nome !== "s37"), JSON.stringify(r.json).slice(0, 120));
+
+    const rGen2 = await fetch(BASE + "/maquinas/cliente/linux?nome=s37virgem", { headers: { authorization: "Bearer " + TESTKEY }, signal: AbortSignal.timeout(30000) });
+    await rGen2.arrayBuffer();
+    r = await call("GET", "/maquinas", { key: TESTKEY });
+    const chV = (r.json?.chaves ?? []).find((c: any) => c.nome === "s37virgem") ?? {};
+    r = await call("DELETE", `/maquinas/chave/${String(chV.id ?? "nao")}`, { key: TESTKEY });
+    f.check("cortar chave virgem some com ela antes de ativar", r.status === 200 && r.json?.maquina_removida === false, r.texto.slice(0, 120));
+
+    const chavePlana = execD(
+      `node -e "const fs=require('fs');const b=fs.readFileSync('/tmp/cli37');const len=b.readUInt32BE(b.length-8);console.log(JSON.parse(b.slice(b.length-8-len,b.length-8)).k)"`,
+    ).trim();
+    r = await call("GET", "/maquinas", { key: chavePlana });
+    f.check("chave de cliente JAMAIS loga no painel (401)", r.status === 401, { status: r.status, k: chavePlana.slice(0, 6) + "…" });
+
+    const rWin = await fetch(BASE + "/maquinas/cliente/win", { headers: { authorization: "Bearer " + OPKEY }, signal: AbortSignal.timeout(60000) });
+    const lenWin = Number(rWin.headers.get("content-length") ?? 0);
+    f.check("gerar cliente Windows também sai com trailer", rWin.status === 200 && lenWin > 80_000_000, { status: rWin.status, len: lenWin });
+    await rWin.arrayBuffer();
+
+    execD("rm -f /tmp/c37v.json");
+    f.fechar("v3.7 chave-cliente");
+  });
+
   await bloco(t, "freio de força bruta (último: bloqueia o IP)", async () => {
     const f = fiscal();
     for (let i = 0; i < 10; i++) {
