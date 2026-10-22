@@ -2,7 +2,7 @@ import { useCallback, useEffect, useMemo, useState } from "react";
 import { baixar, del, get, post, qs } from "../services/api";
 import { fmtData, slug } from "../lib/fmt";
 import { useToast } from "./Toast";
-import type { DecayResp, Gaveta, GavetasResp } from "../types";
+import type { DecayResp, Gaveta, GavetasResp, RemoverUsuarioResp, UsuarioItem } from "../types";
 
 /** Plural certo: 1 usuário / 2 usuários. */
 function pl(n: number, um: string, muitos: string): string {
@@ -74,6 +74,10 @@ export function Gavetas({ operador, tenant, usuario, onAbrirUsuario, onVoltar, o
   const [novoUsuarioNome, setNovoUsuarioNome] = useState("");
   const [novoUsuarioPapel, setNovoUsuarioPapel] = useState<"usuario" | "operador">("usuario");
   const [chaveGerada, setChaveGerada] = useState<{ nome: string; chave: string } | null>(null);
+  /* v3.5: apagar usuário = AGENDAR exclusão (janela configurável). Cartão tem
+     botão em duas fases (primeiro clique arma, segundo confirma) e rótulo do prazo. */
+  const [contas, setContas] = useState<Record<string, UsuarioItem>>({});
+  const [confirmarApagar, setConfirmarApagar] = useState<string | null>(null);
 
   /* operador começa escolhendo o usuário; quem entra com login comum já vê as suas gavetas */
   const modoUsuarios = operador && usuario === null;
@@ -87,10 +91,10 @@ export function Gavetas({ operador, tenant, usuario, onAbrirUsuario, onVoltar, o
     }
     setCriando(true);
     try {
-      const r = await post<{ nome: string; chave: string }>("/usuarios", { nome, papel: novoUsuarioPapel });
+      const r = await post<{ nome: string; chave: string; aviso?: string }>("/usuarios", { nome, papel: novoUsuarioPapel });
       setChaveGerada({ nome: r.nome, chave: r.chave });
       await carregar();
-      toast(`usuário ${r.nome} criado`);
+      toast(r.aviso && r.aviso.includes("DESFEITA") ? "recriado: exclusão desfeita, dados voltaram" : `usuário ${r.nome} criado`);
     } catch (e) {
       toast("criar: " + (e as Error).message);
     } finally {
@@ -98,17 +102,38 @@ export function Gavetas({ operador, tenant, usuario, onAbrirUsuario, onVoltar, o
     }
   }
 
+  /* v3.5: apagar usuário = desliga o login na hora e AGENDA a morte dos dados. */
+  async function apagarConta(nome: string) {
+    try {
+      const r = await del<RemoverUsuarioResp>(`/usuarios/${encodeURIComponent(nome)}`);
+      toast(`login de ${r.nome} desligado; os dados somem em ${r.carencia_dias} dia(s) — recriar o nome desfaz`);
+      await carregar();
+    } catch (e) {
+      toast("apagar: " + (e as Error).message);
+    }
+  }
+
   const carregar = useCallback(async () => {
     setCarregando(true);
     try {
       setDados(await get<GavetasResp>("/gavetas"));
+      if (operador && usuario === null) {
+        /* v3.5: a lista de contas dá o mapa de "agendado para exclusão" e papel dos
+           cartões do nível 1; o nível funciona mesmo se essa chamada falhar */
+        try {
+          const u = await get<{ usuarios: UsuarioItem[] }>("/usuarios");
+          setContas(Object.fromEntries(u.usuarios.map((x) => [x.nome, x])));
+        } catch {
+          setContas({});
+        }
+      }
     } catch (e) {
       setDados(null);
       toast("gavetas: " + (e as Error).message);
     } finally {
       setCarregando(false);
     }
-  }, [toast]);
+  }, [toast, operador, usuario]);
 
   useEffect(() => {
     void carregar();
@@ -264,7 +289,7 @@ export function Gavetas({ operador, tenant, usuario, onAbrirUsuario, onVoltar, o
           <button
             id="btnDecay"
             className="btn"
-            title="arquiva (sem apagar) os documentos sem uso há 30 dias ou mais — padrão, ajustável"
+            title="arquiva (sem apagar) os documentos sem uso; padrão 6 meses, ajustável em Configurações → Esquecimento"
             onClick={() => void arquivarEsquecidos()}
           >
             arquivar esquecidos
@@ -339,6 +364,29 @@ export function Gavetas({ operador, tenant, usuario, onAbrirUsuario, onVoltar, o
                 </div>
                 <div className="mt-0.5 text-[12px] text-txt3">
                   {vazio ? "clique para abrir e enviar o primeiro documento" : `último documento ${fmtData(ultimo)}`}
+                </div>
+                {/* v3.5: apagar a conta (duas fases) e o aviso de exclusão agendada */}
+                <div className="mt-1.5 flex min-h-[28px] items-center gap-2" onClick={(ev) => ev.stopPropagation()}>
+                  {contas[t]?.agendado_exclusao_em ? (
+                    <span className="chip text-[11px]" title="login desligado; os dados serão apagados nesta data — recriar o nome desfaz">
+                      ⏳ some em {new Date(String(contas[t]?.agendado_exclusao_em)).toLocaleDateString("pt-BR")} — recriar desfaz
+                    </span>
+                  ) : (
+                    <button
+                      id={`btnApagarUsuario-${slug(t)}`}
+                      className={"btn btn-mini btn-sutil" + (confirmarApagar === t ? " btn-perigo" : "")}
+                      onClick={() => {
+                        if (confirmarApagar !== t) {
+                          setConfirmarApagar(t);
+                          return;
+                        }
+                        setConfirmarApagar(null);
+                        void apagarConta(t);
+                      }}
+                    >
+                      {confirmarApagar === t ? "apagar de verdade?" : "apagar"}
+                    </button>
+                  )}
                 </div>
               </div>
             ))}
@@ -445,7 +493,7 @@ export function Gavetas({ operador, tenant, usuario, onAbrirUsuario, onVoltar, o
         <button
           id="btnDecay"
           className="btn"
-          title="arquiva (sem apagar) os documentos sem uso há 30 dias ou mais — padrão, ajustável"
+          title="arquiva (sem apagar) os documentos sem uso; padrão 6 meses, ajustável em Configurações → Esquecimento"
           onClick={() => void arquivarEsquecidos()}
         >
           arquivar esquecidos

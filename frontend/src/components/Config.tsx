@@ -667,18 +667,54 @@ function Esquecimento() {
   const { toast } = useToast();
   const [c, setC] = useState<ConfigResp | null>(null);
   const [rodando, setRodando] = useState(false);
+  /* v3.5: os três números (arquivar / morte do arquivado / carência) editáveis */
+  const [form, setForm] = useState<{ dias_arquivar: string; dias_excluir_arquivado: string; dias_carencia: string } | null>(null);
+  const [salvando, setSalvando] = useState(false);
 
-  useEffect(() => {
+  const carregar = useCallback(() => {
     void get<ConfigResp>("/config")
-      .then(setC)
+      .then((r) => {
+        setC(r);
+        setForm({
+          dias_arquivar: String(r.esquecimento.dias_arquivar),
+          dias_excluir_arquivado: String(r.esquecimento.dias_excluir_arquivado),
+          dias_carencia: String(r.esquecimento.dias_carencia),
+        });
+      })
       .catch((e) => toast("config: " + (e as Error).message));
   }, [toast]);
+
+  useEffect(() => {
+    carregar();
+  }, [carregar]);
+
+  async function salvar() {
+    if (!form) return;
+    setSalvando(true);
+    try {
+      const r = await put<{ efetivos: Record<string, number> }>("/config/esquecimento", {
+        dias_arquivar: Number(form.dias_arquivar),
+        dias_excluir_arquivado: Number(form.dias_excluir_arquivado),
+        dias_carencia: Number(form.dias_carencia),
+      });
+      toast(`esquecimento salvo: arquiva em ${r.efetivos.dias_arquivar}d, apaga arquivado em ${r.efetivos.dias_excluir_arquivado}d, carência ${r.efetivos.dias_carencia}d`);
+      carregar(); // prova de escrita: reler
+    } catch (e) {
+      toast("salvar esquecimento: " + (e as Error).message);
+    } finally {
+      setSalvando(false);
+    }
+  }
 
   async function rodar() {
     setRodando(true);
     try {
-      const r = await post<{ docs_arquivados_agora: number }>("/decay", {});
-      toast(`arquivados agora: ${r.docs_arquivados_agora}`);
+      const r = await post<{ docs_arquivados_agora: number; expurgo?: { usuarios_apagados: string[]; docs_expurgados: number } }>("/decay", {});
+      const ex = r.expurgo;
+      const extra = ex && (ex.usuarios_apagados.length || ex.docs_expurgados)
+        ? ` · faxina: ${ex.usuarios_apagados.length} conta(s), ${ex.docs_expurgados} arquivado(s) apagado(s)`
+        : "";
+      toast(`arquivados agora: ${r.docs_arquivados_agora}${extra}`);
     } catch (e) {
       toast("esquecimento: " + (e as Error).message);
     } finally {
@@ -686,20 +722,43 @@ function Esquecimento() {
     }
   }
 
-  if (!c) return <div className="cartao dica">carregando…</div>;
+  if (!c || !form) return <div className="cartao dica">carregando…</div>;
   const e = c.esquecimento;
+  const campo = (chave: "dias_arquivar" | "dias_excluir_arquivado" | "dias_carencia", rotulo: string, dica: string) => (
+    <label className="rotulo m-0">
+      {rotulo}
+      <input
+        id={`esq-${chave}`}
+        type="number"
+        min={0}
+        max={36500}
+        className="campo mt-1"
+        value={form[chave]}
+        onChange={(ev) => setForm({ ...form, [chave]: ev.target.value })}
+      />
+      <span className="text-[11px] text-txt3">{dica}</span>
+    </label>
+  );
   return (
     <div className="cartao">
-      <h2 className="mb-3 text-[13px] font-semibold text-txt2">Arquivar esquecidos</h2>
+      <h2 className="mb-3 text-[13px] font-semibold text-txt2">Esquecimento</h2>
       <div className="flex max-w-[560px] flex-col gap-3">
         <div className="it-linha"><span className="sub2">situação</span><b>{e.ativo ? "ligado" : "desligado"}</b></div>
-        <div className="it-linha"><span className="sub2">arquiva depois de</span><b>{e.dias} dias sem acesso</b></div>
+        {campo("dias_arquivar", "dias sem uso até ARQUIVAR", "documento esquecido sai da busca mas revive ao ser usado (padrão 180 = 6 meses)")}
+        {campo("dias_excluir_arquivado", "dias arquivado até APAGAR de vez", "arquivado encostado por mais que isto é excluído sem volta (padrão 365 = 1 ano)")}
+        {campo("dias_carencia", "dias de carência ao apagar usuário", "janela para recriar o nome e desfazer; depois disto conta e dados somem (padrão 30)")}
+        <div className="it-linha"><span className="sub2">origem dos valores</span><b>{Object.values(e.origem ?? {}).includes("tela") ? "tela (o que você salvar aqui)" : "padrão do servidor"}</b></div>
         <div className="it-linha"><span className="sub2">exige menos de</span><b>{e.min_acessos} acessos</b></div>
         <div className="it-linha"><span className="sub2">verifica a cada</span><b>{e.intervalo_minutos} minutos</b></div>
-        <p className="dica m-0">arquivar não apaga: o documento pode ser revivido na busca com “mostrar arquivados”.</p>
-        <button id="btnRodarDecay" className="btn self-start" disabled={rodando} onClick={() => void rodar()}>
-          arquivar esquecidos agora
-        </button>
+        <p className="dica m-0">arquivar não apaga: o documento volta ao ser usado. A exclusão definitiva só chega em quem já estava arquivado além da janela.</p>
+        <div className="flex gap-2">
+          <button id="btnSalvarEsquecimento" className="btn btn-primario self-start" disabled={salvando} onClick={() => void salvar()}>
+            {salvando ? "salvando…" : "salvar"}
+          </button>
+          <button id="btnRodarDecay" className="btn self-start" disabled={rodando} onClick={() => void rodar()}>
+            rodar agora (arquiva + faxina)
+          </button>
+        </div>
       </div>
     </div>
   );

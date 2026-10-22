@@ -140,9 +140,20 @@ export type UsuarioItem = {
   gavetas: number;
   documentos: number;
   ultimo: string | null;
+  /** v3.5: preenchido quando a exclusão está agendada (a conta some depois da carência) */
+  agendado_exclusao_em: string | null;
 };
 export type UsuariosResp = { usuarios: UsuarioItem[] };
 export type NovoUsuarioResp = { nome: string; papel: string; chave: string; aviso: string };
+/** v3.5: resposta do apagar-agendar */
+export type RemoverUsuarioResp = {
+  nome: string;
+  removido: boolean;
+  agendado: boolean;
+  expira_em: string | null;
+  carencia_dias: number;
+  aviso: string;
+};
 
 export type ProviderResp = {
   configurado: boolean;
@@ -247,6 +258,14 @@ export type TesteMcpResp = {
 export type ConfigResp = {
   versao: string;
   limites: Record<string, number>;
-  esquecimento: { ativo: boolean; dias: number; min_acessos: number; intervalo_minutos: number };
+  esquecimento: {
+    ativo: boolean;
+    dias_arquivar: number;
+    dias_excluir_arquivado: number;
+    dias_carencia: number;
+    origem: Record<string, string>;
+    min_acessos: number;
+    intervalo_minutos: number;
+  };
   modelo_embedding: string;
 };
