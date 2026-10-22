@@ -595,7 +595,7 @@ function Conta({ nome, operador, onChaveNova }: { nome: string; operador: boolea
         </div>
         <div className="it-linha">
           <span className="sub2">papel</span>
-          <span>{operador ? "operador (vê tudo)" : "usuário"}</span>
+          <span>{operador ? "admin (vê tudo)" : "usuário"}</span>
         </div>
         <div className="it-linha">
           <span className="sub2">chave</span>

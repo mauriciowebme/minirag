@@ -146,7 +146,7 @@ export default function App() {
           </div>
           <div className="min-w-0">
             <div className="truncate text-[13px] font-semibold">{nome}</div>
-            <div className="text-[11px] text-txt3">{operador ? "vê tudo · operador" : "usuário"}</div>
+            <div className="text-[11px] text-txt3">{operador ? "vê tudo · admin" : "usuário"}</div>
           </div>
         </div>
         <button id="btnSair" className="btn btn-sutil mt-2 w-full justify-start" title="sair da sessão" onClick={() => sessao.sair()}>
