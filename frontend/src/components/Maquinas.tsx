@@ -1,10 +1,10 @@
 import { useCallback, useEffect, useState } from "react";
-import { baixar, del, get, patch, post } from "../services/api";
+import { baixar, del, get, patch } from "../services/api";
 import { useToast } from "./Toast";
-import type { ChaveClienteLinha, MaquinaLinha, MaquinasLogLinha, MaquinasResp, PareamentoResp } from "../types";
+import type { ChaveClienteLinha, MaquinaLinha, MaquinasLogLinha, MaquinasResp } from "../types";
 
 /* v3.6: máquinas do usuário (o túnel absorvido). Cada login comum vê e gerencia
-   as SUAS; o admin vê todas e pode apontar o pareamento para um tenant com ?tenant.
+   as SUAS; o admin vê todas (a tela só gera cliente para o usuário logado).
    A parede de verdade está na API (alvoMaquina escopa pelo login). */
 
 function minutesAgo(iso: string | null): string {
@@ -20,20 +20,13 @@ export function Maquinas({ operador }: { operador: boolean }) {
   const { toast } = useToast();
   const [maquinas, setMaquinas] = useState<MaquinaLinha[]>([]);
   const [log, setLog] = useState<MaquinasLogLinha[]>([]);
-  const [nomeNovo, setNomeNovo] = useState(`maq-${new Date().toTimeString().slice(0, 5).replace(":", "")}`);
-  const [tenantNovo, setTenantNovo] = useState("");
-  const [criando, setCriando] = useState(false);
   const [chaves, setChaves] = useState<ChaveClienteLinha[]>([]);
   const [gerandoCli, setGerandoCli] = useState(false);
-  const [pareamento, setPareamento] = useState<PareamentoResp | null>(null);
 
   async function gerarCliente(plat: "win" | "linux") {
     setGerandoCli(true);
-    const params = new URLSearchParams();
-    if (operador && tenantNovo.trim()) params.set("tenant", tenantNovo.trim());
-    if (nomeNovo.trim()) params.set("nome", nomeNovo.trim());
     try {
-      await baixar(`/maquinas/cliente/${plat}?${params.toString()}`, plat === "win" ? "minirag-cliente-win.exe" : "minirag-cliente-linux");
+      await baixar(`/maquinas/cliente/${plat}`, plat === "win" ? "minirag-cliente-win.exe" : "minirag-cliente-linux");
       toast("cliente gerado — o arquivo que baixou já é do teu usuário");
       carregar();
     } catch (e) {
@@ -72,22 +65,6 @@ export function Maquinas({ operador }: { operador: boolean }) {
     return () => clearInterval(rel);
   }, [carregar]);
 
-  async function parear() {
-    if (!nomeNovo.trim()) return;
-    setCriando(true);
-    try {
-      const suf = operador && tenantNovo.trim() ? "?tenant=" + encodeURIComponent(tenantNovo.trim()) : "";
-      const r = await post<PareamentoResp>("/maquinas" + suf, { nome: nomeNovo.trim() });
-      setPareamento(r);
-      setNomeNovo("");
-      toast("token gerado — ele aparece uma única vez, copie agora");
-    } catch (e) {
-      toast("parear: " + (e as Error).message);
-    } finally {
-      setCriando(false);
-    }
-  }
-
   async function ativar(m: MaquinaLinha, ativo: boolean) {
     try {
       await patch(`/maquinas/${encodeURIComponent(m.host)}?tenant=${encodeURIComponent(m.tenant)}`, { ativo });
@@ -117,59 +94,11 @@ export function Maquinas({ operador }: { operador: boolean }) {
         </h2>
       </div>
 
-      {pareamento && (
-        <div className="rounded-lg border border-amber-500/40 bg-amber-500/10 p-3" id="maqTokenCaixa">
-          <div className="mb-1 text-[12px] font-semibold text-amber-300">
-            Cole este comando no PowerShell da máquina — vale {Math.round((pareamento.segundos ?? 900) / 60)} min, uma vez só
-          </div>
-          <div className="mb-1 text-[11px] text-txt3">Windows (na pasta onde salvou o .exe):</div>
-          <div className="flex items-center gap-2">
-            <code className="flex-1 select-all break-all rounded bg-black/40 p-2 text-[12px]" id="maqComandoWin">
-              {`.\minirag-cliente-win.exe --token ${pareamento.token}`}
-            </code>
-            <button
-              className="btn self-start"
-              onClick={() => {
-                void navigator.clipboard
-                  ?.writeText(`.\minirag-cliente-win.exe --token ${pareamento.token}`)
-                  .then(() => toast("comando copiado"))
-                  .catch(() => toast("copie manualmente"));
-              }}
-            >
-              copiar
-            </button>
-          </div>
-          <div className="mb-1 mt-2 text-[11px] text-txt3">Linux:</div>
-          <div className="flex items-center gap-2">
-            <code className="flex-1 select-all break-all rounded bg-black/40 p-2 text-[12px]" id="maqComandoLinux">
-              {`./minirag-cliente-linux --token ${pareamento.token}`}
-            </code>
-            <button
-              className="btn self-start"
-              onClick={() => {
-                void navigator.clipboard
-                  ?.writeText(`./minirag-cliente-linux --token ${pareamento.token}`)
-                  .then(() => toast("comando copiado"))
-                  .catch(() => toast("copie manualmente"));
-              }}
-            >
-              copiar
-            </button>
-          </div>
-          <div className="mt-2 flex items-center justify-between text-[11px] text-txt3">
-            <span>depois de colar, a máquina aparece na lista em segundos; se a rede cair, ela se reconecta sozinha</span>
-            <button className="btn self-start" onClick={() => setPareamento(null)}>
-              fechei
-            </button>
-          </div>
-        </div>
-      )}
-
       <div className="cartao">
         <h3 className="mb-1 text-[13px] font-semibold text-txt2">Binários do cliente</h3>
         <p className="dica mt-0 mb-2">
           cada clique gera um cliente com a chave do teu usuário assada dentro: um arquivo só, dois cliques na
-          máquina e pronto — conecta, e se a rede cair se reconecta sozinho. Clientes desta versão se auto-atualizam.
+          máquina e pronto. A máquina se batiza sozinha com o nome real do computador. Clientes desta versão se auto-atualizam.
         </p>
         <div className="flex flex-wrap items-center gap-2">
           <button
@@ -180,46 +109,19 @@ export function Maquinas({ operador }: { operador: boolean }) {
           >
             {gerandoCli ? "gerando…" : "⬓ gerar meu cliente Windows"}
           </button>
-          <a id="binarioClienteWin" className="btn" href="/maquina/cliente/win" download>
-            cliente genérico (usa comando)
-          </a>
-          <a id="binarioClienteLinux" className="btn" href="/maquina/cliente/linux" download>
-            ⬓ Linux
-          </a>
+          <button
+            id="btnGerarClienteLinux"
+            className="btn"
+            disabled={gerandoCli}
+            onClick={() => void gerarCliente("linux")}
+          >
+            ⬓ gerar meu cliente Linux
+          </button>
         </div>
         <p className="dica mt-2 mb-0">
           primeiro acesso no Windows: o SmartScreen avisa (binário sem assinatura) — escolha Manter/mais
           informações e rode mesmo, é o seu próprio programa.
         </p>
-      </div>
-
-      <div className="cartao">
-        <h3 className="mb-1 text-[13px] font-semibold text-txt2">Conectar máquina nova</h3>
-        <p className="dica mt-0 mb-2">
-          <b>1.</b> baixe o cliente no cartão acima e salve na máquina · <b>2.</b> gere o comando · <b>3.</b> cole no
-          PowerShell da máquina (uma vez só). Ela aparece na lista e depois religa sozinha.
-        </p>
-        <div className="flex flex-wrap items-center gap-2">
-          <input
-            id="maqNome"
-            className="campo w-40"
-            placeholder="nome da máquina"
-            value={nomeNovo}
-            onChange={(e) => setNomeNovo(e.target.value)}
-          />
-          {operador && (
-            <input
-              id="maqTenant"
-              className="campo w-40"
-              placeholder="dar a outro usuário (opcional)"
-              value={tenantNovo}
-              onChange={(e) => setTenantNovo(e.target.value)}
-            />
-          )}
-          <button id="btnParear" className="btn btn-primario" disabled={criando} onClick={() => void parear()}>
-            {criando ? "gerando…" : "＋ gerar comando"}
-          </button>
-        </div>
       </div>
 
       <table className="tabela" id="maquinasTabela">

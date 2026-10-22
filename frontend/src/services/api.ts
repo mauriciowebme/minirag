@@ -140,7 +140,9 @@ export async function baixar(caminho: string, nomeArquivo: string): Promise<void
   const url = URL.createObjectURL(blob);
   const a = document.createElement("a");
   a.href = url;
-  a.download = nomeArquivo;
+  // o servidor batiza o arquivo com o dono (content-disposition); o nome local é só reserva
+  const disp = /filename="?([^";]+)"?/i.exec(r.headers.get("content-disposition") || "");
+  a.download = disp ? decodeURIComponent(disp[1]) : nomeArquivo;
   a.click();
   setTimeout(() => URL.revokeObjectURL(url), 2000);
 }
