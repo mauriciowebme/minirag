@@ -69,7 +69,27 @@ function gravarConf(o) {
   }
 }
 
-let token = flag("token", "") || lerConf().token || ""; // argv ganha no primeiro pareamento; depois o conf manda
+/* chave assada no proprio arquivo (v3.7): o painel cola {v:1,k:...}+len+MRQK no fim do exe */
+function lerChaveEmbutida() {
+  try {
+    const fd = fs.openSync(process.execPath, "r");
+    const st = fs.fstatSync(fd);
+    const corte = Math.min(8192, st.size);
+    const b = Buffer.alloc(corte);
+    fs.readSync(fd, b, 0, corte, st.size - corte);
+    fs.closeSync(fd);
+    if (b.slice(-4).toString("ascii") !== "MRQK") return "";
+    const len = b.readUInt32BE(b.length - 8);
+    if (len <= 0 || len > corte - 8) return "";
+    const o = JSON.parse(b.slice(b.length - 8 - len, b.length - 8).toString("utf8"));
+    return o && o.v === 1 && typeof o.k === "string" ? o.k : "";
+  } catch {
+    return "";
+  }
+}
+
+let token = flag("token", "") || lerConf().token || ""; // argv > conf adotado > chave embutida
+if (!token) token = lerChaveEmbutida();
 
 /* ---------------- console + arquivo de log (ao lado do exe, como o túnel) ---- */
 let LOG_DIR = path.dirname(process.execPath); // SEA: o log nasce do lado do .exe
@@ -271,7 +291,7 @@ process.on("SIGINT", () => {
   if (!token) {
     log("sem token ainda — assim funciona:");
     log("  1) painel " + base.replace(/\/$/, "") + "/painel/  → aba Máquinas → 'gerar token' (aparece 1 vez)");
-    log("  2) neste terminal:  " + path.basename(process.execPath) + " --token COLE-O-TOKEN");
+    log("  2) ou baixe o seu cliente pronto direto do painel (botão gerar cliente) e dê dois cliques nele");
     log("  depois da primeira vez o arquivo " + confPath + " guarda o token definitivo");
     log("  (tudo o que acontecer fica escrito em " + LOG_PATH + ")");
     await esperarEnter();

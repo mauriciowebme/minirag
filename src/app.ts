@@ -8,6 +8,8 @@ import {
   apagarMaquina,
   controleDeMaquinaAtivo,
   criarPareamento,
+  gerarClienteBinario,
+  revogarChaveCliente,
   gravarControleDeMaquina,
   listarLog,
   listarMaquinas,
@@ -488,6 +490,28 @@ export function criarApp(): FastifyInstance {
   /* ------------------------------------------------------------- maquinas */
   /* v3.6: o túnel absorvido. REST e MCP batem na MESMA função; máquina nasce
      presa ao usuário (comum sempre no próprio; operador mira com ?tenant). */
+
+  /* cliente já com a chave do usuário assada dentro (v3.7): um arquivo, dois cliques */
+  app.get("/maquinas/cliente/:plataforma", async (req, reply) => {
+    const u = usuario(req);
+    const s = req.params as Record<string, string>;
+    const q = req.query as Record<string, string>;
+    const plat = s.plataforma === "win" || s.plataforma === "linux" ? s.plataforma : null;
+    if (!plat) throw new HttpError(404, "plataforma: win | linux");
+    const alvo = alvoMaquina(u, q.tenant ?? null);
+    const { buf, arquivo } = await gerarClienteBinario(alvo, plat, String(q.nome ?? ""));
+    return reply
+      .header("content-type", "application/octet-stream")
+      .header("content-length", String(buf.length))
+      .header("content-disposition", `attachment; filename="${arquivo}"`)
+      .send(buf);
+  });
+
+  app.delete("/maquinas/chave/:id", async (req) => {
+    const u = usuario(req);
+    const s = req.params as Record<string, string>;
+    return revogarChaveCliente(u, s.id);
+  });
 
   app.get("/maquinas", async (req) => {
     const u = usuario(req);
