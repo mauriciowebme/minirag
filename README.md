@@ -10,6 +10,27 @@ parecidos com a pergunta, com uma nota de 0 a 1.
 
 ---
 
+## v3.3 — A resposta agora vive no servidor; fechar a aba não mata mais nada (21/10/2026)
+
+- **O defeito**: a resposta do chat morria com a aba. Wi-fi que caiu, aba que fechou,
+  deploy no meio — `não consegui responder` na volta, e o trabalho pago em token perdido.
+- **O que fizemos**: a pergunta virou **tarefa no servidor** (`POST /chat/tarefa`): o
+  agente roda sozinho, independente de conexão, gravando o texto acumulado (`parcial`)
+  no banco a cada pedaço. A tela assina `GET /chat/tarefa/:id/stream` — um SSE
+  **reanexável**: abrir de novo replay do que já foi escrito + o resto ao vivo; tarefa
+  que terminou sem ninguém olhando devolve replay + `fim` e fecha (nada pendurado).
+- **Fechar a aba ≠ falha**: o trabalho continua; voltar readota a bolha (a pergunta,
+  que ainda não está no histórico, entra; o parcial vira base). Queda de conexão no
+  meio do stream: reanexa até 3× com backoff antes de reclamar.
+- **Higiene**: boot limpa órfãs (`rodando` de processo morto vira `falhou`; terminadas
+  com 10min+ saem). Duplicata de evento entre snapshot e ouvinte é descartada no client
+  pela base (delta que não passa a última fotografia do servidor não entra).
+- **Fallback**: servidor antigo (sem `/chat/tarefa`) → front cai no `/chat/stream` de
+  sempre; deploy pode vir em qualquer ordem.
+- **Decisões registradas**: o modelo continua gastando token sem cliente olhando (é o
+  que "sobreviver" significa); as mensagens só entram no histórico no fim (o `parcial`
+  fica na tarefa enquanto ela vive); a fila do navegador ainda é local (próximo degrau).
+
 ## v3.2 — A resposta longa parou de ser morta no meio (21/10/2026)
 
 - **O defeito**: depois de uma rodada de ferramentas, a tela mostrava
