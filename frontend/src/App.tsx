@@ -26,6 +26,12 @@ const MENU: { id: Vista; rotulo: string; icone: string }[] = [
 
 const DENTRO_DO_CAMINHO = new Set<Vista>(["gavetas", "arquivos", "editor"]);
 
+/* v3.4 (política do dono, 21/10): o usuário comum só tem três lugares na tela —
+   Chat, Buscar e Fila. Painel, Usuários/Gavetas e Configurações são do admin.
+   A parede de verdade está na API (dashboard/config gravam exigem operador);
+   o filtro aqui é a consequência visual, não a segurança. */
+const VISTAS_DO_COMUM: Vista[] = ["chat", "buscar", "jobs"];
+
 const TITULOS: Record<Vista, string> = {
   painel: "Painel",
   gavetas: "Usuários",
@@ -56,7 +62,8 @@ export default function App() {
   useEffect(() => {
     if (!sessao.logado) return;
     setUsuarioAberto(null);
-    setVista("painel");
+    /* comum não tem Painel: o ponto de entrada dele é o Chat (v3.4) */
+    setVista(sessao.sessao.operador ? "painel" : "chat");
     get<HealthResp>("/health")
       .then((h) => setVersao(h.versao || "?"))
       .catch(() => undefined);
@@ -89,12 +96,14 @@ export default function App() {
 
   const navegar = useCallback(
     (destino: Vista) => {
+      /* v3.4: se o comum tentar ir a módulo de admin (por qualquer caminho), fica no Chat */
+      if (sessao.logado && !sessao.sessao.operador && !VISTAS_DO_COMUM.includes(destino)) destino = "chat";
       if (sujo && !confirm("descartar o que você digitou no editor?")) return;
       setSujo(false);
       setVista(destino);
       setMenuAberto(false);
     },
-    [sujo],
+    [sujo, sessao.logado, sessao.sessao.operador],
   );
 
   if (!sessao.logado) {
@@ -117,7 +126,7 @@ export default function App() {
 
       {/* Um menu só, na ordem definida pelo dono (sem títulos de grupo: "visão geral"
           e "memória" saíram — a divisão não ajudava a achar nada). */}
-      {MENU.map((m) => {
+      {MENU.filter((m) => operador || VISTAS_DO_COMUM.includes(m.id)).map((m) => {
         const ativo = m.id === "gavetas" ? DENTRO_DO_CAMINHO.has(vista) : vista === m.id;
         const rotulo = m.id === "gavetas" ? (operador ? "Usuários" : "Gavetas") : m.rotulo;
         return (

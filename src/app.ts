@@ -471,8 +471,10 @@ export function criarApp(): FastifyInstance {
   /* ------------------------------------------------------------- painel */
 
   /** Números do acervo em uma chamada (o Painel não faz 6 requisições). */
+  /* v3.4: Painel é do admin. O usuário comum não tem o módulo na tela nem pela API. */
   app.get("/dashboard", async (req) => {
     const u = usuario(req);
+    exigirOperador(u);
     const s = req.query as Record<string, string>;
     return dadosPainel(u, s.tenant ?? "");
   });
@@ -531,13 +533,18 @@ export function criarApp(): FastifyInstance {
     return verProvider(u, s.tenant ?? "");
   });
 
+  /* v3.4: provider é decisão de admin. O comum LÊ o seu (o Chat precisa saber se está
+   * ligado); quem ESCREVE é só o operador — para si, para o tenant-alvo via body.tenant,
+   * ou o padrão global (global:true). Sem Config na tela do comum, ele usa o que o admin definir. */
   app.put("/config/provider", async (req) => {
     const u = usuario(req);
-    return salvarProvider(u, corpo(req));
+    exigirOperador(u);
+    return salvarProvider(u, corpo(req) as Parameters<typeof salvarProvider>[1]);
   });
 
   app.post("/config/provider/testar", async (req) => {
     const u = usuario(req);
+    exigirOperador(u);
     return testarProvider(u, corpo(req));
   });
 

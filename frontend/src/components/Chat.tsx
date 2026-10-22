@@ -297,9 +297,14 @@ export function Chat({
       {semProvider && (
         <div className="aviso" id="avisoProvider">
           <span>Chat desligado: nenhum provider configurado. A Busca continua funcionando.</span>
-          <button className="btn btn-mini ml-auto" onClick={onIrConfig}>
-            configurar agora
-          </button>
+          {/* v3.4: provider é decisão de admin — o comum não tem Configurações na tela */}
+          {operador ? (
+            <button className="btn btn-mini ml-auto" onClick={onIrConfig}>
+              configurar agora
+            </button>
+          ) : (
+            <span className="ml-auto text-[12px] text-txt3">peça ao administrador para ligar o provider</span>
+          )}
         </div>
       )}
 

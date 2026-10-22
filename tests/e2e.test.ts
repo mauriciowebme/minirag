@@ -1090,8 +1090,9 @@ test("minirag v2 — suíte completa", async (t) => {
     r = await call("GET", "/config/provider", { key: TESTKEY });
     f.check("chave salva não volta em claro", r.status === 200 && !new RegExp(["sk", "teste", "1234"].join("-")).test(r.texto) && r.json?.origem === "global", r.texto.slice(0, 160));
 
-    /* linha própria pela metade (URL sem modelo) NÃO pode esconder o global que o chat está usando */
-    await call("PUT", "/config/provider", { key: TESTKEY, corpo: { base_url: "http://127.0.0.1:1/v1", modelo: "", ativo: false } });
+    /* linha própria pela metade (URL sem modelo) NÃO pode esconder o global que o chat está usando.
+       v3.4: quem escreve a linha do comum é o operador (mirando o tenant). */
+    await call("PUT", "/config/provider", { key: OPKEY, corpo: { tenant: "teste", base_url: "http://127.0.0.1:1/v1", modelo: "", ativo: false } });
     r = await call("GET", "/config/provider", { key: TESTKEY });
     f.check(
       "tela mostra o global quando a linha própria está incompleta",
@@ -1221,10 +1222,10 @@ test("minirag v2 — suíte completa", async (t) => {
 
     /* O chat deste bloco roda com a chave do usuario. Se existir linha PROPRIA completa dele
        (sobrou de outro bloco), ela tem prioridade sobre o padrao — regra de escopo da v2.8.1, nao
-       defeito. Entao o bloco desliga a linha propria antes de apontar o padrao para o fake dele. */
+       defeito. Entao o bloco desliga a linha propria (pelo operador, regra v3.4) antes de apontar o padrao para o fake dele. */
     await call("PUT", "/config/provider", {
-      key: TESTKEY,
-      corpo: { tipo: "litellm", base_url: "http://127.0.0.1:1/v1", modelo: "", ativo: false },
+      key: OPKEY,
+      corpo: { tenant: "teste", tipo: "litellm", base_url: "http://127.0.0.1:1/v1", modelo: "", ativo: false },
     });
 
     let r = await call("POST", "/ingest", {
@@ -1377,8 +1378,8 @@ test("minirag v2 — suíte completa", async (t) => {
     f.check("apagar MCP inexistente -> 404", r.status === 404, r.status);
 
     /* ---- 8. linha própria pela metade não tapa o padrão global ---- */
-    r = await call("PUT", "/config/provider", { key: TESTKEY, corpo: { tipo: "litellm", base_url: "http://127.0.0.1:1/v1", modelo: "", ativo: false } });
-    f.check("linha própria incompleta aceita (desligada)", r.status === 200, r.texto.slice(0, 140));
+    r = await call("PUT", "/config/provider", { key: OPKEY, corpo: { tenant: "teste", tipo: "litellm", base_url: "http://127.0.0.1:1/v1", modelo: "", ativo: false } });
+    f.check("operador escreve linha incompleta do comum (v3.4: escrita é só do admin)", r.status === 200, r.texto.slice(0, 140));
     r = await provedor({ modelo: "eco", global: true });
     f.check("provider global de volta", r.status === 200 && r.json?.configurado === true, r.texto.slice(0, 140));
     r = await call("POST", "/chat", { key: TESTKEY, corpo: { pergunta: "a global ainda funciona?", memoria: GAV } });
@@ -1773,16 +1774,16 @@ test("minirag v2 — suíte completa", async (t) => {
     r = await call("GET", "/config/provider", { key: OPKEY });
     f.check("a linha do operador não foi tocada de relance", r.json?.escopo !== CLI && r.json?.system_prompt === "PROMPT-DE-INSTRUCAO", { escopo: r.json?.escopo, prompt: r.json?.system_prompt });
     r = await call("PUT", "/config/provider", { key: TESTKEY, corpo: { ...semGlobal, tenant: CLI, system_prompt: "INVADE-CLI-30", contexto_tokens: 4000 } });
-    f.check("usuário comum que tenta gravar em cliente alheio cai na própria linha", r.status === 200 && r.json?.escopo !== CLI, { escopo: r.json?.escopo });
+    f.check("usuário comum não escreve provider NENHUM (v3.4: escrita é de admin)", r.status === 403, r.texto.slice(0, 140));
     r = await call("GET", `/config/provider?tenant=${CLI}`, { key: OPKEY });
     f.check("e o cliente alheio continua intacto", r.json?.system_prompt === "PROBE-CLI-30", r.json?.system_prompt);
     r = await call("PUT", "/config/provider", { key: TESTKEY, corpo: { ...base, global: true, system_prompt: "x", contexto_tokens: 4000 } });
-    f.check("usuário comum não grava o padrão global", r.status === 409, r.status);
+    f.check("usuário comum não grava o padrão global", r.status === 403, r.status);
 
     /* ---------------------------------------------- limpeza (não contamina os blocos seguintes) */
     /* a linha do usuario comum tambem: ela ficou completa durante os testes de escopo e passaria a
-       ter prioridade sobre o padrao nos blocos que rodam depois deste */
-    await call("PUT", "/config/provider", { key: TESTKEY, corpo: { ...semGlobal, base_url: "http://127.0.0.1:1/v1", modelo: "", ativo: false } });
+       ter prioridade sobre o padrao nos blocos que rodam depois deste (v3.4: limpeza pela mão do operador) */
+    await call("PUT", "/config/provider", { key: OPKEY, corpo: { ...semGlobal, tenant: "teste", base_url: "http://127.0.0.1:1/v1", modelo: "", ativo: false } });
     await call("PUT", "/config/provider", { key: OPKEY, corpo: { ...semGlobal, tenant: CLI, system_prompt: "", ativo: false, contexto_tokens: 4000 } });
     await call("PUT", "/config/provider", { key: OPKEY, corpo: { ...base, system_prompt: "", memoria_turnos: 12, verbatim_turnos: 4, reserva_tokens: 1024, contexto_tokens: 0, ativo: false } });
     await call("DELETE", `/chat?memoria=${GAV}`, { key: OPKEY });
@@ -2022,6 +2023,38 @@ test("minirag v2 — suíte completa", async (t) => {
     await call("DELETE", `/gavetas/${GAV}`, { key: TESTKEY });
     await call("DELETE", `/chat?memoria=${GAV}`, { key: OPKEY });
     f.fechar("v3.3 tarefa");
+  });
+
+  await bloco(t, "v3.4: módulos do admin — o comum só vê chat, buscar e fila", async () => {
+    const f = fiscal();
+    /* política do dono (21/10): Painel, Usuários e Configurações são do ADMIN —
+       na tela (filtro do menu) E na porta (a parede de verdade é aqui). */
+    let r = await call("GET", "/dashboard", { key: TESTKEY });
+    f.check("comum não abre o painel", r.status === 403, r.texto.slice(0, 140));
+    r = await call("GET", "/dashboard", { key: OPKEY });
+    f.check("admin abre o painel", r.status === 200 && typeof r.json?.numeros?.documentos === "number", r.texto.slice(0, 140));
+
+    r = await call("PUT", "/config/provider", { key: TESTKEY, corpo: { base_url: "http://127.0.0.1:1/v1", modelo: "" } });
+    f.check("comum não escreve provider", r.status === 403, r.texto.slice(0, 140));
+    r = await call("POST", "/config/provider/testar", { key: TESTKEY, corpo: {} });
+    f.check("comum não testa conexão", r.status === 403, r.texto.slice(0, 140));
+    r = await call("GET", "/config/provider", { key: TESTKEY });
+    f.check("comum LÊ o próprio provider (o Chat depende disso)", r.status === 200 && typeof r.json?.configurado === "boolean", r.texto.slice(0, 140));
+
+    /* admin configura a linha de um comum mirando o tenant (o caminho que a tela dele usa) */
+    r = await call("PUT", "/config/provider", { key: OPKEY, corpo: { tenant: "teste", tipo: "litellm", base_url: "http://127.0.0.1:1/v1", modelo: "", ativo: false } });
+    f.check("admin escreve provider de outro usuário (tenant no corpo)", r.status === 200 && r.json?.escopo === "teste", { escopo: r.json?.escopo, status: r.status });
+
+    /* os três módulos do comum seguem vivos pela porta */
+    r = await call("GET", "/jobs?limit=5", { key: TESTKEY });
+    f.check("comum usa a fila (próprio escopo)", r.status === 200 && Array.isArray(r.json?.jobs), r.texto.slice(0, 100));
+    r = await call("POST", "/search", { key: TESTKEY, corpo: { query: "qualquer coisa", memoria: "gav-v34-inexistente" } });
+    f.check("comum usa a busca", r.status === 200 && Array.isArray(r.json?.items), r.texto.slice(0, 100));
+    r = await call("GET", "/chat?memoria=gav-v34&limit=5", { key: TESTKEY });
+    f.check("comum usa o histórico do chat", r.status === 200 && Array.isArray(r.json?.mensagens), r.texto.slice(0, 100));
+    r = await call("GET", "/gavetas", { key: TESTKEY });
+    f.check("comum lista as próprias gavetas (o seletor do Chat precisa)", r.status === 200, r.status);
+    f.fechar("v3.4 perfis");
   });
 
   await bloco(t, "freio de força bruta (último: bloqueia o IP)", async () => {

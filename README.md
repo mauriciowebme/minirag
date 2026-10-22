@@ -10,6 +10,21 @@ parecidos com a pergunta, com uma nota de 0 a 1.
 
 ---
 
+## v3.4 — Dois perfis de verdade: o comum só vive em Chat, Buscar e Fila (21/10/2026)
+
+- **A política do dono**: Painel, Usuários/Gavetas e Configurações passam a ser **módulos
+  do admin**. O usuário comum entra e vê três coisas: conversar (Chat), buscar (Buscar) e
+  acompanhar a ingestão (Fila).
+- **Parede na porta, não só na tela**: `GET /dashboard`, `PUT /config/provider` e
+  `POST /config/provider/testar` agora exigem operador (403). O menu filtrado é a
+  consequência visual; a segurança mora na API (esconder botão não esconde rota).
+- **Provider virou decisão de admin**: o comum **lê** o seu próprio estado (o Chat precisa
+  saber se está ligado e mostra "peça ao administrador" quando não está), mas quem
+  **escreve** é o operador — para si, para um usuário específico (`tenant` no corpo, rota
+  que já existia) ou como padrão global. Menos um lugar para o comum se perder.
+- Chaves continuam trocáveis por quem é dono delas (`POST /usuarios/:nome/chave` aceita o
+  próprio), sem tela para isso por enquanto — a rota existe para quando a política mudar.
+
 ## v3.3 — A resposta agora vive no servidor; fechar a aba não mata mais nada (21/10/2026)
 
 - **O defeito**: a resposta do chat morria com a aba. Wi-fi que caiu, aba que fechou,
