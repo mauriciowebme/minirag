@@ -10,6 +10,49 @@ parecidos com a pergunta, com uma nota de 0 a 1.
 
 ---
 
+## v3.5 — Esquecimento com régua na tela e apagar usuário com carência (22/10/2026)
+
+- **Três números, todos configuráveis** (antes só existia o primeiro, preso em 30 dias e
+  só mexível no ambiente):
+  - `dias_arquivar` — documento sem uso por N dias (e menos de `min_acessos` acessos) é
+    **arquivado**: sai da busca padrão, **revive ao ser usado**. Padrão novo: **180 dias (6 meses)**.
+  - `dias_excluir_arquivado` — arquivado encostado por mais que isto é **apagado de vez**
+    (chunks, `documents`, original em `arquivos`). Padrão: **365 dias (1 ano)** — o "morrer
+    depois de 1 ano, também configurável" que você pediu. Nunca toca documento vivo:
+    exige `archived_at` preenchido em **todos** os pedaços.
+  - `dias_carencia` — janela entre pedir o apagar de um usuário e a morte dos dados dele.
+    Padrão: **30 dias**.
+- **Editável na tela**: Configurações → **Esquecimento** ganhou os três campos + botão
+  salvar. O que você salva ali **vence** o ambiente (gravado na tabela `esquecimento_cfg`;
+  as variáveis viraram o default do boot). `GET /config` mostra os valores efetivos e a
+  origem de cada um (tela/ambiente).
+- **Apagar usuário agora funciona** (o botão existia só para gaveta, por isso o seu
+  "apagar" do `teste` não fazia nada). `DELETE /usuarios/:nome`:
+  - **desliga o login na hora** (chave do agendado devolve 401; o usuário some do chat e
+    das listas de busca do painel, a linha fica visível com `agendado_exclusao_em`);
+  - **agenda a exclusão dos dados** (gavetas, documentos, chunks, originais, jobs,
+    chats e provider da pessoa) para o fim da carência;
+  - **recriar o mesmo nome dentro da janela DESFAZ tudo** — o acervo inteiro volta com o
+    login novo (`aviso` no 201 diz que a exclusão foi cancelada);
+  - a **faxina** roda junto do loop do decay (e no `POST /decay` manual): estourou o prazo,
+    apaga de vez. A resposta do `/decay` ganha `expurgo: {usuarios_apagados, docs_expurgados}`.
+  - Guarda antiga mantida: não se apaga o último admin ativo (`409`).
+- **Tela**: cada card de usuário (Gavetas) ganhou botão **apagar** em duas fases (um clique
+  arma, o segundo "apagar de verdade?" executa) — quem tem exclusão agendada mostra o chip
+  **⏳ some em DD/MM/AAAA — recriar desfaz** no lugar do botão.
+- **MCP**: 23 tools — as 21 da v2.8 + `apagar_usuario` (admin) e `esquecimento`
+  (`acao: "ver" | "definir"`, escrever é só do admin).
+- **Contrato que mudou**: `DELETE /usuarios/:nome` responde `{agendado, carencia_dias}`
+  (não responde mais `removido` — nada é apagado fisicamente ali); `POST /usuarios` em nome
+  agendado volta `201` com `aviso`; `GET /usuarios` traz `agendado_exclusao_em`;
+  `PUT /config/esquecimento` (admin) grava os três números; `POST /decay` expõe `expurgo`.
+- Testes: bloco **v3.5** (19 checagens: efetivos, 403/422 da escrita, ciclo
+  apagar→401→recriar→acervo vivo, faxina vencida zero-sobra (usuário, chunks, fonte,
+  jobs), arquivado fora-da-janela morre / dentro fica, MCP espelho). Os dois checks
+  velhos do `removido` migraram para `agendado`.
+
+---
+
 ## v3.4 — Dois perfis de verdade: o comum só vive em Chat, Buscar e Fila (21/10/2026)
 
 - **A política do dono**: Painel, Usuários/Gavetas e Configurações passam a ser **módulos
@@ -624,11 +667,12 @@ outros logins nem de outras gavetas.
 |---|---|---|
 | `GET /dashboard` | qualquer login | números do acervo em uma chamada (usuários, gavetas, documentos, trechos, fila, buscas/chats do dia, por usuário, saúde, últimos envios) |
 | `GET /config` | qualquer login | limites e política de esquecimento (sem segredo) |
-| `GET /usuarios` | operador | lista com papel, ativo, `chave_hint`, gavetas e documentos |
-| `POST /usuarios` | operador | `{nome, papel}` → `201 {nome, papel, chave}` — **a chave aparece só nesta resposta** |
+| `GET /usuarios` | operador | lista com papel, ativo, `chave_hint`, gavetas, documentos e `agendado_exclusao_em` (v3.5) |
+| `POST /usuarios` | operador | `{nome, papel}` → `201 {nome, papel, chave}` — **a chave aparece só nesta resposta**; recriar nome agendado **desfaz a exclusão** e devolve `aviso` (v3.5) |
 | `PATCH /usuarios/{nome}` | operador | `{ativo?, papel?}` — não deixa desativar/rebaixar o último operador |
 | `POST /usuarios/{nome}/chave` | operador (qualquer) ou o próprio | gera chave nova e devolve uma vez |
-| `DELETE /usuarios/{nome}` | operador | só sem documentos (`409` se tiver) |
+| `DELETE /usuarios/{nome}` | operador | v3.5: **agenda** a exclusão dos dados (`{agendado, carencia_dias}`); desliga o login na hora; `409` se for o último admin ativo |
+| `PUT /config/esquecimento` | **admin** | v3.5: grava `dias_arquivar`, `dias_excluir_arquivado`, `dias_carencia` (0–36500; tela vence o ambiente; devolve `efetivos`) |
 | `GET/PUT /config/provider` | qualquer login | provider do chat (`tipo`, `base_url`, `modelo`, `chave`, `temperatura`, `system_prompt`, `mcp_interno`, `max_rodadas`, `ativo`); `global: true` (só operador) grava o padrão de todos. Desde a v3.0 também `memoria_turnos`, `verbatim_turnos`, `reserva_tokens`, `contexto_tokens`, `contexto_detectado`, `janela_efetiva`, `origem_janela` e `escopo` (onde a chamada mexeu). Chave e cabeçalho voltam **mascarados** |
 | `POST /config/provider/testar` | qualquer login | manda um "teste de conexao" ao modelo e devolve `{ok, ms, modelo, contexto_detectado}` — a janela anunciada pelo provedor vira a janela efetiva |
 | `POST /chat` | qualquer login | `{pergunta, memoria}` → `{resposta, ferramentas[], rodadas, modelo, ms, aviso, compactacao}`; manda as últimas `memoria_turnos` rodadas da gaveta (compactadas se não couberem na janela) e roda as ferramentas do MCP ligado **direto**, sem confirmar; sem provider → `409` |
@@ -680,8 +724,13 @@ Os dois campos são **opcionais** — sem corpo, usa os defaults do servidor.
 
 **Response (200):**
 ```json
-{ "arquivados_agora": 2, "ativos": 5, "arquivados": 3 }
+{ "arquivados_agora": 2, "ativos": 5, "arquivados": 3, "expurgo": { "usuarios_apagados": ["fulano"], "docs_expurgados": 1 } }
 ```
+
+Desde a v3.5 o `/decay` também roda a **faxina**: contas com carência vencida são
+apagadas de vez (dados inteiros) e documentos arquivados além de
+`dias_excluir_arquivado` morrem. O campo `expurgo` mostra o que a faxina mexeu —
+usuário comum só enxerga o próprio alcance.
 
 ---
 
@@ -1115,9 +1164,11 @@ O minirag roda em qualquer ambiente com Docker. Segue um exemplo prático
 | `MINIRAG_MAX_QUERY_CHARS` | `2000` | teto da `query` de busca (estourou = 422) |
 | `MINIRAG_MAX_CHUNKS_TENANT` | `10000` | cota de chunks por login (estourou = 413) |
 | `MINIRAG_DECAY_ATIVO` | `1` | `0` desliga o esquecimento automático |
-| `MINIRAG_DECAY_DIAS` | `30` | sem acesso por N dias → arquiva |
+| `MINIRAG_DECAY_DIAS` | `180` | sem acesso por N dias → arquiva (v3.5: o valor salvo na tela vence) |
 | `MINIRAG_DECAY_MIN_ACESSOS` | `2` | usado N+ vezes nunca é arquivado |
-| `MINIRAG_DECAY_INTERVALO_MINUTOS` | `60` | de quanto em quanto o loop roda |
+| `MINIRAG_DECAY_INTERVALO_MINUTOS` | `60` | de quanto em quanto o loop roda (decay + faxina) |
+| `MINIRAG_EXPURGO_ARQUIVADO_DIAS` | `365` | arquivado por N dias ou mais é apagado de vez (tela vence) |
+| `MINIRAG_CARENCIA_DIAS` | `30` | janela entre apagar usuário e a exclusão dos dados dele (tela vence) |
 | `MINIRAG_CORS_ORIGINS` | `""` | origens de navegador que podem chamar; em uso servidor-para-servidor pode ficar vazio |
 | `MINIRAG_ADMIN` | `""` | login do admin, escopo total (`nome:chave`), vê todas as gavetas. Desde a v3.4; o nome antigo `MINIRAG_OPERADOR` ainda vale como apelido |
 | `MINIRAG_LOGIN_MAX_FALHAS` | `10` | falhas de chave por IP antes de bloquear (429) |
