@@ -57,6 +57,22 @@ RUN cd frontend && npm ci --no-audit --no-fund
 COPY frontend ./frontend
 RUN cd frontend && npm run build
 
+# ---------------------------------------------------------------- cliente (v3.6)
+# Binários Node SEA do cliente de máquina, ASSADOS na imagem (auto-update e
+# download partem do próprio container). O estágio usa o node daqui para gerar
+# o blob e baixa o node.exe oficial da MESMA versão para o alvo Windows.
+FROM node:22-bookworm-slim AS cliente
+RUN apt-get update \
+    && apt-get install -y --no-install-recommends curl ca-certificates python3 \
+    && rm -rf /var/lib/apt/lists/*
+WORKDIR /build
+COPY package.json ./
+COPY src/config.ts ./src/
+COPY agente/ ./agente/
+COPY scripts/ ./scripts/
+RUN bash scripts/build-cliente.sh \
+    && test -f agente/bin/minirag-cliente-win.exe && test -f agente/bin/minirag-cliente-linux
+
 # ---------------------------------------------------------------- estágio 3
 # Imagem final: Node + Python no MESMO container (2 containers no total)
 FROM python:3.11-slim AS runtime
@@ -87,6 +103,7 @@ COPY --from=build /build/node_modules ./node_modules
 COPY --from=build /build/package.json ./
 COPY embedder ./embedder
 COPY --from=build /build/frontend/dist ./frontend/dist
+COPY --from=cliente /build/agente/bin ./agente/bin
 
 EXPOSE 8000
 

@@ -9,5 +9,7 @@ node_modules/
 dist/
 painel/app.js
 tests-dist/
+agente/bin/
+agente/.build/
 .hermes/
 *.tsbuildinfo
