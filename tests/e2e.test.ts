@@ -2337,6 +2337,28 @@ test("minirag v2 — suíte completa", async (t) => {
       psql(`SELECT count(*) FROM maquinas WHERE tenant='suite-m36'`),
     );
 
+    /* interruptor global de controle: desligado barra chat, MCP externo e REST de uma vez */
+    r = await call("POST", "/mcp", { key: OPKEY, corpo: { jsonrpc: "2.0", id: 92, method: "tools/list" } });
+    const nomesOn = ((r.json?.result?.tools ?? []) as any[]).map((t) => t.name);
+    r = await call("GET", "/config/mcp", { key: OPKEY });
+    f.check("config/mcp reporta controle das máquinas ligado por padrão", r.status === 200 && r.json?.controle_maquinas === true, r.texto.slice(0, 120));
+    r = await call("PATCH", "/config/mcp/maquinas", { key: TESTKEY, corpo: { ativo: false } });
+    f.check("comum não mexe no interruptor (403)", r.status === 403, r.texto.slice(0, 100));
+    r = await call("PATCH", "/config/mcp/maquinas", { key: OPKEY, corpo: { ativo: false } });
+    f.check("operador desliga e a config lê false", r.status === 200 && r.json?.controle_maquinas === false, r.texto.slice(0, 120));
+    r = await call("POST", "/maquinas/maq-mcp/run", { key: TESTKEY, corpo: { cmd: "echo bloqueado" } });
+    f.check("desligado: REST run vira 409 com o caminho do interruptor", r.status === 409 && String(r.json?.detail ?? "").includes("Ferramentas"), r.texto.slice(0, 160));
+    r = await mcp(4, "rodar_comando", { host: "maq-mcp", cmd: "echo bloqueado-mcp" }, TESTKEY);
+    const txtBloq = String(r.json?.result?.content?.[0]?.text ?? "");
+    f.check("desligado: MCP rodar_comando recusa com a mesma frase", txtBloq.includes("409") && txtBloq.includes("DESLIGADO"), txtBloq.slice(0, 140));
+    r = await call("POST", "/mcp", { key: OPKEY, corpo: { jsonrpc: "2.0", id: 90, method: "tools/list" } });
+    const nomesOff = ((r.json?.result?.tools ?? []) as any[]).map((t) => t.name);
+    f.check("desligado: rodar_comando some do tools/list MCP", !nomesOff.includes("rodar_comando") && nomesOff.length === nomesOn.length - 1, { on: nomesOn.length, off: nomesOff.length });
+    r = await call("PATCH", "/config/mcp/maquinas", { key: OPKEY, corpo: { ativo: true } });
+    r = await call("POST", "/maquinas/maq-mcp/run", { key: TESTKEY, corpo: { cmd: "echo liberado" } });
+    f.check("religado: executa normal de novo", r.json?.stdout === "liberado", r.texto.slice(0, 140));
+    f.check("persistido no banco (cache tem par com a tabela)", psql(`SELECT valor FROM maquinas_cfg WHERE chave='controle_ativo'`) === "1", "");
+
     /* fase 3: o container serve o cliente e a régua de auto-update */
     r = await call("GET", "/maquina/atualizacao", { key: TESTKEY });
     f.check("atualizacao: versão do produto + binários assados na imagem", r.status === 200 && r.json?.versao === (process.env.VERSAO ?? "3.6.0") && r.json?.cliente?.linux === true && r.json?.cliente?.win === true, JSON.stringify(r.json ?? {}).slice(0, 120));
