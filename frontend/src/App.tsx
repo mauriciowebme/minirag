@@ -56,6 +56,9 @@ export default function App() {
   const [sujo, setSujo] = useState(false);
   const [recarregarArquivos, setRecarregarArquivos] = useState(0);
   const [menuAberto, setMenuAberto] = useState(false);
+  /* v3.6.1: a aba Máquinas vive e morre com o interruptor de Controle das máquinas
+     (Configurações → Ferramentas), igual à tela do túnel — desligado, some a aba. */
+  const [controleMaq, setControleMaq] = useState(true);
 
   useEffect(() => {
     void sessao.restaurar();
@@ -69,6 +72,9 @@ export default function App() {
     setVista(sessao.sessao.operador ? "painel" : "chat");
     get<HealthResp>("/health")
       .then((h) => setVersao(h.versao || "?"))
+      .catch(() => undefined);
+    get<{ controle_maquinas?: boolean }>("/config/mcp")
+      .then((r) => setControleMaq(r.controle_maquinas !== false))
       .catch(() => undefined);
   }, [sessao.logado]);
 
@@ -101,12 +107,14 @@ export default function App() {
     (destino: Vista) => {
       /* v3.4: se o comum tentar ir a módulo de admin (por qualquer caminho), fica no Chat */
       if (sessao.logado && !sessao.sessao.operador && !VISTAS_DO_COMUM.includes(destino)) destino = "chat";
+      /* máquina desligada na config não tem aba: admin cai na Configurações (o interruptor mora lá) */
+      if (destino === "maquinas" && !controleMaq) destino = operador ? "config" : "chat";
       if (sujo && !confirm("descartar o que você digitou no editor?")) return;
       setSujo(false);
       setVista(destino);
       setMenuAberto(false);
     },
-    [sujo, sessao.logado, sessao.sessao.operador],
+    [sujo, sessao.logado, sessao.sessao.operador, controleMaq],
   );
 
   if (!sessao.logado) {
@@ -129,7 +137,7 @@ export default function App() {
 
       {/* Um menu só, na ordem definida pelo dono (sem títulos de grupo: "visão geral"
           e "memória" saíram — a divisão não ajudava a achar nada). */}
-      {MENU.filter((m) => operador || VISTAS_DO_COMUM.includes(m.id)).map((m) => {
+      {MENU.filter((m) => (operador || VISTAS_DO_COMUM.includes(m.id)) && (m.id !== "maquinas" || controleMaq)).map((m) => {
         const ativo = m.id === "gavetas" ? DENTRO_DO_CAMINHO.has(vista) : vista === m.id;
         const rotulo = m.id === "gavetas" ? (operador ? "Usuários" : "Gavetas") : m.rotulo;
         return (
@@ -257,6 +265,7 @@ export default function App() {
               tenant={tenant}
               onChaveNova={(c) => sessao.trocarChave(c)}
               onIrPainel={() => navegar("painel")}
+              onControleMaquinas={setControleMaq}
             />
           )}
         </main>

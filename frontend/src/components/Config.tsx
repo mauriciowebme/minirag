@@ -19,12 +19,14 @@ export function Config({
   tenant,
   onChaveNova,
   onIrPainel,
+  onControleMaquinas,
 }: {
   nome: string;
   operador: boolean;
   tenant: string;
   onChaveNova: (chave: string) => void;
   onIrPainel: () => void;
+  onControleMaquinas?: (v: boolean) => void;
 }) {
   const [aba, setAba] = useState<Aba>("provider");
 
@@ -54,7 +56,7 @@ export function Config({
         </nav>
         <div className="min-w-0 flex-1">
           {aba === "provider" && <Provider operador={operador} tenant={tenant} onIrPainel={onIrPainel} />}
-          {aba === "ferramentas" && <Ferramentas operador={operador} tenant={tenant} />}
+          {aba === "ferramentas" && <Ferramentas operador={operador} tenant={tenant} onControleMaquinas={onControleMaquinas} />}
           {aba === "conta" && <Conta nome={nome} operador={operador} onChaveNova={onChaveNova} />}
           {aba === "limites" && <Limites />}
           {aba === "esquecimento" && <Esquecimento />}
@@ -315,7 +317,7 @@ function Provider({ operador, tenant, onIrPainel }: { operador: boolean; tenant:
 
 /* ---------------------------------------------------------- ferramentas */
 
-function Ferramentas({ operador, tenant }: { operador: boolean; tenant: string }) {
+function Ferramentas({ operador, tenant, onControleMaquinas }: { operador: boolean; tenant: string; onControleMaquinas?: (v: boolean) => void }) {
   const { toast } = useToast();
   const [p, setP] = useState<ProviderResp | null>(null);
   const [servidores, setServidores] = useState<ServidorMcp[]>([]);
@@ -336,10 +338,11 @@ function Ferramentas({ operador, tenant }: { operador: boolean; tenant: string }
       const rMcp = await get<ServidoresResp>("/config/mcp");
       setServidores(rMcp.servidores);
       setControleMaq(rMcp.controle_maquinas !== false);
+      onControleMaquinas?.(rMcp.controle_maquinas !== false);
     } catch (e) {
       toast("servidores MCP: " + (e as Error).message);
     }
-  }, [operador, tenant, toast]);
+  }, [operador, tenant, toast, onControleMaquinas]);
 
   useEffect(() => {
     void carregar();
@@ -350,6 +353,7 @@ function Ferramentas({ operador, tenant }: { operador: boolean; tenant: string }
     try {
       const r = await patch<{ controle_maquinas: boolean }>("/config/mcp/maquinas", { ativo: valor });
       setControleMaq(r.controle_maquinas);
+      onControleMaquinas?.(r.controle_maquinas);
       toast(valor ? "controle das máquinas ligado" : "controle das máquinas desligado — ninguém executa (chat, MCP e REST)");
     } catch (e) {
       toast("controle das máquinas: " + (e as Error).message);
