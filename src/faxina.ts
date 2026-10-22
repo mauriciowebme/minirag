@@ -32,6 +32,8 @@ async function apagarTenant(nome: string): Promise<void> {
     for (const tabela of [
       "chunks", "documents", "arquivos", "gavetas", "ingest_jobs",
       "chat_mensagens", "chat_tarefas",
+      // v3.6: apagar o usuário leva as máquinas dele junto (pareamentos pendentes e rastro)
+      "maquinas", "pareamentos", "comandos_log",
     ]) {
       await c.query(`DELETE FROM ${tabela} WHERE tenant = $1`, [nome]);
     }

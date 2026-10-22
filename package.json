@@ -22,11 +22,13 @@
     "mammoth": "^1.13.0",
     "pdfjs-dist": "^3.11.174",
     "pg": "^8.13.1",
+    "ws": "^8.22.0",
     "yazl": "^3.3.1"
   },
   "devDependencies": {
     "@types/node": "^22.10.5",
     "@types/pg": "^8.11.10",
+    "@types/ws": "^8.18.2",
     "@types/yazl": "^2.4.6",
     "esbuild": "^0.24.2",
     "typescript": "^5.7.3"

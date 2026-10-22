@@ -21,6 +21,7 @@ import { CONFIG } from "./config";
 import { healthAtual } from "./ferramentas";
 import { criarUsuario, listarUsuarios, exigirOperador, removerUsuario } from "./usuarios";
 import { escreverEsquecimento, lerEsquecimento } from "./esquecimento";
+import { alvoMaquina, criarPareamento, listarMaquinas, rodar } from "./maquinas";
 import { responderChat, salvarProvider, testarProvider, verProvider } from "./provider";
 import {
   atualizarFerramentas,
@@ -354,6 +355,44 @@ export const TOOLS: Tool[] = [
       },
     },
   },
+  {
+    name: "gerar_pareamento",
+    description:
+      "Cria um token de pareamento de maquina (uso unico, expira em ~15 min). O cliente da maquina usa esse token uma vez e ganha o token definitivo. Maquina nasce presa ao usuario que gerou.",
+    inputSchema: {
+      type: "object",
+      properties: {
+        nome: { type: "string", description: "apelido da maquina (letras, numeros, - . _)" },
+        tenant: { type: "string", description: "so operador: para quem sera a maquina" },
+      },
+      required: ["nome"],
+    },
+  },
+  {
+    name: "maquinas_online",
+    description: "Lista as maquinas do usuario com estado online (host, so, desde, ativo).",
+    inputSchema: {
+      type: "object",
+      properties: {
+        tenant: { type: "string", description: "so operador: mira outro usuario; sem tenant o operador ve todas" },
+      },
+    },
+  },
+  {
+    name: "rodar_comando",
+    description:
+      "Executa um comando de shell numa maquina DO USUARIO (fora do ar ou de outro dono = erro). Responde {exit, stdout, stderr, ms}. Tudo fica auditado.",
+    inputSchema: {
+      type: "object",
+      properties: {
+        host: { type: "string" },
+        cmd: { type: "string", description: "comando de shell (ate 4000 chars)" },
+        timeout: { type: "integer", description: "segundos aguardando; default 30, max 120" },
+        tenant: { type: "string", description: "so operador: dono da maquina" },
+      },
+      required: ["host", "cmd"],
+    },
+  },
 ];
 
 const ok = (id: unknown, result: unknown) => ({ jsonrpc: "2.0", id, result });
@@ -540,6 +579,21 @@ async function executarTool(
           limit: args.limit === undefined ? undefined : Number(args.limit),
         },
         user,
+      );
+    case "gerar_pareamento":
+      return criarPareamento(user, alvoMaquina(user, args.tenant), String(args.nome ?? ""));
+    case "maquinas_online": {
+      const alvo = user.operador ? String(args.tenant ?? "").trim() || null : user.tenant;
+      return listarMaquinas(alvo);
+    }
+    case "rodar_comando":
+      return rodar(
+        user,
+        alvoMaquina(user, args.tenant),
+        String(args.host ?? ""),
+        String(args.cmd ?? ""),
+        args.timeout === undefined || args.timeout === null ? undefined : Number(args.timeout),
+        "mcp",
       );
     default:
       throw new Error(`tool desconhecida: ${name}`);

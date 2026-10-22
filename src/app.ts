@@ -3,6 +3,15 @@ import fs from "node:fs";
 import path from "node:path";
 import Fastify, { FastifyInstance, FastifyReply, FastifyRequest } from "fastify";
 import { CONFIG, tenantFor } from "./config";
+import {
+  alvoMaquina,
+  apagarMaquina,
+  criarPareamento,
+  listarLog,
+  listarMaquinas,
+  mudarMaquina,
+  rodar,
+} from "./maquinas";
 import { HttpError, iso } from "./errors";
 import { authenticate, ipCliente } from "./auth";
 import { embedderDim, embedderDisponivel } from "./embed";
@@ -472,6 +481,88 @@ export function criarApp(): FastifyInstance {
     // arquivados mortos pela janela). Mesmo escopo do decay.
     const expurgo = await faxina(alvo);
     return { ...res, expurgo };
+  });
+
+  /* ------------------------------------------------------------- maquinas */
+  /* v3.6: o túnel absorvido. REST e MCP batem na MESMA função; máquina nasce
+     presa ao usuário (comum sempre no próprio; operador mira com ?tenant). */
+
+  app.get("/maquinas", async (req) => {
+    const u = usuario(req);
+    const s = req.query as Record<string, string>;
+    const alvo = u.operador ? String(s.tenant ?? "").trim() || null : u.tenant;
+    return listarMaquinas(alvo);
+  });
+
+  app.post("/maquinas", async (req, reply) => {
+    const u = usuario(req);
+    const b = corpo(req);
+    const alvo = alvoMaquina(u, (b.tenant as string) ?? (req.query as Record<string, string>).tenant ?? null);
+    return reply.status(201).send(await criarPareamento(u, alvo, String(b.nome ?? "")));
+  });
+
+  app.patch("/maquinas/:host", async (req) => {
+    const u = usuario(req);
+    const p = req.params as Record<string, string>;
+    const alvo = alvoMaquina(u, (req.query as Record<string, string>).tenant ?? null);
+    return mudarMaquina(u, alvo, decodeURIComponent(p.host), corpo(req));
+  });
+
+  app.delete("/maquinas/:host", async (req) => {
+    const u = usuario(req);
+    const p = req.params as Record<string, string>;
+    const alvo = alvoMaquina(u, (req.query as Record<string, string>).tenant ?? null);
+    return apagarMaquina(alvo, decodeURIComponent(p.host));
+  });
+
+  app.post("/maquinas/:host/run", async (req) => {
+    const u = usuario(req);
+    const p = req.params as Record<string, string>;
+    const b = corpo(req);
+    const alvo = alvoMaquina(u, (b.tenant as string) ?? null);
+    return rodar(
+      u,
+      alvo,
+      decodeURIComponent(p.host),
+      String(b.cmd ?? ""),
+      b.timeout === undefined || b.timeout === null ? undefined : Number(b.timeout),
+      "rest",
+    );
+  });
+
+  app.get("/maquinas/log", async (req) => {
+    const u = usuario(req);
+    const s = req.query as Record<string, string>;
+    const alvo = u.operador ? String(s.tenant ?? "").trim() || null : u.tenant;
+    return listarLog(alvo, s.host ?? null, s.limit === undefined ? 50 : Number(s.limit));
+  });
+
+  /* Cliente da máquina (fase 3): o binário é público — não há segredo dentro
+     dele; o segredo está no token que o usuário cola ao rodar, e a parede do
+     pareamento continua na chave da tela. O auto-update do cliente lê a
+     versão daqui e baixa o exe por estas rotas (sem auth, same motivo). */
+  const BIN_CLI = process.env.MINIRAG_CLIENTE_DIR ?? path.join(process.cwd(), "agente", "bin");
+  app.get("/maquina/atualizacao", async () => ({
+    versao: CONFIG.versao,
+    cliente: {
+      win: fs.existsSync(path.join(BIN_CLI, "minirag-cliente-win.exe")),
+      linux: fs.existsSync(path.join(BIN_CLI, "minirag-cliente-linux")),
+    },
+  }));
+
+  app.get("/maquina/cliente/:plataforma", async (req, reply) => {
+    const p = req.params as Record<string, string>;
+    const nome =
+      p.plataforma === "win" ? "minirag-cliente-win.exe" : p.plataforma === "linux" ? "minirag-cliente-linux" : null;
+    if (!nome) throw new HttpError(404, "plataforma: win | linux");
+    const arq = path.join(BIN_CLI, nome);
+    if (!fs.existsSync(arq)) throw new HttpError(404, "binário ainda não publicado neste servidor");
+    const st = fs.statSync(arq);
+    return reply
+      .header("content-type", "application/octet-stream")
+      .header("content-length", String(st.size)) // stream cru viria chunked; o HEAD do teste e o navegador pedem tamanho
+      .header("content-disposition", `attachment; filename="${nome}"`)
+      .send(fs.createReadStream(arq));
   });
 
   /* ------------------------------------------------------------- painel */

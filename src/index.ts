@@ -14,6 +14,7 @@ import { iniciarFaxinaLoop, pararFaxinaLoop } from "./faxina";
 import { initProvider } from "./provider";
 import { initFerramentas } from "./ferramentas";
 import { initMetricas } from "./dashboard";
+import { anexarHubMaquinas, initMaquinas } from "./maquinas";
 
 let filho: ChildProcess | null = null;
 let encerrando = false;
@@ -78,6 +79,7 @@ async function main(): Promise<void> {
   await initProvider();
   await initFerramentas(); // v2.8: servidores MCP que dão ferramentas ao chat
   await initMetricas();
+  await initMaquinas(); // v3.6: máquinas por usuário (túnel absorvido)
   const esq = await lerEsquecimento();
   log(
     `limites: content<=${CONFIG.maxContentChars} chars, query<=${CONFIG.maxQueryChars} chars, ` +
@@ -104,6 +106,7 @@ async function main(): Promise<void> {
   }, 30_000).unref?.();
 
   const app = criarApp();
+  anexarHubMaquinas(app.server as unknown as import("node:http").Server); // v3.6: /maquina/ws no MESMO servidor/porta
   await app.listen({ port: CONFIG.port, host: CONFIG.host });
   log(`servindo em http://${CONFIG.host}:${CONFIG.port} (v${CONFIG.versao})`);
 
