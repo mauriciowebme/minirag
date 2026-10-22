@@ -96,9 +96,37 @@ export type Vista =
   | "chat"
   | "buscar"
   | "jobs"
+  | "maquinas"
   | "config"
   | "arquivos"
   | "editor";
+
+/* v3.6: máquinas por usuário (túnel absorvido) */
+export type MaquinaLinha = {
+  tenant: string;
+  host: string;
+  nome: string;
+  so: string | null;
+  usuario_win: string | null;
+  ativo: boolean;
+  visto_em: string | null;
+  criado_em: string;
+  online: boolean;
+  desde: string | null;
+};
+export type MaquinasResp = { maquinas: MaquinaLinha[] };
+export type PareamentoResp = { token: string; segundos: number; nome: string; tenant: string; expira_em: string };
+export type MaquinasLogLinha = {
+  tenant: string;
+  host: string;
+  cmd: string;
+  exit: number;
+  stdout: string;
+  stderr: string;
+  ms: number;
+  origem: string;
+  criado_em: string;
+};
 
 export type DashboardResp = {
   versao: string;

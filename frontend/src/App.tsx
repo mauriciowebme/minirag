@@ -9,6 +9,7 @@ import { Jobs } from "./components/Jobs";
 import { Painel } from "./components/Painel";
 import { Chat } from "./components/Chat";
 import { Config } from "./components/Config";
+import { Maquinas } from "./components/Maquinas";
 import { get } from "./services/api";
 import type { HealthResp, Vista } from "./types";
 
@@ -18,6 +19,7 @@ import type { HealthResp, Vista } from "./types";
 const MENU: { id: Vista; rotulo: string; icone: string }[] = [
   { id: "painel", rotulo: "Painel", icone: "▦" },
   { id: "chat", rotulo: "Chat", icone: "💬" },
+  { id: "maquinas", rotulo: "Máquinas", icone: "🖥" },
   { id: "buscar", rotulo: "Buscar", icone: "⌕" },
   { id: "jobs", rotulo: "Fila", icone: "≡" },
   { id: "gavetas", rotulo: "Gavetas", icone: "👤" },
@@ -30,7 +32,7 @@ const DENTRO_DO_CAMINHO = new Set<Vista>(["gavetas", "arquivos", "editor"]);
    Chat, Buscar e Fila. Painel, Usuários/Gavetas e Configurações são do admin.
    A parede de verdade está na API (dashboard/config gravam exigem operador);
    o filtro aqui é a consequência visual, não a segurança. */
-const VISTAS_DO_COMUM: Vista[] = ["chat", "buscar", "jobs"];
+const VISTAS_DO_COMUM: Vista[] = ["chat", "maquinas", "buscar", "jobs"];
 
 const TITULOS: Record<Vista, string> = {
   painel: "Painel",
@@ -40,6 +42,7 @@ const TITULOS: Record<Vista, string> = {
   chat: "Chat",
   buscar: "Buscar",
   jobs: "Fila",
+  maquinas: "Máquinas",
   config: "Configurações",
 };
 
@@ -242,6 +245,7 @@ export default function App() {
 
           {vista === "chat" && <Chat escopo={{ tenant, memoria }} operador={operador} onIrConfig={() => navegar("config")} />}
 
+          {vista === "maquinas" && <Maquinas operador={operador} />}
           {vista === "buscar" && <Buscar escopo={{ tenant, memoria }} operador={operador} onAbrirEditor={(id) => abrirEditor(id)} />}
 
           {vista === "jobs" && <Jobs tenant={tenant} nome={nome} operador={operador} />}
