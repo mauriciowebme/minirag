@@ -393,13 +393,16 @@ test("minirag v2 — suíte completa", async (t) => {
       "list_gavetas",
       "list_jobs",
       "listar_mcp",
-      "listar_usuarios",
+      "gerar_pareamento",
       "gerir_mcp",
+      "listar_usuarios",
+      "maquinas_online",
       "rename_doc",
+      "rodar_comando",
       "search",
       "upload_file",
     ].sort();
-    f.check("tools/list tem 23 tools (paridade com a REST)", JSON.stringify(nomes) === JSON.stringify(ESPERADAS.sort()), nomes.length);
+    f.check("tools/list tem 26 tools (paridade com a REST)", JSON.stringify(nomes) === JSON.stringify(ESPERADAS.sort()), nomes.length);
 
     r = await rpc(5, "tools/call", { name: "health" }, null);
     f.check("tools/call sem Bearer -> 401", r.status === 401 && "error" in (r.json ?? {}), r.texto.slice(0, 150));
@@ -2191,6 +2194,160 @@ test("minirag v2 — suíte completa", async (t) => {
     await call("DELETE", `/gavetas/${encodeURIComponent(GAVX)}`, { key: TESTKEY });
 
     f.fechar("v3.5 esquecimento-faxina");
+  });
+
+  await bloco(t, "v3.6: máquinas por usuário — hub WS, pareamento, run, escopo e MCP", async () => {
+    const f = fiscal();
+    const CONTAINER = process.env.CONTAINER ?? "";
+    const DB = process.env.DBCONTAINER ?? CONTAINER.replace("-api-", "-db-");
+    const psql = (sql: string) =>
+      execFileSync("docker", ["exec", DB, "sh", "-c", `psql -U \"$POSTGRES_USER\" -d \"$POSTGRES_DB\" -tAc \"${sql}\"`], { encoding: "utf8" }).trim();
+    const leArq = (p: string) => {
+      try {
+        return execFileSync("docker", ["exec", CONTAINER, "cat", p], { encoding: "utf8" });
+      } catch {
+        return "";
+      }
+    };
+    /* máquina falsa na receita dos providers falsos: roda DENTRO do container e
+       fala o wire exato do túnel (oi/{token,host,os,user}; cmd/{cmd,rotulo,espera};
+       resposta/{exit,stdout,stderr}) */
+    const FAKE = [
+      'const WebSocket=require("/app/node_modules/ws");const fs=require("fs");',
+      'const url=process.env.FQ_URL||"ws://127.0.0.1:8000/maquina/ws";',
+      'const token=process.env.FQ_TOKEN||"", host=process.env.FQ_HOST||"maq", loop=process.env.FQ_LOOP==="1", arq=process.env.FQ_ARQ;',
+      'let cur=token;', // cliente de verdade adota o token de máquina que recebe no ack e reconecta com ele
+      'function conectar(){const ws=new WebSocket(url);',
+      'ws.on("open",()=>ws.send(JSON.stringify({token:cur,host,os:"fake",user:"suite"})));',
+      'ws.on("message",(b)=>{let m={};try{m=JSON.parse(String(b))}catch{return}',
+      'if(m.ack){fs.writeFileSync(arq,JSON.stringify(m));if(m.token){cur=m.token;fs.writeFileSync(arq+".mk",m.token)}if(m.ack==="negado"&&!loop)ws.close();}',
+      'else if(typeof m.cmd==="string"){',
+      'if(m.cmd==="nunca")return;',
+      'if(m.cmd.indexOf("echo ")===0)setTimeout(()=>{try{ws.send(JSON.stringify({exit:0,stdout:m.cmd.slice(5),stderr:""}))}catch{}},120);',
+      'else ws.send(JSON.stringify({exit:0,stdout:"",stderr:""}))}});',
+      'ws.on("error",()=>{});ws.on("close",()=>{if(loop)setTimeout(conectar,400)});}',
+      'conectar();if(!loop)setTimeout(()=>process.exit(0),25000);',
+    ].join("");
+    execFileSync("docker", ["exec", "-i", CONTAINER, "sh", "-c", "cat > /app/maqfake.js"], { input: FAKE });
+    const subir = (envs: Record<string, string>) =>
+      execFileSync("docker", ["exec", "-d", CONTAINER, "sh", "-c",
+        Object.entries(envs).map(([k, v]) => `${k}='${v}'`).join(" ") + " node /app/maqfake.js"]);
+    const ate = async (cond: () => Promise<boolean> | boolean, tetoMs = 15000) => {
+      const fim = Date.now() + tetoMs;
+      for (;;) {
+        if (await cond()) return true;
+        if (Date.now() > fim) return false;
+        await dormir(400);
+      }
+    };
+
+    let r = await call("POST", "/maquinas", { key: TESTKEY, corpo: { nome: "suite-1" } });
+    const par1 = String(r.json?.token ?? "");
+    f.check("usuário comum cria pareamento (40 chars, expira)", r.status === 201 && par1.length === 40 && Number(r.json?.segundos) >= 60, r.texto.slice(0, 140));
+
+    subir({ FQ_TOKEN: par1, FQ_HOST: "maq-01", FQ_LOOP: "1", FQ_ARQ: "/tmp/a1.json" });
+    const ok1 = await ate(() => leArq("/tmp/a1.json").includes('"ack":"ok"'));
+    const tokenMaq = leArq("/tmp/a1.json.mk").trim();
+    f.check("pareamento ao vivo: ack ok + token de máquina devolvido", ok1 && tokenMaq.length === 40, { ack: leArq("/tmp/a1.json").slice(0, 80), len: tokenMaq.length });
+
+    r = await call("GET", "/maquinas", { key: TESTKEY });
+    const lin = (r.json?.maquinas ?? []).find((m: any) => m.host === "maq-01");
+    f.check("GET /maquinas: máquina DO usuário, online", r.status === 200 && lin?.online === true && lin?.tenant === "teste" && lin?.so === "fake", r.texto.slice(0, 200));
+
+    r = await call("POST", "/maquinas/maq-01/run", { key: TESTKEY, corpo: { cmd: "echo ola-maq" } });
+    f.check("run echo: exit 0 e stdout certo", r.status === 200 && r.json?.exit === 0 && r.json?.stdout === "ola-maq" && r.json?.ms > 0, r.texto.slice(0, 160));
+
+    r = await call("GET", "/maquinas/log?limit=3", { key: TESTKEY });
+    const lg0 = (r.json?.log ?? [])[0] ?? {};
+    f.check("auditoria guarda o comando com origem rest", lg0?.cmd === "echo ola-maq" && lg0?.origem === "rest" && lg0?.host === "maq-01", JSON.stringify(lg0).slice(0, 140));
+
+    const t0 = Date.now();
+    r = await call("POST", "/maquinas/maq-01/run", { key: TESTKEY, corpo: { cmd: "nunca", timeout: 2 } });
+    f.check("máquina muda responde -124 no prazo (espera+8s)", r.json?.exit === -124 && t0 - Date.now() < 30000, { status: r.status, json: r.json?.exit, ms: Date.now() - t0 });
+
+    subir({ FQ_TOKEN: tokenMaq, FQ_HOST: "maq-01b", FQ_ARQ: "/tmp/a1b.json" });
+    await ate(() => leArq("/tmp/a1b.json").includes("negado"));
+    f.check("token de máquina NÃO vale para outro host", leArq("/tmp/a1b.json").includes("desconhecido"), leArq("/tmp/a1b.json").slice(0, 100));
+
+    r = await call("POST", "/maquinas", { key: TESTKEY, corpo: { nome: "suite-2" } });
+    const par2 = String(r.json?.token ?? "");
+    subir({ FQ_TOKEN: par2, FQ_HOST: "maq-02", FQ_ARQ: "/tmp/a2.json" });
+    await ate(() => leArq("/tmp/a2.json").includes("ok"));
+    subir({ FQ_TOKEN: par2, FQ_HOST: "maq-03", FQ_ARQ: "/tmp/a3.json" });
+    await ate(() => leArq("/tmp/a3.json").includes("negado"));
+    f.check("pareamento é de uso único (segundo uso = negado)", /vencido ou ja usados|vencido ou já usado/.test(leArq("/tmp/a3.json")), leArq("/tmp/a3.json").slice(0, 120));
+
+    r = await call("POST", "/maquinas", { key: OPKEY, corpo: { nome: "suite-op" } });
+    subir({ FQ_TOKEN: String(r.json?.token ?? ""), FQ_HOST: "maq-op", FQ_ARQ: "/tmp/aop.json" });
+    await ate(() => leArq("/tmp/aop.json").includes("ok"));
+    r = await call("POST", "/maquinas/maq-op/run", { key: TESTKEY, corpo: { cmd: "echo cruza" } });
+    f.check("comum NÃO alcança máquina de outro dono (404)", r.status === 404, r.texto.slice(0, 120));
+    r = await call("POST", "/maquinas/maq-op/run?tenant=operador", { key: OPKEY, corpo: { cmd: "echo admin-mira" } });
+    f.check("admin alcança máquina alheia com ?tenant", r.status === 200 && r.json?.stdout === "admin-mira", r.texto.slice(0, 140));
+    r = await call("GET", "/maquinas?tenant=operador", { key: TESTKEY });
+    f.check("comum pede ?tenant de outro e só vê as suas", r.status === 200 && (r.json?.maquinas ?? []).every((m: any) => m.tenant === "teste"), r.texto.slice(0, 160));
+
+    r = await call("PATCH", "/maquinas/maq-01", { key: TESTKEY, corpo: { ativo: false } });
+    const sumiu = await ate(async () => {
+      const x = await call("GET", "/maquinas", { key: TESTKEY });
+      return !((x.json?.maquinas ?? []).find((m: any) => m.host === "maq-01"))?.online;
+    }, 12000);
+    r = await call("POST", "/maquinas/maq-01/run", { key: TESTKEY, corpo: { cmd: "echo desligada" } });
+    f.check("desativar derruba o cano e barra novo run", sumiu && r.status === 404, { sumiu, status: r.status });
+    r = await call("PATCH", "/maquinas/maq-01", { key: TESTKEY, corpo: { ativo: true } });
+    const voltou = await ate(async () => {
+      const x = await call("GET", "/maquinas", { key: TESTKEY });
+      return !!((x.json?.maquinas ?? []).find((m: any) => m.host === "maq-01"))?.online;
+    }, 15000);
+    r = await call("POST", "/maquinas/maq-01/run", { key: TESTKEY, corpo: { cmd: "echo reviveu" } });
+    f.check("reativar deixa a máquina religar sozinha e rodar", voltou && r.json?.stdout === "reviveu", { voltou, out: r.json?.stdout });
+
+    r = await call("DELETE", "/maquinas/maq-01", { key: TESTKEY });
+    f.check("DELETE máquina remove linha e cano", r.status === 200 && psql(`SELECT count(*) FROM maquinas WHERE tenant='teste' AND host='maq-01'`) === "0", r.texto.slice(0, 120));
+
+    const mcp = (id: unknown, name: string, args: unknown, key: string) =>
+      call("POST", "/mcp", { key, corpo: { jsonrpc: "2.0", id, method: "tools/call", params: { name, arguments: args } } });
+    r = await mcp(1, "gerar_pareamento", { nome: "suite-mcp" }, TESTKEY);
+    const parMcp = JSON.parse(r.json?.result?.content?.[0]?.text ?? "{}");
+    f.check("MCP gerar_pareamento devolve token", typeof parMcp?.token === "string" && parMcp.token.length === 40, JSON.stringify(parMcp).slice(0, 100));
+    subir({ FQ_TOKEN: parMcp.token, FQ_HOST: "maq-mcp", FQ_LOOP: "1", FQ_ARQ: "/tmp/amcp.json" });
+    await ate(() => leArq("/tmp/amcp.json").includes("ok"));
+    r = await mcp(2, "rodar_comando", { host: "maq-mcp", cmd: "echo via-mcp" }, TESTKEY);
+    const rodMcp = JSON.parse(r.json?.result?.content?.[0]?.text ?? "{}");
+    f.check("MCP rodar_comando executa e audita origem mcp", rodMcp?.stdout === "via-mcp", JSON.stringify(rodMcp).slice(0, 140));
+    r = await call("GET", "/maquinas/log?limit=1", { key: TESTKEY });
+    f.check("log traz a execução vinda do MCP", r.json?.log?.[0]?.origem === "mcp", JSON.stringify(r.json?.log?.[0] ?? {}).slice(0, 120));
+    r = await mcp(3, "maquinas_online", {}, OPKEY);
+    const onlMcp = JSON.parse(r.json?.result?.content?.[0]?.text ?? "{}");
+    f.check("MCP maquinas_online (admin sem tenant) enxerga todas", (onlMcp?.maquinas ?? []).some((m: any) => m.host === "maq-mcp") && (onlMcp?.maquinas ?? []).some((m: any) => m.host === "maq-op"), (onlMcp?.maquinas ?? []).map((m: any) => m.host).join(","));
+
+    /* apagar usuário (carência v3.5) leva máquinas, pareamentos e log junto */
+    r = await call("POST", "/usuarios", { key: OPKEY, corpo: { nome: "suite-m36", papel: "usuario" } });
+    const k36 = String(r.json?.chave ?? "");
+    r = await call("POST", "/maquinas", { key: k36, corpo: { nome: "m36" } });
+    subir({ FQ_TOKEN: String(r.json?.token ?? ""), FQ_HOST: "maq-m36", FQ_ARQ: "/tmp/a36.json" });
+    await ate(() => leArq("/tmp/a36.json").includes("ok"));
+    await call("POST", "/maquinas/maq-m36/run", { key: k36, corpo: { cmd: "echo antes" } });
+    await call("DELETE", "/usuarios/suite-m36", { key: OPKEY });
+    psql(`UPDATE usuarios SET agendado_exclusao_em = now() - interval '1 hour' WHERE nome = 'suite-m36'`);
+    await call("POST", "/decay", { key: OPKEY, corpo: {} });
+    f.check(
+      "expurgo do usuário apaga máquinas + pareamentos + log do tenant",
+      psql(`SELECT (SELECT count(*) FROM maquinas WHERE tenant='suite-m36') || '|' || (SELECT count(*) FROM pareamentos WHERE tenant='suite-m36') || '|' || (SELECT count(*) FROM comandos_log WHERE tenant='suite-m36')`) === "0|0|0",
+      psql(`SELECT count(*) FROM maquinas WHERE tenant='suite-m36'`),
+    );
+
+    /* fase 3: o container serve o cliente e a régua de auto-update */
+    r = await call("GET", "/maquina/atualizacao", { key: TESTKEY });
+    f.check("atualizacao: versão do produto + binários assados na imagem", r.status === 200 && r.json?.versao === (process.env.VERSAO ?? "3.6.0") && r.json?.cliente?.linux === true && r.json?.cliente?.win === true, JSON.stringify(r.json ?? {}).slice(0, 120));
+    const respHead = await fetch(`${process.env.BASE}/maquina/cliente/linux`, { method: "HEAD", signal: AbortSignal.timeout(20000) });
+    const lenCabe = Number(respHead.headers.get("content-length") ?? 0);
+    f.check("download do cliente linux: 200, binário de verdade", respHead.status === 200 && lenCabe > 1_000_000 && (respHead.headers.get("content-disposition") ?? "").includes("attachment"), { status: respHead.status, len: lenCabe });
+    r = await call("GET", "/maquina/cliente/mac", { key: TESTKEY });
+    f.check("plataforma fora de win|linux é 404", r.status === 404, r.texto.slice(0, 100));
+
+    execFileSync("docker", ["exec", CONTAINER, "sh", "-c", "pkill -f maqfake || true"]);
+    f.fechar("v3.6 maquinas");
   });
 
   await bloco(t, "freio de força bruta (último: bloqueia o IP)", async () => {
