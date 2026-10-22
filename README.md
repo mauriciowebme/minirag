@@ -10,6 +10,22 @@ parecidos com a pergunta, com uma nota de 0 a 1.
 
 ---
 
+## v3.7 (22/10) — cliente pronto do painel (chave assada, um arquivo, dois cliques)
+
+- **`GET /maquinas/cliente/win|linux?nome=&tenant=`** (autenticado, mesmo escopo das rotas de
+  máquina): gera o binário do **usuário que baixou** — o exe mestre da imagem ganha um trailer
+  `JSON{v,k} + uint32BE(len) + "MRQK"` com a **chave única** (24 h de validade, uso único).
+- **Ativação**: primeiro `oi` do cliente com a chave embutida cria a máquina (`chaves_cliente` →
+  `usada, host_ativado`), o cliente **adota a chave definitiva** (arquivo de conf ao lado do usuário)
+  e a chave do arquivo queima — cópia levada a outra máquina é recusada e a tentativa fica no log.
+- **Corte no painel**: `DELETE /maquinas/chave/:id` — chave virgem some; chave ativada **apaga a
+  máquina junto** e derruba a conexão na hora. A lista de chaves vem em `GET /maquinas` (`chaves[]`).
+- **A chave de cliente NÃO é credencial de usuário**: jamais abre painel, chat, API ou MCP (401).
+- **Sem autostart no boot** (decisão explícita do dono): conecta quando rodado e se reconecta
+  enquanto aberto. O pareamento com comando continua como porta secundária.
+- **Tela**: botão *⬓ gerar meu cliente Windows* no cartão Binários + carta "Chaves de cliente
+  geradas" com estado (aguardando/ativada) e *cortar*.
+
 ## v3.6 — Máquinas por usuário: o túnel virou recurso do minirag (22/10/2026)
 
 Cada usuário pode ter máquinas suas conectadas (o seu PC, o servidor dele), e o
