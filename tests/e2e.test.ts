@@ -1029,7 +1029,7 @@ test("minirag v2 — suíte completa", async (t) => {
     f.check("dashboard traz saúde do sistema", typeof r.json?.saude?.embedder === "string", r.json?.saude);
 
     r = await call("GET", "/dashboard", { key: TESTKEY });
-    f.check("dashboard (usuário comum) escopo = próprio tenant", r.status === 200 && r.json?.escopo === "teste", r.json?.escopo);
+    f.check("dashboard não é módulo do comum (v3.4: 403)", r.status === 403, r.json?.detail ?? r.status);
 
     r = await call("GET", "/config", { key: TESTKEY });
     f.check("config expõe limites sem segredo", r.status === 200 && r.json?.limites?.max_content_chars > 0, r.json?.limites);
@@ -2027,6 +2027,18 @@ test("minirag v2 — suíte completa", async (t) => {
 
   await bloco(t, "v3.4: módulos do admin — o comum só vê chat, buscar e fila", async () => {
     const f = fiscal();
+    const CONTAINER = process.env.CONTAINER ?? "";
+    const DB = process.env.DBCONTAINER ?? CONTAINER.replace("-api-", "-db-");
+    const psql = (sql: string) =>
+      execFileSync("docker", ["exec", DB, "sh", "-c", `psql -U \"$POSTGRES_USER\" -d \"$POSTGRES_DB\" -tAc \"${sql}\"`], { encoding: "utf8" }).trim();
+    /* v3.4: o nome canônico da variável do admin é MINIRAG_ADMIN (apelido OPERADOR ainda vale).
+       Esta suíte só prova que o boot com o nome NOVO funciona se o container nasceu com ela. */
+    if (CONTAINER) {
+      const nomeSemente = execFileSync("docker", ["exec", CONTAINER, "sh", "-c", "printenv MINIRAG_ADMIN | cut -d: -f1"], { encoding: "utf8" }).trim();
+      f.check("boot semeou o admin pela variável MINIRAG_ADMIN", nomeSemente === "op", { nome: nomeSemente });
+    } else {
+      f.check("boot semeou o admin pela variável MINIRAG_ADMIN", false, "sem CONTAINER no ambiente");
+    }
     /* política do dono (21/10): Painel, Usuários e Configurações são do ADMIN —
        na tela (filtro do menu) E na porta (a parede de verdade é aqui). */
     let r = await call("GET", "/dashboard", { key: TESTKEY });
@@ -2041,9 +2053,12 @@ test("minirag v2 — suíte completa", async (t) => {
     r = await call("GET", "/config/provider", { key: TESTKEY });
     f.check("comum LÊ o próprio provider (o Chat depende disso)", r.status === 200 && typeof r.json?.configurado === "boolean", r.texto.slice(0, 140));
 
-    /* admin configura a linha de um comum mirando o tenant (o caminho que a tela dele usa) */
+    /* admin configura a linha de um comum mirando o tenant (o caminho que a tela dele usa).
+       A RESPOSTA mostra a linha EFETIVA (regra v2.8.1: incompleta não tapa global) — onde a
+       escrita caiu se prova no banco. */
     r = await call("PUT", "/config/provider", { key: OPKEY, corpo: { tenant: "teste", tipo: "litellm", base_url: "http://127.0.0.1:1/v1", modelo: "", ativo: false } });
-    f.check("admin escreve provider de outro usuário (tenant no corpo)", r.status === 200 && r.json?.escopo === "teste", { escopo: r.json?.escopo, status: r.status });
+    const caiu = psql(`SELECT escopo || '|' || base_url FROM provider_config WHERE escopo = 'teste'`);
+    f.check("admin escreve provider NA LINHA do usuário (tenant no corpo)", r.status === 200 && caiu === "teste|http://127.0.0.1:1/v1", { status: r.status, caiu });
 
     /* os três módulos do comum seguem vivos pela porta */
     r = await call("GET", "/jobs?limit=5", { key: TESTKEY });

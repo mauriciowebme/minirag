@@ -34,7 +34,7 @@ declaradas, as duas contra o ambiente de teste:
 
 | Papel | Nome na semente | Pode | Não pode |
 |---|---|---|---|
-| operador | `op` (nome da semente `MINIRAG_OPERADOR`; o bloco v3.1 exercita a renomeação no SQL) | `POST /usuarios`, `PUT /config/provider` global, ver o escopo dos outros, painel | — |
+| operador | `op` (nome da semente `MINIRAG_ADMIN`; o bloco v3.1 exercita a renomeação no SQL) | `POST /usuarios`, `PUT /config/provider` global, ver o escopo dos outros, painel | — |
 | usuário | **`teste`** (semente `MINIRAG_USERS`) | `POST /chat`, `/gavetas`, documentos do **próprio** escopo, `PUT /config/provider` na própria linha | gerir usuário, mexer na linha global |
 | sem chave | — | `/health`, `/painel/` (HTML) | tudo o resto → **401**; papel errado → **403** |
 
@@ -99,6 +99,7 @@ que o segredo some da tela, não que a escrita é idempotente.
 
 ## 9. Estado da suíte hoje
 
-14 blocos nomeados, **290 checagens**, exit 0 na última rodada completa (21/10/2026, v3.4.0):
+14 blocos nomeados, **288 checagens** (contadas na saída real da rodada de 21/10/2026, v3.4.0;
+o valor 291 anunciado antes vinha de memória, não da régua — corrigido), exit 0:
 v1.8 33 · MCP 27 · v1.10 24 · arquivos 20 · imagem/OCR 10 · v2.7 33 · v2.8 39 · v2.9 29 ·
-v3.0 31 · v3.1 3 · v3.2 9 · v3.3 20 · v3.4 10 · rate-limit 2.
+v3.0 31 · v3.1 3 · v3.2 9 · v3.3 17 · v3.4 11 · rate-limit 2.
