@@ -1,7 +1,7 @@
 import { useCallback, useEffect, useState } from "react";
-import { del, get, patch, post } from "../services/api";
+import { baixar, del, get, patch, post } from "../services/api";
 import { useToast } from "./Toast";
-import type { MaquinaLinha, MaquinasLogLinha, MaquinasResp, PareamentoResp } from "../types";
+import type { ChaveClienteLinha, MaquinaLinha, MaquinasLogLinha, MaquinasResp, PareamentoResp } from "../types";
 
 /* v3.6: máquinas do usuário (o túnel absorvido). Cada login comum vê e gerencia
    as SUAS; o admin vê todas e pode apontar o pareamento para um tenant com ?tenant.
@@ -23,11 +23,43 @@ export function Maquinas({ operador }: { operador: boolean }) {
   const [nomeNovo, setNomeNovo] = useState(`maq-${new Date().toTimeString().slice(0, 5).replace(":", "")}`);
   const [tenantNovo, setTenantNovo] = useState("");
   const [criando, setCriando] = useState(false);
+  const [chaves, setChaves] = useState<ChaveClienteLinha[]>([]);
+  const [gerandoCli, setGerandoCli] = useState(false);
   const [pareamento, setPareamento] = useState<PareamentoResp | null>(null);
+
+  async function gerarCliente(plat: "win" | "linux") {
+    setGerandoCli(true);
+    const params = new URLSearchParams();
+    if (operador && tenantNovo.trim()) params.set("tenant", tenantNovo.trim());
+    if (nomeNovo.trim()) params.set("nome", nomeNovo.trim());
+    try {
+      await baixar(`/maquinas/cliente/${plat}?${params.toString()}`, plat === "win" ? "minirag-cliente-win.exe" : "minirag-cliente-linux");
+      toast("cliente gerado — o arquivo que baixou já é do teu usuário");
+      carregar();
+    } catch (e) {
+      toast("gerar cliente: " + (e as Error).message);
+    } finally {
+      setGerandoCli(false);
+    }
+  }
+
+  async function cortarChave(c: ChaveClienteLinha) {
+    if (!window.confirm(`cortar a chave ${c.id}${c.usada ? ` — isso APAGA a máquina ${c.host_ativado} junto` : " (ainda não ativada)"}?`)) return;
+    try {
+      await del(`/maquinas/chave/${c.id}`);
+      toast("chave cortada");
+      carregar();
+    } catch (e) {
+      toast("cortar chave: " + (e as Error).message);
+    }
+  }
 
   const carregar = useCallback(() => {
     void get<MaquinasResp>("/maquinas")
-      .then((r) => setMaquinas(r.maquinas))
+      .then((r) => {
+        setMaquinas(r.maquinas);
+        setChaves(r.chaves ?? []);
+      })
       .catch((e) => toast("máquinas: " + (e as Error).message));
     void get<{ log: MaquinasLogLinha[] }>("/maquinas/log?limit=30")
       .then((r) => setLog(r.log))
@@ -125,7 +157,7 @@ export function Maquinas({ operador }: { operador: boolean }) {
             </button>
           </div>
           <div className="mt-2 flex items-center justify-between text-[11px] text-txt3">
-            <span>depois de colar, a máquina aparece na lista abaixo em segundos e religa sozinha para sempre</span>
+            <span>depois de colar, a máquina aparece na lista em segundos; se a rede cair, ela se reconecta sozinha</span>
             <button className="btn self-start" onClick={() => setPareamento(null)}>
               fechei
             </button>
@@ -136,12 +168,20 @@ export function Maquinas({ operador }: { operador: boolean }) {
       <div className="cartao">
         <h3 className="mb-1 text-[13px] font-semibold text-txt2">Binários do cliente</h3>
         <p className="dica mt-0 mb-2">
-          rode na máquina que você quer controlar, com o comando gerado no cartão abaixo. Clientes desta versão se
-          auto-atualizam: quando sair versão nova, a máquina baixa e religa sozinha.
+          cada clique gera um cliente com a chave do teu usuário assada dentro: um arquivo só, dois cliques na
+          máquina e pronto — conecta, e se a rede cair se reconecta sozinho. Clientes desta versão se auto-atualizam.
         </p>
-        <div className="flex flex-wrap gap-2">
+        <div className="flex flex-wrap items-center gap-2">
+          <button
+            id="btnGerarClienteWin"
+            className="btn btn-primario"
+            disabled={gerandoCli}
+            onClick={() => void gerarCliente("win")}
+          >
+            {gerandoCli ? "gerando…" : "⬓ gerar meu cliente Windows"}
+          </button>
           <a id="binarioClienteWin" className="btn" href="/maquina/cliente/win" download>
-            ⬓ Windows (.exe)
+            cliente genérico (usa comando)
           </a>
           <a id="binarioClienteLinux" className="btn" href="/maquina/cliente/linux" download>
             ⬓ Linux
@@ -242,6 +282,40 @@ export function Maquinas({ operador }: { operador: boolean }) {
           ))}
         </tbody>
       </table>
+
+      {chaves.length > 0 && (
+        <div className="cartao" id="chavesClienteCard">
+          <h3 className="mb-2 text-[13px] font-semibold text-txt2">
+            Chaves de cliente geradas <span className="sub2">— cada arquivo baixado tem uma; cortar aqui apaga o acesso na hora</span>
+          </h3>
+          <table className="tabela" id="chavesTabela">
+            <thead>
+              <tr>
+                <th>nome</th>
+                {operador && <th>donos</th>}
+                <th>estado</th>
+                <th className="num">expira</th>
+                <th className="acoes">ações</th>
+              </tr>
+            </thead>
+            <tbody>
+              {chaves.map((c) => (
+                <tr key={c.id}>
+                  <td>{c.nome || <span className="sub2">(sem nome)</span>}</td>
+                  {operador && <td>{c.tenant}</td>}
+                  <td>{c.usada ? <span className="text-verde">ativada em {c.host_ativado}</span> : <span className="sub2">aguardando o primeiro clique</span>}</td>
+                  <td className="num">{new Date(c.expira_em).toLocaleTimeString("pt-BR", { hour: "2-digit", minute: "2-digit" })}</td>
+                  <td className="acoes">
+                    <button className="btn btn-perigo" onClick={() => void cortarChave(c)}>
+                      cortar
+                    </button>
+                  </td>
+                </tr>
+              ))}
+            </tbody>
+          </table>
+        </div>
+      )}
 
       <div className="cartao" id="maqLogCard">
         <h3 className="mb-2 text-[13px] font-semibold text-txt2">

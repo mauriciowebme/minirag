@@ -114,7 +114,16 @@ export type MaquinaLinha = {
   online: boolean;
   desde: string | null;
 };
-export type MaquinasResp = { maquinas: MaquinaLinha[] };
+export type ChaveClienteLinha = {
+  id: string;
+  tenant: string;
+  nome: string;
+  usada: boolean;
+  host_ativado: string | null;
+  criado_em: string;
+  expira_em: string;
+};
+export type MaquinasResp = { maquinas: MaquinaLinha[]; chaves?: ChaveClienteLinha[] };
 export type PareamentoResp = { token: string; segundos: number; nome: string; tenant: string; expira_em: string };
 export type MaquinasLogLinha = {
   tenant: string;
