@@ -122,6 +122,26 @@ export function Maquinas({ operador }: { operador: boolean }) {
       )}
 
       <div className="cartao">
+        <h3 className="mb-1 text-[13px] font-semibold text-txt2">Binários do cliente</h3>
+        <p className="dica mt-0 mb-2">
+          rode na máquina que você quer controlar, com um token gerado abaixo. Clientes desta versão se
+          auto-atualizam: quando sair versão nova, a máquina baixa e religa sozinha.
+        </p>
+        <div className="flex flex-wrap gap-2">
+          <a id="binarioClienteWin" className="btn" href="/maquina/cliente/win" download>
+            ⬓ Windows (.exe)
+          </a>
+          <a id="binarioClienteLinux" className="btn" href="/maquina/cliente/linux" download>
+            ⬓ Linux
+          </a>
+        </div>
+        <p className="dica mt-2 mb-0">
+          primeiro acesso no Windows: o SmartScreen avisa (binário sem assinatura) — escolha Manter/mais
+          informações e rode mesmo, é o seu próprio programa.
+        </p>
+      </div>
+
+      <div className="cartao">
         <h3 className="mb-2 text-[13px] font-semibold text-txt2">Adicionar máquina</h3>
         <div className="flex flex-wrap items-center gap-2">
           <input
