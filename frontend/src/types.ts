@@ -273,7 +273,7 @@ export type ServidorMcp = {
   erro: string | null;
   atualizado_em: string;
 };
-export type ServidoresResp = { servidores: ServidorMcp[] };
+export type ServidoresResp = { servidores: ServidorMcp[]; controle_maquinas?: boolean };
 export type TesteMcpResp = {
   nome: string;
   url: string;

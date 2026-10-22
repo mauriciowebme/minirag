@@ -322,6 +322,8 @@ function Ferramentas({ operador, tenant }: { operador: boolean; tenant: string }
   const [novo, setNovo] = useState({ nome: "", url: "", cabecalho: "" });
   const [mostrarNovo, setMostrarNovo] = useState(false);
   const [rodando, setRodando] = useState<string | null>(null);
+  const [controleMaq, setControleMaq] = useState(true);
+  const [rodandoMaq, setRodandoMaq] = useState(false);
   const [resultado, setResultado] = useState<TesteMcpResp | null>(null);
 
   const carregar = useCallback(async () => {
@@ -331,7 +333,9 @@ function Ferramentas({ operador, tenant }: { operador: boolean; tenant: string }
       setP(null);
     }
     try {
-      setServidores((await get<ServidoresResp>("/config/mcp")).servidores);
+      const rMcp = await get<ServidoresResp>("/config/mcp");
+      setServidores(rMcp.servidores);
+      setControleMaq(rMcp.controle_maquinas !== false);
     } catch (e) {
       toast("servidores MCP: " + (e as Error).message);
     }
@@ -340,6 +344,19 @@ function Ferramentas({ operador, tenant }: { operador: boolean; tenant: string }
   useEffect(() => {
     void carregar();
   }, [carregar]);
+
+  async function ligarMaquinasControle(valor: boolean) {
+    setRodandoMaq(true);
+    try {
+      const r = await patch<{ controle_maquinas: boolean }>("/config/mcp/maquinas", { ativo: valor });
+      setControleMaq(r.controle_maquinas);
+      toast(valor ? "controle das máquinas ligado" : "controle das máquinas desligado — ninguém executa (chat, MCP e REST)");
+    } catch (e) {
+      toast("controle das máquinas: " + (e as Error).message);
+    } finally {
+      setRodandoMaq(false);
+    }
+  }
 
   /** o botão fica na config do provider — grava só este campo, preservando o resto */
   async function ligarInterno(valor: boolean) {
@@ -441,6 +458,31 @@ function Ferramentas({ operador, tenant }: { operador: boolean; tenant: string }
           dar as ferramentas do minirag ao chat
         </label>
         {p?.mcp_interno && <p className="dica mt-2 mb-0" id="mcpInternoAviso">Sem nenhuma ferramenta ligada, o modelo só conversa com o que sabe.</p>}
+      </div>
+
+      <div className="cartao">
+        <h2 className="mb-1 text-[13px] font-semibold text-txt2">Controle das máquinas</h2>
+        <p className="dica mt-0 mb-3">
+          ligado, o chat e as ferramentas MCP podem executar comandos nas máquinas cadastradas (aba Máquinas). Desligado,{' '}
+          <b>ninguém executa</b>: chat, servidores MCP externos e a rota REST são barrados — as máquinas continuam online,
+          a listagem e o histórico de execuções ficam preservados. {operador ? "" : "Só o operador liga e desliga."}
+        </p>
+        <label className="check">
+          <input
+            id="mcpControleMaquinas"
+            type="checkbox"
+            checked={controleMaq}
+            disabled={!operador || rodandoMaq}
+            onChange={(e) => void ligarMaquinasControle(e.target.checked)}
+          />
+          deixar as máquinas executarem comandos
+        </label>
+        {!controleMaq && (
+          <p className="dica mt-2 mb-0" id="mcpControleMaquinasAviso">
+            Controle desligado: a ferramenta de executar some do chat e da lista MCP, e o servidor recusa qualquer ordem —
+            para voltar, marque de novo.
+          </p>
+        )}
       </div>
 
       <div className="cartao">
