@@ -23,8 +23,10 @@ parecidos com a pergunta, com uma nota de 0 a 1.
 - **A chave de cliente NÃO é credencial de usuário**: jamais abre painel, chat, API ou MCP (401).
 - **Sem autostart no boot** (decisão explícita do dono): conecta quando rodado e se reconecta
   enquanto aberto. O pareamento com comando continua como porta secundária.
-- **Tela**: botão *⬓ gerar meu cliente Windows* no cartão Binários + carta "Chaves de cliente
-  geradas" com estado (aguardando/ativada) e *cortar*.
+- **Tela**: botão *⬓ gerar meu cliente* (Windows e Linux) no cartão Binários + carta "Chaves de
+  cliente geradas" com estado (aguardando/ativada) e *cortar*. A carta "Conectar máquina nova"
+  (comando com token) **saiu da tela por ordem do dono** — o cliente gerado é a única porta dele;
+  o endpoint de pareamento continua no servidor para o MCP, discreto. (3.7.1)
 
 ## v3.6 — Máquinas por usuário: o túnel virou recurso do minirag (22/10/2026)
 
