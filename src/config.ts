@@ -85,7 +85,11 @@ export function parseUsers(raw: string): Array<[string, string]> {
 }
 
 export const USERS = parseUsers(process.env.MINIRAG_USERS ?? "");
-export const OPERADOR = parseUsers(process.env.MINIRAG_OPERADOR ?? "");
+/* v3.4 (21/10): o nome canônico é MINIRAG_ADMIN. MINIRAG_OPERADOR continua valendo como
+ * apelido antigo — ambiente que ainda não trocou a variável segue bootando igual.
+ * Com as duas presentes, ADMIN vence. */
+const ENV_ADMIN = process.env.MINIRAG_ADMIN || process.env.MINIRAG_OPERADOR || "";
+export const OPERADOR = parseUsers(ENV_ADMIN);
 
 export function isOperador(u: Usuario): boolean {
   return Boolean(u.operador);

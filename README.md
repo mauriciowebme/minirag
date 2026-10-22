@@ -92,7 +92,7 @@ parecidos com a pergunta, com uma nota de 0 a 1.
 ### v3.2.3 — cadastro de usuário: só o admin vem do ambiente, o resto nasce na tela
 
 - **Política decidida pelo dono (21/10)**: a única conta criada por variável de ambiente é a
-  do **admin** (`MINIRAG_OPERADOR`). Usuário comum é cadastrado **dentro da plataforma**, na
+  do **admin** (`MINIRAG_ADMIN`). Usuário comum é cadastrado **dentro da plataforma**, na
   tela **Usuários**, pelo admin — `POST /usuarios` já existia desde a v2.7; aqui muda o uso,
   não o código. Auto-cadastro (pessoa se inscreve sozinha) foi avaliado e **não** é objetivo:
   cada usuário é um tenant isolado com chave própria.
@@ -292,7 +292,7 @@ não são itens de menu — são passos do caminho `usuários → gavetas → ar
   mede a latência e falha com mensagem legível. Cada usuário tem a sua configuração;
   o operador pode gravar o padrão de todos (`global: true`, escopo `*`).
 - **Usuários no banco (`/usuarios`)**: tabela `usuarios` (nome, `chave_hash`
-  sha256, `chave_hint`, `papel`, `ativo`). `MINIRAG_USERS`/`MINIRAG_OPERADOR`
+  sha256, `chave_hint`, `papel`, `ativo`). `MINIRAG_USERS`/`MINIRAG_ADMIN`
   passam a ser **semente** do boot (entram uma vez, sem sobrescrever). Criar pela
   tela devolve a chave **uma única vez**; desativar vale na hora; o último operador
   ativo não pode ser rebaixado/desativado; usuário com documentos não pode ser
@@ -391,13 +391,13 @@ pela tool MCP `criar_usuario`); a chave é gravada como **sha256** + os 4 últim
 caracteres para exibição. Sem uma chave válida de usuário **ativo** no cabeçalho
 `Authorization`, nenhum pedido é atendido (401).
 
-As variáveis `MINIRAG_USERS` / `MINIRAG_OPERADOR` continuam existindo como
+As variáveis `MINIRAG_USERS` / `MINIRAG_ADMIN` (o apelido antigo `MINIRAG_OPERADOR` ainda é aceito) continuam existindo como
 **semente**: no boot cada `nome:chave` é inserido **se ainda não existir** — não
 sobrescreve quem já está no banco (nem reativa quem foi desativado pela tela).
 
 ```
 MINIRAG_USERS=sistema:abc123
-MINIRAG_OPERADOR=admin:def456
+MINIRAG_ADMIN=admin:def456
 ```
 
 - `sistema` — o backend do sistema (uma chave só, atende todas as empresas)
@@ -722,7 +722,7 @@ ou fica inteiro. A busca com `include_archived` revive o **documento inteiro**.
 (segurança); chave operador roda global. O loop de fundo segue global.
 
 ### Chave operador (nível novo, opcional)
-`MINIRAG_OPERADOR="nome:chave"` (formato idêntico ao `MINIRAG_USERS`).
+`MINIRAG_ADMIN="nome:chave"` (formato idêntico ao `MINIRAG_USERS`).
 A mesma rota, alcance decidido pela credencial:
 
 | endpoint | login comum | operador |
@@ -1119,7 +1119,7 @@ O minirag roda em qualquer ambiente com Docker. Segue um exemplo prático
 | `MINIRAG_DECAY_MIN_ACESSOS` | `2` | usado N+ vezes nunca é arquivado |
 | `MINIRAG_DECAY_INTERVALO_MINUTOS` | `60` | de quanto em quanto o loop roda |
 | `MINIRAG_CORS_ORIGINS` | `""` | origens de navegador que podem chamar; em uso servidor-para-servidor pode ficar vazio |
-| `MINIRAG_OPERADOR` | `""` | login com escopo total (`nome:chave`), vê todas as gavetas |
+| `MINIRAG_ADMIN` | `""` | login do admin, escopo total (`nome:chave`), vê todas as gavetas. Desde a v3.4; o nome antigo `MINIRAG_OPERADOR` ainda vale como apelido |
 | `MINIRAG_LOGIN_MAX_FALHAS` | `10` | falhas de chave por IP antes de bloquear (429) |
 | `MINIRAG_LOGIN_JANELA_SEG` | `300` | janela (segundos) do freio de força bruta |
 

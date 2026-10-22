@@ -33,7 +33,7 @@ USUARIO_KEY="$(gerar_key)"   # nome OBRIGATORIAMENTE "teste": a suíte.assert no
 #                                      compara tenant === "teste" (trocar o nome quebra 10 checagens)
 OPERADOR_KEY="$(gerar_key)"  # papel operador: gestão de usuários/config
 MINIRAG_USERS="teste:$USUARIO_KEY" \
-MINIRAG_OPERADOR="op:$OPERADOR_KEY" \
+MINIRAG_ADMIN="op:$OPERADOR_KEY" \
 MINIRAG_TEST_BIND="$BIND" MINIRAG_TEST_PORT="$PORTA" \
 $COMPOSE -p "$PROJ" -f docker-compose.test.yml up -d
 

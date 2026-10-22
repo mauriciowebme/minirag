@@ -1,6 +1,6 @@
 /** Usuários no BANCO (v2.7): criar/desativar pela tela, chave gerada e mostrada 1x.
  *
- *  O env (MINIRAG_USERS / MINIRAG_OPERADOR) continua valendo como SEMENTE: no boot
+ *  O env (MINIRAG_USERS / MINIRAG_ADMIN; apelido antigo OPERADOR ainda vale) continua valendo como SEMENTE: no boot
  *  cada entrada é inserida se ainda não existir. Depois disso o banco é a verdade —
  *  desativar pela tela vale até para quem veio do env.
  *
