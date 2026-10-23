@@ -22,6 +22,11 @@ parecidos com a pergunta, com uma nota de 0 a 1.
 
 ---
 
+## v3.12.2 (23/10) — a janela acompanha o programa ao vivo e não fica presa
+
+- **A janela se atualiza sozinha**: quando o programa conectava, a janela continuava escrita "desconectado" até alguém recarregar — ela só entendia avisos que traziam tudo de uma vez e ignorava os avisos de "conectou", "baixando atualização" e "comando recebido". Agora ela acompanha os três ao vivo (provado num navegador de verdade: abre em "desconectado" e vira "ONLINE" sem recarregar).
+- **Fim da espera eterna**: se o pedido de conexão ficar pendurado (acontece no reinício do servidor durante uma publicação), o programa desiste em 15 segundos e tenta de novo, em vez de ficar parado para sempre como ficou hoje.
+
 ## v3.12.1 (23/10) — a janela do cliente voltou a mostrar dados
 
 - **Causa raiz**: o script da página da janela tinha um `;` faltando e uma `}` não fechada, então o navegador **não executava nada**: a janela ficava em "carregando…" para sempre, sem pedir os dados ao programa e sem abrir conexão com o painel local. Corrigido e validado (o script compila e todos os elementos que ele usa existem na página).
