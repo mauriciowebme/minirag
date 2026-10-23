@@ -2594,6 +2594,95 @@ await bloco(t, "v3.6: máquinas por usuário — hub WS, pareamento, run, escopo
     f.fechar("v3.9 painel");
   });
 
+  await bloco(t, "v3.13.1: o cliente atravessa o deploy (soquete pendurado, zumbi na porta)", async () => {
+    const f = fiscal();
+    const CONTAINER = process.env.CONTAINER ?? "";
+    const execD = (sh: string) => execFileSync("docker", ["exec", CONTAINER, "sh", "-c", sh], { encoding: "utf8" });
+    const instalar = (arq: string, conteúdo: string | Buffer) =>
+      execFileSync("docker", ["exec", "-i", CONTAINER, "sh", "-c", `cat > ${arq}`], { input: conteúdo });
+    const ate = async (cond: () => Promise<boolean>, tetoMs = 20000) => {
+      const fim = Date.now() + tetoMs;
+      for (;;) {
+        if (await cond()) return true;
+        if (Date.now() > fim) return false;
+        await dormir(500);
+      }
+    };
+    const online = async (host: string) => {
+      const x = await call("GET", "/maquinas", { key: TESTKEY });
+      return (x.json?.maquinas ?? []).find((y: any) => y.host === host)?.online === true;
+    };
+    const leLog = () => {
+      try {
+        return execD("cat /tmp/minirag-cliente.log 2>/dev/null");
+      } catch {
+        return "";
+      }
+    };
+    /* Conta/mata pelo ARGUMENTO do node (argv[1]), não por texto solto: o wrapper
+       sh -c da gente contém os caminhos todos e mataria a si mesmo. */
+    instalar("/tmp/procura3131.js",
+      'const fs=require("fs"),alvo=process.argv[2];let n=0;for(const d of fs.readdirSync("/proc")){if(!/^[0-9]+$/.test(d))continue;try{const c=fs.readFileSync("/proc/"+d+"/cmdline","utf8").split(String.fromCharCode(0));if(c[1]===alvo){n++;if(process.argv[3]==="mata")process.kill(Number(d),"SIGKILL")}}catch{}}console.log(n);');
+    const vivos = () => execD("node /tmp/procura3131.js /tmp/maq3131.js").trim();
+    const matarCli = () => execD("node /tmp/procura3131.js /tmp/maq3131.js mata").trim();
+
+    /* O hub que engole: abre o TCP e nunca conclui o handshake — o retrato exato do
+       proxy na frente do minirag enquanto o container reinicia (foi o que matou o
+       cliente do dono em 23/10). Modo lido de arquivo: "engole" ou "liga" (encaminha
+       para o hub de verdade). Motor: o Node 22 do container, o mesmo assado no .exe. */
+    instalar("/tmp/hubmodo3131.js",
+      'const net=require("node:net"),fs=require("node:fs");const M="/tmp/hubmodo3131.modo";' +
+      'const modo=()=>{try{return fs.readFileSync(M,"utf8").trim()}catch{return "engole"}};' +
+      'net.createServer((cli)=>{if(modo()!=="liga"){cli.on("error",()=>{});return}' +
+      'const up=net.connect(8000,"127.0.0.1");cli.pipe(up);up.pipe(cli);' +
+      'cli.on("error",()=>up.destroy());up.on("error",()=>cli.destroy());' +
+      '}).listen(8123,"127.0.0.1",()=>console.log("hub-modo pronto"));');
+    instalar("/tmp/maq3131.js", readFileSync(join(process.cwd(), "agente", "cliente.js")));
+
+    const rPar = await call("POST", "/maquinas", { key: TESTKEY, corpo: { nome: "s3131" } });
+    const token3131 = String(rPar.json?.token ?? "");
+    f.check("v3.13.1 pareamento criado para a máquina do teste", rPar.status === 201 && token3131.length === 40, rPar.status);
+
+    execD("node /tmp/procura3131.js /tmp/hubmodo3131.js mata >/dev/null 2>&1; node /tmp/procura3131.js /tmp/maq3131.js mata >/dev/null 2>&1");
+    execD("rm -f /tmp/minirag-cliente.log /tmp/c3131.json /tmp/c3131b.json /tmp/hubmodo3131.modo");
+    execD("nohup node /tmp/hubmodo3131.js >/tmp/hubmodo3131.out 2>&1 & sleep 1; echo ok");
+
+    /* 1) handshake pendurado: o laço TEM que continuar remarcando (na 3.13.0 morria na 1ª) */
+    execD(`nohup node /tmp/maq3131.js --url http://127.0.0.1:8123 --conf /tmp/c3131.json --token ${token3131} --host maq3131 --sem-janela >/tmp/c3131.out 2>&1 & sleep 1; echo ok`);
+    await dormir(45000);
+    const l1 = leLog();
+    const tentativas = (l1.match(/conectando em/g) || []).length;
+    f.check("v3.13.1 soquete pendurado: o relógio dos 15 s larga o soquete e o laço remarca (≥2 em 45 s)", tentativas >= 2 && l1.includes("reconecto em"), `tentativas=${tentativas}`);
+    f.check("v3.13.1 o processo continua vivo tentando (não virou zumbi calado)", vivos() === "1", "vivos=" + vivos());
+    f.check("v3.13.1 com o hub engolindo, a máquina não aparece online", !(await online("maq3131")), String(await online("maq3131")));
+
+    /* 2) zumbi na porta: o segundo clique no exe novo assume em vez de se matar */
+    execD(`nohup node /tmp/maq3131.js --url http://127.0.0.1:8123 --conf /tmp/c3131.json --token ${token3131} --host maq3131 --sem-janela >/tmp/c3131b.out 2>&1 & sleep 8; echo ok`);
+    const assumiu = await ate(async () => leLog().includes("peço que ele saia e eu assumo"), 25000);
+    const umSo = await ate(async () => vivos() === "1", 15000);
+    f.check("v3.13.1 o instance novo vê o vizinho vivo-sem-conexão e assume a porta", assumiu, leLog().split("\n").slice(-2).join(" | ").slice(0, 200));
+    f.check("v3.13.1 sobra UM cliente na máquina (o velho atendeu ao pedido de saída)", umSo === true, "vivos=" + vivos());
+
+    /* 3) volta ao mundo real: o hub bom responde e o laço — que nunca parou — reconecta sozinho */
+    execD("echo liga > /tmp/hubmodo3131.modo");
+    const voltou = await ate(() => online("maq3131"), 90000);
+    f.check("v3.13.1 quando o hub volta, o cliente reconecta SOZINHO e fica online", voltou === true, "online=" + String(await online("maq3131")));
+
+    const rRun = await call("POST", "/maquinas/maq3131/run", { key: TESTKEY, corpo: { cmd: "echo atravessou" } });
+    f.check("v3.13.1 o túnel volta a executar depois do tranco", rRun.status === 200 && String(rRun.json?.stdout ?? "").includes("atravessou"), rRun.texto.slice(0, 120));
+
+    /* 4) o servidor diz POR QUE a máquina caiu (antes, fechamento era mudo no log) */
+    matarCli();
+    await ate(async () => !(await online("maq3131")), 30000);
+    const logServidor = execFileSync("sh", ["-c", `docker logs ${CONTAINER} 2>&1 | grep -oE "OFFLINE [^ ]*maq3131 \\(código [^)]*\\)" | tail -1`], { encoding: "utf8" }).trim();
+    f.check("v3.13.1 o log do servidor traz código e duração da conexão", /código \d+, vivo \d+s/.test(logServidor), logServidor || "(sem linha OFFLINE maq3131 no log)");
+
+    execD("node /tmp/procura3131.js /tmp/hubmodo3131.js mata >/dev/null 2>&1; node /tmp/procura3131.js /tmp/maq3131.js mata >/dev/null 2>&1");
+    execD("rm -f /tmp/c3131.json /tmp/c3131b.json /tmp/maq3131.js /tmp/hubmodo3131.js /tmp/hubmodo3131.modo /tmp/procura3131.js /tmp/minirag-cliente.log");
+    await call("DELETE", `/maquinas/chave/${String(rPar.json?.id ?? "nao")}`, { key: TESTKEY });
+    f.fechar("v3.13.1 cliente atravessa o deploy");
+  });
+
   await bloco(t, "v3.8: vocabulário do túnel no MCP + falas que ficam na tela", async () => {
     const f = fiscal();
     const CONTAINER = process.env.CONTAINER ?? "";
