@@ -16,6 +16,8 @@ export type EventoTransporte =
    *  como BASE e descarta o delta cujo efeito não passa dela (duplicata da corrida R2). */
   | { tipo: "parcial"; texto: string }
   | { tipo: "descartar" }
+  /** v3.8: fala de caminho da rodada — mostra e FICA (pedido do dono) */
+  | { tipo: "fala"; texto: string }
   | { tipo: "ferramenta"; servidor: string; nome: string; ok: boolean; ms: number }
   | { tipo: "fim"; dados: Record<string, unknown> }
   | { tipo: "erro"; detalhe: string };
@@ -40,6 +42,8 @@ export type Linha = {
   falha?: boolean;
   /** escrevendo em pedaços agora */
   escrevendo?: boolean;
+  /** fala de caminho (rascunho da rodada virou balão fixo) */
+  fala?: boolean;
   aviso?: string | null;
   compacto?: string;
 };
@@ -170,6 +174,7 @@ export async function reativar(
 
   let bruto = tarefa.parcial;
   let base = bruto.length; // tamanho da última fotografia confirmada pelo servidor (R2)
+  let falou = false;
   let erro = "";
   const caixa: { dados: Record<string, unknown> | null } = { dados: null };
   try {
@@ -187,6 +192,16 @@ export async function reativar(
           bruto += pedaco;
           bolha.texto = bruto;
         } // abaixo da base: o delta já está contido na fotografia — descarta (R2)
+      } else if (e.tipo === "fala") {
+        const txt = String(e.texto ?? "");
+        if (txt) {
+          falou = true;
+          const idx = c.msgs.findIndex((m) => m.id === vivoId);
+          c.msgs.splice(idx < 0 ? c.msgs.length : idx, 0, {
+            id: proximoId(), papel: "assistant", texto: txt, ferramentas: [], fala: true,
+          });
+          bruto = ""; base = 0; bolha.texto = "";
+        }
       } else if (e.tipo === "ferramenta") {
         bolha.ferramentas.push({ servidor: String(e.servidor), nome: String(e.nome), ok: Boolean(e.ok), ms: Number(e.ms), args: {}, resumo: "" });
       } else if (e.tipo === "fim") {
@@ -200,6 +215,16 @@ export async function reativar(
     if (bolha) {
       const r = caixa.dados ?? saida ?? { resposta: bruto };
       bolha.texto = erro ? "não consegui responder: " + erro : String(r.resposta ?? bruto);
+      /* servidor sem stream (ou reanexar de tarefa): as falas vêm no remanescente do `fim` */
+      const fl = Array.isArray(r.falas) ? (r.falas as string[]) : [];
+      if (fl.length && !falou) {
+        const idx = c.msgs.findIndex((m) => m.id === vivoId);
+        fl.forEach((txt, k) =>
+          c.msgs.splice(idx < 0 ? c.msgs.length : idx + k, 0, {
+            id: vivoId + "f" + k, papel: "assistant", texto: String(txt), ferramentas: [], fala: true,
+          }),
+        );
+      }
       bolha.ferramentas = (r.ferramentas as FerramentaLinha[]) ?? bolha.ferramentas;
       bolha.aviso = (r.aviso as string) ?? null;
       bolha.compacto = (r.compacto as string) ?? undefined;
@@ -240,6 +265,7 @@ async function bombeia(chave: string, memoria: string, tenant: string | undefine
   c.vivo = vivoId;
   c.msgs.push({ id: vivoId, papel: "assistant", texto: "", ferramentas: [], escrevendo: true });
   let bruto = "";
+  let falou = false; // se os balões chegaram pelo stream, o `fim` nao re-insere (nem duplica)
   /* caixa mutável: o evento `fim` escreve aqui por dentro do closure */
   const caixa: { dados: Record<string, unknown> | null } = { dados: null };
   let erro = "";
@@ -250,6 +276,19 @@ async function bombeia(chave: string, memoria: string, tenant: string | undefine
       if (e.tipo === "delta") {
         bruto += String(e.texto ?? "");
         bolha.texto = bruto;
+      } else if (e.tipo === "fala") {
+        /* a rodada chamou ferramenta e falou no caminho: o texto deixa de ser rascunho
+           e vira BALÃO PRÓPRIO, cravado antes da bolha viva (conversa corrida, v3.8) */
+        const txt = String(e.texto ?? "");
+        if (txt) {
+          falou = true;
+          const idx = c.msgs.findIndex((m) => m.id === vivoId);
+          c.msgs.splice(idx < 0 ? c.msgs.length : idx, 0, {
+            id: proximoId(), papel: "assistant", texto: txt, ferramentas: [], fala: true,
+          });
+          bruto = "";
+          bolha.texto = "";
+        }
       } else if (e.tipo === "descartar") {
         bruto = "";
         bolha.texto = "";
@@ -266,6 +305,16 @@ async function bombeia(chave: string, memoria: string, tenant: string | undefine
     if (bolha) {
       const r = caixa.dados ?? saida ?? { resposta: bruto, ferramentas: [] };
       bolha.texto = erro ? "não consegui responder: " + erro : String(r.resposta ?? bruto);
+      /* servidor sem stream (ou reanexar de tarefa): as falas vêm no remanescente do `fim` */
+      const fl = Array.isArray(r.falas) ? (r.falas as string[]) : [];
+      if (fl.length && !falou) {
+        const idx = c.msgs.findIndex((m) => m.id === vivoId);
+        fl.forEach((txt, k) =>
+          c.msgs.splice(idx < 0 ? c.msgs.length : idx + k, 0, {
+            id: vivoId + "f" + k, papel: "assistant", texto: String(txt), ferramentas: [], fala: true,
+          }),
+        );
+      }
       bolha.ferramentas = (r.ferramentas as FerramentaLinha[]) ?? bolha.ferramentas;
       bolha.aviso = (r.aviso as string) ?? null;
       /* quem desenha o aviso da compactação é a tela; o transporte entrega a linha pronta */

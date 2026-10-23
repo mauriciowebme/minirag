@@ -380,6 +380,10 @@
   .msg-ia .md {
     @apply whitespace-normal;
   }
+  /* fala de caminho da rodada (v3.8): balão fixo, discreto, borda à esquerda */
+  .msg-ia .md.fala {
+    @apply whitespace-normal border-l-2 border-borda pl-2 text-[12.5px] text-txt2 opacity-90;
+  }
   .msg-ia .md > *:first-child {
     @apply mt-0;
   }

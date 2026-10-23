@@ -131,15 +131,15 @@ export function Chat({
   const carregarHistorico = useCallback(async () => {
     try {
       const h = await get<ChatHistorico>("/chat?" + qs({ memoria, ...(tenantParam ? { tenant: tenantParam } : {}) }));
-      semear(
-        chave,
-        h.mensagens.map((m) => ({
-          id: `h${m.id}`,
-          papel: m.papel as "user" | "assistant",
-          texto: m.texto,
-          ferramentas: m.ferramentas ?? [],
-        })),
-      );
+      const linhas: { id: string; papel: "user" | "assistant"; texto: string; ferramentas: (typeof h.mensagens)[number]["ferramentas"]; fala?: boolean }[] = [];
+      for (const m of h.mensagens) {
+        /* v3.8: as falas de caminho voltam como balões próprios na ordem em que foram escritas —
+           a conversa fica corrida também depois de recarregar a página */
+        for (const [k, ft] of (m.falas ?? []).entries())
+          linhas.push({ id: `h${m.id}f${k}`, papel: "assistant", texto: String(ft), ferramentas: [], fala: true });
+        linhas.push({ id: `h${m.id}`, papel: m.papel as "user" | "assistant", texto: m.texto, ferramentas: m.ferramentas ?? [] });
+      }
+      semear(chave, linhas);
     } catch (e) {
       toast("histórico: " + (e as Error).message);
     }
@@ -328,7 +328,7 @@ export function Chat({
                     {naFila > 0 ? ` · ${naFila} na fila` : ""}
                   </span>
                 ) : (
-                  <div className={m.escrevendo ? "md vivo" : "md"} dangerouslySetInnerHTML={{ __html: mdParaHtml(m.texto) }} />
+                  <div className={(m.escrevendo ? "md vivo" : "md") + (m.fala ? " fala" : "")} dangerouslySetInnerHTML={{ __html: mdParaHtml(m.texto) }} />
                 )
               ) : (
                 <>

@@ -1,5 +1,5 @@
 import { useCallback, useEffect, useState } from "react";
-import { baixar, del, get, patch } from "../services/api";
+import { baixar, del, get, patch, rodarAcao } from "../services/api";
 import { useToast } from "./Toast";
 import type { ChaveClienteLinha, MaquinaLinha, MaquinasLogLinha, MaquinasResp } from "../types";
 
@@ -22,6 +22,37 @@ export function Maquinas({ operador }: { operador: boolean }) {
   const [log, setLog] = useState<MaquinasLogLinha[]>([]);
   const [chaves, setChaves] = useState<ChaveClienteLinha[]>([]);
   const [gerandoCli, setGerandoCli] = useState(false);
+  /* v3.8: as ferramentas do vocabulário (túnel) também saem daqui, em modal */
+  const [maqAcoes, setMaqAcoes] = useState<MaquinaLinha | null>(null);
+  const [acaoSel, setAcaoSel] = useState<{ nome: string; desc: string; campos: string[] } | null>(null);
+  const [argsAcao, setArgsAcao] = useState<Record<string, string>>({});
+  const [rodandoAcao, setRodandoAcao] = useState(false);
+  const [saidaAcao, setSaidaAcao] = useState<{ texto: string; erro: boolean } | null>(null);
+
+  async function dispararAcao() {
+    if (!maqAcoes || !acaoSel) return;
+    setRodandoAcao(true);
+    setSaidaAcao(null);
+    const args: Record<string, unknown> = { host: maqAcoes.host };
+    for (const [k, v] of Object.entries(argsAcao)) {
+      const s = v.trim();
+      if (!s) continue;
+      /* a tela só conhece campos de texto: liga de volta os tipos que o schema cobra */
+      if (k === "comandos") args[k] = s.split("\n").map((t) => t.trim()).filter(Boolean);
+      else if (s === "true" || s === "false") args[k] = s === "true";
+      else if (/^\d+$/.test(s)) args[k] = Number(s);
+      else args[k] = s;
+    }
+    try {
+      const texto = await rodarAcao(acaoSel.nome, args);
+      setSaidaAcao({ texto, erro: false });
+    } catch (e) {
+      setSaidaAcao({ texto: (e as Error).message, erro: true });
+    } finally {
+      setRodandoAcao(false);
+      carregar();
+    }
+  }
 
   async function gerarCliente(plat: "win" | "linux") {
     setGerandoCli(true);
@@ -176,6 +207,20 @@ export function Maquinas({ operador }: { operador: boolean }) {
                   />
                   ativa
                 </label>
+                {m.online && (
+                  <button
+                    className="btn mr-1"
+                    title="rodar uma ferramenta do vocabulário nesta máquina"
+                    onClick={() => {
+                      setMaqAcoes(m);
+                      setAcaoSel(null);
+                      setArgsAcao({});
+                      setSaidaAcao(null);
+                    }}
+                  >
+                    ferramentas
+                  </button>
+                )}
                 <button className="btn btn-perigo" onClick={() => void apagar(m)}>
                   apagar
                 </button>
@@ -256,6 +301,80 @@ export function Maquinas({ operador }: { operador: boolean }) {
           </table>
         )}
       </div>
+      {maqAcoes && (
+        <div className="veu" role="dialog" aria-modal="true" aria-label="ferramentas da máquina" onClick={() => setMaqAcoes(null)}>
+          <div className="modal" onClick={(e) => e.stopPropagation()}>
+            <h3>ferramentas · {maqAcoes.nome || maqAcoes.host}</h3>
+            <div className="flex flex-wrap gap-1 p-4">
+              {ACOES_MAQUINA.map((a) => (
+                <button
+                  key={a.nome}
+                  className={"btn btn-mini" + (acaoSel?.nome === a.nome ? " btn-primario" : "")}
+                  title={a.desc}
+                  onClick={() => {
+                    setAcaoSel(a);
+                    setArgsAcao({});
+                    setSaidaAcao(null);
+                  }}
+                >
+                  {a.nome}
+                </button>
+              ))}
+            </div>
+            {acaoSel && (
+              <div className="px-4 pb-3">
+                <div className="sub2 mb-2">{acaoSel.desc}</div>
+                {acaoSel.campos.map((c) => (
+                  <input
+                    key={c}
+                    className="campo mb-2"
+                    placeholder={c}
+                    value={argsAcao[c] ?? ""}
+                    onChange={(e) => setArgsAcao((x) => ({ ...x, [c]: e.target.value }))}
+                  />
+                ))}
+                <button className="btn btn-primario" disabled={rodandoAcao} onClick={() => void dispararAcao()}>
+                  {rodandoAcao ? "rodando…" : "rodar"}
+                </button>
+              </div>
+            )}
+            {saidaAcao && (
+              <pre
+                className={
+                  "m-4 max-h-56 overflow-auto whitespace-pre-wrap p-2 text-[11px]" + (saidaAcao.erro ? " text-red-400" : " text-txt2")
+                }
+              >
+                {saidaAcao.texto.slice(0, 4000)}
+              </pre>
+            )}
+          </div>
+        </div>
+      )}
     </section>
   );
 }
+
+/* v3.8: o vocabulário do túnel, também clicável na tela (mesmas tools que o chat usa via MCP) */
+const ACOES_MAQUINA: { nome: string; desc: string; campos: string[] }[] = [
+  { nome: "listar_arquivos", desc: "lista uma pasta", campos: ["caminho", "padrao"] },
+  { nome: "ler_arquivo", desc: "ler arquivo (texto ou base64)", campos: ["caminho", "offset", "limite"] },
+  { nome: "escrever_arquivo", desc: "escrever arquivo de texto", campos: ["caminho", "conteudo"] },
+  { nome: "buscar_arquivos", desc: "procurar arquivos por nome", campos: ["raiz", "nome"] },
+  { nome: "grep_remoto", desc: "procurar dentro dos arquivos", campos: ["raiz", "padrao"] },
+  { nome: "editar_no_local", desc: "editar arquivo na máquina", campos: ["caminho", "busca", "substituicao"] },
+  { nome: "estado_maquina", desc: "SO, RAM, disco, IP", campos: [] },
+  { nome: "processos", desc: "top processos por memória", campos: ["acao", "nome"] },
+  { nome: "janelas", desc: "janelas visíveis", campos: ["acao", "titulo"] },
+  { nome: "area_transferencia", desc: "ler a área de transferência", campos: ["acao", "texto"] },
+  { nome: "falar", desc: "SAPI fala nos auto-falantes", campos: ["texto"] },
+  { nome: "abrir", desc: "abrir como duplo-clique", campos: ["alvo"] },
+  { nome: "servicos", desc: "serviços (listar/parar/iniciar)", campos: ["acao", "nome", "filtro"] },
+  { nome: "eventos", desc: "eventos do Windows", campos: ["horas", "nivel"] },
+  { nome: "rede", desc: "ping/DNS/portas a partir da máquina", campos: ["acao", "alvo"] },
+  { nome: "esperar_arquivo", desc: "espera aparecer arquivo novo", campos: ["pasta", "padrao"] },
+  { nome: "power", desc: "energia (recusa sem confirm)", campos: ["acao", "confirmar"] },
+  { nome: "rodar_lote", desc: "vários comandos numa só ida", campos: ["comandos"] },
+  { nome: "sessao", desc: "memória de pasta desta máquina", campos: ["acao", "nome", "pasta"] },
+  { nome: "git_remoto", desc: "git numa pasta da máquina", campos: ["repo", "acao", "mensagem", "ref", "confirmar"] },
+  { nome: "rodar_comando", desc: "shell cru no agente", campos: ["cmd", "timeout"] },
+];

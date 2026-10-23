@@ -267,6 +267,7 @@ export type ChatHistorico = {
     papel: "user" | "assistant";
     texto: string;
     ferramentas: ChamadaFerramenta[];
+    falas?: string[];
     quando: string;
   }[];
 };

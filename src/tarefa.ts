@@ -104,10 +104,10 @@ export async function rodarTarefa(id: string, u: Usuario): Promise<void> {
         if (e.tipo === "delta") {
           parcial += String(e.texto ?? "");
           espelhar(parcial);
-        } else if (e.tipo === "descartar") {
+        } else if (e.tipo === "descartar" || e.tipo === "fala") {
           parcial = "";
-          /* o rascunho descartado tem que sumir do banco também, senão quem
-           * reanexar nesse intervalo replaya texto que ia ser jogado fora */
+          /* o rascunho da rodada (que agora e FALA fixa na tela, v3.8) tem que sumir do
+           * espelho tambem, senao quem reanexar nesse intervalo replaya rascunho + resposta */
           espelhar("");
         }
         notificarTarefa(id, e); // barril (Task 4) — ao vivo, independente do banco

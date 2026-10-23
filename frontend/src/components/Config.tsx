@@ -236,9 +236,9 @@ function Provider({ operador, tenant, onIrPainel }: { operador: boolean; tenant:
             <input className="campo mt-1" value={temperatura} onChange={(e) => setTemperatura(e.target.value)} />
           </label>
           <label className="rotulo m-0">
-            rodadas de ferramenta
+            rodadas do agente (loop de ferramentas; ao bater o teto ele para e avisa)
             <input id="provRodadas" className="campo mt-1" value={rodadas} onChange={(e) => setRodadas(e.target.value)} />
-            <span className="dica mt-1 block">0 = nunca chamar ferramenta (0 a 10)</span>
+            <span className="dica mt-1 block">0 = nunca chamar ferramenta (0 a 60; padrão 5)</span>
           </label>
         </div>
         <div className="grade-2 !gap-3">

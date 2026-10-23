@@ -131,6 +131,7 @@ export async function initProvider(): Promise<void> {
        criado_em TIMESTAMPTZ NOT NULL DEFAULT now())`,
   );
   await q(`ALTER TABLE chat_mensagens ADD COLUMN IF NOT EXISTS ferramentas JSONB`);
+  await q(`ALTER TABLE chat_mensagens ADD COLUMN IF NOT EXISTS falas JSONB`);
   await q(`CREATE INDEX IF NOT EXISTS chat_tenant_idx ON chat_mensagens (tenant, memoria, id)`);
 }
 
@@ -277,8 +278,8 @@ export async function salvarProvider(
 
   const maxRodadas =
     body.max_rodadas === undefined ? Number(linhaAnterior?.max_rodadas ?? RODADAS_PADRAO) : Number(body.max_rodadas);
-  if (!Number.isInteger(maxRodadas) || maxRodadas < 0 || maxRodadas > 10) {
-    throw erro422("max_rodadas deve ser um número entre 0 e 10");
+  if (!Number.isInteger(maxRodadas) || maxRodadas < 0 || maxRodadas > 60) {
+    throw erro422("max_rodadas deve ser um número entre 0 e 60");
   }
 
   /* v3.0 — memória e orçamento. `contexto_tokens: 0` significa "deixa automático". */
@@ -558,6 +559,7 @@ export type EventoChat =
   | { tipo: "delta"; texto: string }
   | { tipo: "descartar" }
   | { tipo: "ferramenta"; servidor: string; nome: string; ok: boolean; ms: number }
+  | { tipo: "fala"; texto: string }
   | { tipo: "fim"; dados: Record<string, unknown> }
   | { tipo: "erro"; detalhe: string };
 
@@ -650,6 +652,7 @@ export async function responderChat(
   };
 
   const chamadas: ChamadaFerramenta[] = [];
+  const falas: string[] = []; // v3.8: as falas de caminho da rodada ficam na tela (e na gaveta)
   const inicio = Date.now();
   let texto = "";
   let rodadas = 0;
@@ -690,9 +693,15 @@ export async function responderChat(
       texto = r.texto;
       break;
     }
-    /* a rodada chamou ferramenta: o texto que saiu junto NÃO é a resposta */
+    /* a rodada chamou ferramenta: o texto dela NÃO é a resposta — mas é FALA DE
+     * CAMINHO (v3.8, pedido do dono): mostra e FICA na tela como balão próprio.
+     * Para o modelo continua rascunho: o eco histórico segue sem ele. */
     const rascunho = textoDeRaciocinio(r.texto, true);
-    if (emitir && saiuTexto) emitir({ tipo: "descartar" });
+    const falaRodada = String(r.texto ?? "").trim();
+    if (falaRodada) {
+      falas.push(falaRodada);
+      emitir?.({ tipo: "fala", texto: falaRodada });
+    } else if (emitir && saiuTexto) emitir({ tipo: "descartar" });
     if (rodadas > cfg.max_rodadas) {
       texto = rascunho ? ultimoResultadoTool(mensagens) || "" : r.texto;
       aviso = `o modelo ainda queria ferramenta e bateu o limite de ${cfg.max_rodadas} rodadas`;
@@ -747,10 +756,11 @@ export async function responderChat(
         : "nenhuma ferramenta está ligada em Configurações → Ferramentas (MCP)");
   }
 
-  await gravarMensagens(tenant, memoria, pergunta, texto, chamadas);
+  await gravarMensagens(tenant, memoria, pergunta, texto, chamadas, falas);
   return {
     resposta: texto,
     ferramentas: chamadas,
+    falas,
     rodadas,
     modelo: cfg.modelo,
     provider: cfg.escopo,
@@ -770,14 +780,15 @@ async function gravarMensagens(
   pergunta: string,
   resposta: string,
   chamadas: ChamadaFerramenta[],
+  falas: string[] = [],
 ): Promise<void> {
   await q(
     `INSERT INTO chat_mensagens (tenant, memoria, papel, texto, ferramentas) VALUES ($1, $2, 'user', $3, NULL)`,
     [tenant, memoria, pergunta],
   );
   await q(
-    `INSERT INTO chat_mensagens (tenant, memoria, papel, texto, ferramentas) VALUES ($1, $2, 'assistant', $3, $4::jsonb)`,
-    [tenant, memoria, resposta, JSON.stringify(chamadas)],
+    `INSERT INTO chat_mensagens (tenant, memoria, papel, texto, ferramentas, falas) VALUES ($1, $2, 'assistant', $3, $4::jsonb, $5::jsonb)`,
+    [tenant, memoria, resposta, JSON.stringify(chamadas), JSON.stringify(falas)],
   );
 }
 
@@ -789,7 +800,7 @@ export async function historicoChat(
   const memoria = (opts.memoria ?? "").trim();
   const limite = Math.min(Math.max(opts.limit ?? 40, 1), 200);
   const r = await q(
-    `SELECT id, papel, texto, ferramentas, criado_em FROM chat_mensagens
+    `SELECT id, papel, texto, ferramentas, falas, criado_em FROM chat_mensagens
      WHERE tenant = $1 AND memoria = $2 ORDER BY id DESC LIMIT $3`,
     [tenant, memoria, limite],
   );
@@ -801,6 +812,7 @@ export async function historicoChat(
       papel: m.papel,
       texto: m.texto,
       ferramentas: m.ferramentas ?? [],
+      falas: m.falas ?? [],
       quando: m.criado_em,
     })),
   };

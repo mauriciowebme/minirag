@@ -43,6 +43,20 @@ export async function api<T>(caminho: string, opts: RequestInit = {}): Promise<T
   throw new ApiErro(r.status, detalhe);
 }
 
+/** v3.8: roda uma ferramenta de máquina direto pela tela (JSON-RPC do MCP interno). */
+export async function rodarAcao(nome: string, args: Record<string, unknown>): Promise<string> {
+  const r = await api<{
+    result?: { content?: { text?: string }[]; isError?: boolean };
+    error?: { message?: string };
+  }>(
+    "/mcp",
+    { method: "POST", body: JSON.stringify({ jsonrpc: "2.0", id: Date.now(), method: "tools/call", params: { name: nome, arguments: args } }) },
+  );
+  if (r.error) throw new ApiErro(500, r.error.message ?? "a ferramenta falhou");
+  const texto = (r.result?.content ?? []).map((c) => c.text ?? "").join("\n");
+  return texto || "(vazio)";
+}
+
 export function get<T>(caminho: string): Promise<T> {
   return api<T>(caminho);
 }
