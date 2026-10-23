@@ -14,7 +14,7 @@ parecidos com a pergunta, com uma nota de 0 a 1.
 
 - **Vocabulário do túnel como ferramentas**: 20 nomes (`listar_arquivos`, `ler_arquivo`, `escrever_arquivo`, `buscar_arquivos`, `grep_remoto`, `editar_no_local`, `estado_maquina`, `processos`, `janelas`, `area_transferencia`, `falar`, `abrir`, `servicos`, `eventos`, `rede`, `esperar_arquivo`, `power`, `rodar_lote`, `sessao`, `git_remoto`) montados no servidor (`src/maquinas_tools.ts`: tabela nome→comando, PowerShell/sh por SO) e expostos no MCP, no chat e no REST da mesma porta — 46 tools no `tools/list`; o cliente Node não muda por verbo novo.
 - **Governança**: `power` (qualquer ação) e `git_remoto` (commit, push, checkout) exigem `confirmar=true` — sem isso a chamada morre em 409 sem nada executar; serial por host; `sessao` abre/lista/fecha processo em segundo plano na máquina; `falar` fala texto (máx. 600 chars) via SAPI no Windows ou espeak no Linux.
-- **Escrita de arquivo na máquina**: canal one-time `GET /maquina/u?k=…` — os bytes ficam no servidor no máximo 5 minutos e a chave é de uso único, casada com o host do cliente que baixa.
+- **Escrita de arquivo na máquina**: canal `GET /maquina/u?k=…` — os bytes ficam no servidor no máximo 5 minutos; a chave só serve para a máquina cujo host casa com ela e vale enquanto não expira (não é de uso único).
 - **Chat**: as falas de caminho da rodada viram balões próprios na tela, voltam no histórico (`chat_mensagens.falas`); teto de `max_rodadas` subiu de 10 para **60** (validação, MCP e Configurações).
 - **Auditoria**: `comandos_log.origem` alargada (16→64) e gravada como `canal:ferramenta` — o insert de ferramenta morria em silêncio no schema antigo.
 
