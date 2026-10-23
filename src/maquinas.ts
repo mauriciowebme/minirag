@@ -98,6 +98,8 @@ export async function initMaquinas(): Promise<void> {
        criado_em    TIMESTAMPTZ NOT NULL DEFAULT now()
      )`,
   );
+  /* v3.10: uma chave pode ativar VÁRIAS máquinas — o contador alimenta a tela */
+  await q(`ALTER TABLE chaves_cliente ADD COLUMN IF NOT EXISTS ativacoes INTEGER NOT NULL DEFAULT 0`);
   await q(
     `CREATE TABLE IF NOT EXISTS maquinas_cfg (
        chave         TEXT PRIMARY KEY,
@@ -305,12 +307,12 @@ export async function gerarClienteBinario(alvo: string, plataforma: "win" | "lin
 export async function listarChaves(alvo: string | null) {
   const r = alvo
     ? await q<any>(
-        `SELECT token_hash, tenant, nome, usada, host_ativado, criado_em, expira_em
+        `SELECT token_hash, tenant, nome, usada, host_ativado, ativacoes, criado_em, expira_em
          FROM chaves_cliente WHERE tenant = $1 ORDER BY criado_em DESC`,
         [alvo],
       )
     : await q<any>(
-        `SELECT token_hash, tenant, nome, usada, host_ativado, criado_em, expira_em
+        `SELECT token_hash, tenant, nome, usada, host_ativado, ativacoes, criado_em, expira_em
          FROM chaves_cliente ORDER BY criado_em DESC`,
       );
   return r.rows.map((c: any) => ({ ...c, id: String(c.token_hash).slice(0, 16) }));
@@ -324,14 +326,13 @@ export async function revogarChaveCliente(u: Usuario, id: string) {
   if (!r.rowCount) throw new HttpError(404, "chave nao encontrada");
   const ch = r.rows[0];
   if (!u.operador && ch.tenant !== u.tenant) throw new HttpError(404, "chave nao encontrada");
-  let maquinaRemovida = false;
-  if (ch.usada && ch.host_ativado) {
-    await apagarMaquina(ch.tenant, ch.host_ativado);
-    maquinaRemovida = true;
-  }
+  /* v3.10: cortar a chave para NOVAS ativações; as máquinas já ativadas ficam com o
+     token próprio delas — bloquear ou apagar continua sendo ação POR MÁQUINA. */
+  const rCont = await q<any>(`SELECT ativacoes FROM chaves_cliente WHERE token_hash = $1`, [ch.token_hash]);
+  const mantidas = Number(rCont.rows[0]?.ativacoes ?? 0);
   await q(`DELETE FROM chaves_cliente WHERE token_hash = $1`, [ch.token_hash]);
-  log(`maquinas: CHAVE REVOGADA ${ch.tenant} (ativada=${ch.usada}${maquinaRemovida ? " maquina-apagada" : ""})`);
-  return { cortada: true, maquina_removida: maquinaRemovida };
+  log(`maquinas: CHAVE REVOGADA ${ch.tenant} (ativacoes=${mantidas} — máquinas mantidas)`);
+  return { cortada: true, maquinas_mantidas: mantidas };
 }
 
 /* ------------------------------------------------------------------ HUB ----- */
@@ -372,23 +373,33 @@ async function receberOi(ws: WebSocket, oi: OiFrame, httpBase = ""): Promise<voi
     if (c.rowCount) {
       // 1b) chave assada no cliente baixado do painel: ativa na primeira maquina e queima
       const ch = c.rows[0];
-      if (ch.usada || new Date(ch.expira_em).getTime() < Date.now()) {
-        ws.send(JSON.stringify({ ack: "negado", motivo: ch.usada ? "chave do cliente já usada" : "chave do cliente expirada" }));
-        log(`maquinas: TENTATIVA com chave queimada host=${host} (usada=${ch.usada})`);
+      /* v3.10: o cliente baixado serve para VÁRIAS máquinas. A validade da chave é a
+       * janela de ATIVAÇÃO; cada máquina recebe token próprio na primeira conexão,
+       * então bloquear/apagar uma não mexe nas outras. Cortar a chave só impede
+       * ativações novas — quem já ativou continua com o token dele. */
+      if (new Date(ch.expira_em).getTime() < Date.now()) {
+        ws.send(JSON.stringify({ ack: "negado", motivo: "chave do cliente expirada — gere um cliente novo" }));
+        log(`maquinas: TENTATIVA com chave vencida host=${host}`);
         ws.close();
         return;
       }
       tokenNovo = randomBytes(20).toString("hex");
-      await q(
+      const rMaq = await q<any>(
         `INSERT INTO maquinas (tenant, host, nome, so, usuario_win, token_hash)
          VALUES ($1,$2,$3,$4,$5,$6)
-         ON CONFLICT (tenant, host) DO UPDATE SET nome = EXCLUDED.nome, so = EXCLUDED.so,
-           usuario_win = EXCLUDED.usuario_win, token_hash = EXCLUDED.token_hash, visto_em = now()`,
-        [ch.tenant, host, String(ch.nome || host), String(oi.os ?? "").slice(0, 40), String(oi.user ?? "").slice(0, 64), hashChave(tokenNovo)],
+         ON CONFLICT (tenant, host) DO UPDATE SET so = EXCLUDED.so,
+           usuario_win = EXCLUDED.usuario_win, token_hash = EXCLUDED.token_hash, visto_em = now()
+         RETURNING (xmax = 0) AS nova`,
+        [ch.tenant, host, host, String(oi.os ?? "").slice(0, 40), String(oi.user ?? "").slice(0, 64), hashChave(tokenNovo)],
       );
-      await q(`UPDATE chaves_cliente SET usada = true, host_ativado = $2 WHERE token_hash = $1`, [hash, host]);
-      registro = { tenant: ch.tenant, host, nome: String(ch.nome || host) };
-      log(`maquinas: CLIENTE ATIVADO ${ch.tenant}|${host}`);
+      const nova = rMaq.rows[0]?.nova === true;
+      await q(
+        `UPDATE chaves_cliente SET usada = true, host_ativado = COALESCE(host_ativado, $2),
+           ativacoes = ativacoes + $3 WHERE token_hash = $1`,
+        [hash, host, nova ? 1 : 0],
+      );
+      registro = { tenant: ch.tenant, host, nome: host };
+      log(`maquinas: CLIENTE ATIVADO ${ch.tenant}|${host}${nova ? "" : " (reinstalação da mesma máquina)"}`);
     } else {
     // 2) token de pareamento (primeira vez): usa e cria a máquina
     const p = await q<any>(
