@@ -304,6 +304,29 @@ export async function gerarClienteBinario(alvo: string, plataforma: "win" | "lin
   return { buf: Buffer.concat([bin, payload, rodape]), arquivo };
 }
 
+/* v3.10.1: a tela baixava por fetch+blob e o Edge/Chrome passou a bloquear os
+ * downloads seguintes ("Precisa de autorização para transferir"). O bilhete é a
+ * autorização de UM download por navegação comum: curto (2 min), uso único e
+ * preso ao tenant — o endereço não carrega a chave do painel. */
+const bilhetes = new Map<string, { tenant: string; plat: string; exp: number }>();
+const BILHETE_MS = 120_000;
+
+export function emitirBilheteCliente(alvo: string, plataforma: string) {
+  const agora = Date.now();
+  for (const [k, v] of bilhetes) if (v.exp < agora) bilhetes.delete(k);
+  const t = randomBytes(18).toString("hex");
+  bilhetes.set(t, { tenant: alvo, plat: plataforma, exp: agora + BILHETE_MS });
+  return { bilhete: t, segundos: Math.floor(BILHETE_MS / 1000) };
+}
+
+export function resgatarBilheteCliente(t: string): { tenant: string; plat: string } | null {
+  const v = bilhetes.get(String(t ?? ""));
+  if (!v) return null;
+  bilhetes.delete(String(t)); // uso único, mesmo se o download falhar depois
+  if (v.exp < Date.now()) return null;
+  return { tenant: v.tenant, plat: v.plat };
+}
+
 export async function listarChaves(alvo: string | null) {
   const r = alvo
     ? await q<any>(

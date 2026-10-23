@@ -8,7 +8,7 @@ import {
   apagarMaquina,
   controleDeMaquinaAtivo,
   criarPareamento,
-  gerarClienteBinario,
+  gerarClienteBinario, emitirBilheteCliente, resgatarBilheteCliente,
   revogarChaveCliente,
   gravarControleDeMaquina,
   listarLog,
@@ -494,18 +494,38 @@ export function criarApp(): FastifyInstance {
 
   /* cliente já com a chave do usuário assada dentro (v3.7): um arquivo, dois cliques */
   app.get("/maquinas/cliente/:plataforma", async (req, reply) => {
-    const u = usuario(req);
     const s = req.params as Record<string, string>;
     const q = req.query as Record<string, string>;
     const plat = s.plataforma === "win" || s.plataforma === "linux" ? s.plataforma : null;
     if (!plat) throw new HttpError(404, "plataforma: win | linux");
-    const alvo = alvoMaquina(u, q.tenant ?? null);
+    /* v3.10.1: ?bilhete= autoriza UM download por navegação (sem header) — o que
+       evita o bloqueio de "download automático" do Edge/Chrome */
+    let alvo: string;
+    if (q.bilhete) {
+      const b = resgatarBilheteCliente(String(q.bilhete));
+      if (!b || b.plat !== plat) throw new HttpError(403, "bilhete inválido ou vencido — gere de novo");
+      alvo = b.tenant;
+    } else {
+      alvo = alvoMaquina(usuario(req), q.tenant ?? null);
+    }
     const { buf, arquivo } = await gerarClienteBinario(alvo, plat, String(q.nome ?? ""));
     return reply
       .header("content-type", "application/octet-stream")
       .header("content-length", String(buf.length))
       .header("content-disposition", `attachment; filename="${arquivo}"`)
       .send(buf);
+  });
+
+  /* bilhete para o navegador baixar sem blob (v3.10.1) */
+  app.post("/maquinas/cliente/:plataforma/bilhete", async (req) => {
+    const u = usuario(req);
+    const s = req.params as Record<string, string>;
+    const q = req.query as Record<string, string>;
+    const plat = s.plataforma === "win" || s.plataforma === "linux" ? s.plataforma : null;
+    if (!plat) throw new HttpError(404, "plataforma: win | linux");
+    const alvo = alvoMaquina(u, q.tenant ?? null);
+    const { bilhete, segundos } = emitirBilheteCliente(alvo, plat);
+    return { bilhete, segundos, url: `/maquinas/cliente/${plat}?bilhete=${bilhete}` };
   });
 
   app.delete("/maquinas/chave/:id", async (req) => {
