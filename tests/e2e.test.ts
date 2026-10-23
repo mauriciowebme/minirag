@@ -2205,7 +2205,14 @@ test("minirag v2 — suíte completa", async (t) => {
     f.fechar("v3.5 esquecimento-faxina");
   });
 
-  await bloco(t, "v3.6: máquinas por usuário — hub WS, pareamento, run, escopo e MCP", async () => {
+  /* mata clientes de teste por /proc — script no container evita o inferno de aspas do sh -c */
+const MATAR_JS =
+  "const fs=require('fs');for(const d of fs.readdirSync('/proc')){if(!/^[0-9]+$/.test(d))continue;try{const c=fs.readFileSync('/proc/'+d+'/cmdline','utf8').split(String.fromCharCode(0)).join(' ');if(new RegExp(['cliente'+'-painel[.]js','cli'+'37'].join('|')).test(c))process.kill(Number(d),'SIGKILL')}catch(e){}}";
+function instalarMatador(CONTAINER: string) {
+  execFileSync("docker", ["exec", "-i", CONTAINER, "sh", "-c", "cat > /tmp/matar-clientes.js"], { input: MATAR_JS });
+}
+
+await bloco(t, "v3.6: máquinas por usuário — hub WS, pareamento, run, escopo e MCP", async () => {
     const f = fiscal();
     const CONTAINER = process.env.CONTAINER ?? "";
     const DB = process.env.DBCONTAINER ?? CONTAINER.replace("-api-", "-db-");
@@ -2381,12 +2388,13 @@ test("minirag v2 — suíte completa", async (t) => {
     f.fechar("v3.6 maquinas");
   });
 
-  await bloco(t, "v3.7: cliente com chave assada — gerar, ativar, queimar, cortar", async () => {
+  await bloco(t, "v3.7: cliente com chave assada — ativa várias máquinas, bloqueio por máquina e corte da chave", async () => {
     const f = fiscal();
     const CONTAINER = process.env.CONTAINER ?? "";
     const BASE = process.env.BASE ?? "";
     let r: Awaited<ReturnType<typeof call>>;
     const execD = (sh: string) => execFileSync("docker", ["exec", CONTAINER, "sh", "-c", sh], { encoding: "utf8" });
+    instalarMatador(CONTAINER);
     const leArq = (p2: string) => {
       try {
         return execD("cat " + p2);
@@ -2414,40 +2422,69 @@ test("minirag v2 — suíte completa", async (t) => {
     const dispo = rGen.headers.get("content-disposition") ?? "";
     f.check("nome do arquivo carrega o usuário", dispo.includes("minirag-cliente-teste"), dispo.slice(0, 90));
     execFileSync("docker", ["exec", "-i", CONTAINER, "sh", "-c", "cat > /tmp/cli37 && chmod 755 /tmp/cli37"], { input: bufGen });
-    execD("rm -f /tmp/c37*.json /tmp/c37*.log; nohup /tmp/cli37 --url http://127.0.0.1:8000 --conf /tmp/c37.json >/tmp/c37.out 2>&1 & sleep 1; echo ido");
-    const ativou = await ate(async () => {
-      const r = await call("GET", "/maquinas", { key: TESTKEY });
-      const ch = (r.json?.chaves ?? []).find((c: any) => c.nome === "s37");
-      return ch?.usada === true && !!ch?.host_ativado;
+
+    /* 1ª máquina: o MESMO arquivo ativa a primeira e adota token próprio */
+    execD("rm -f /tmp/c37.json /tmp/c37.log /tmp/c37.out; nohup /tmp/cli37 --url http://127.0.0.1:8000 --conf /tmp/c37.json --host cli37-a >/tmp/c37.out 2>&1 & sleep 1; echo ido");
+    const ativouA = await ate(async () => {
+      const x = await call("GET", "/maquinas", { key: TESTKEY });
+      const m = (x.json?.maquinas ?? []).find((y: any) => y.host === "cli37-a");
+      return m?.online === true;
     }, 20000);
     r = await call("GET", "/maquinas", { key: TESTKEY });
+    const maqA = (r.json?.maquinas ?? []).find((m: any) => m.host === "cli37-a") ?? {};
     const chS37 = (r.json?.chaves ?? []).find((c: any) => c.nome === "s37") ?? {};
-    const maqS37 = (r.json?.maquinas ?? []).find((m: any) => m.host === chS37.host_ativado) ?? {};
-    f.check("dois cliques: chave ativou máquina online com o nome dado", ativou && maqS37.online === true && maqS37.nome === "s37", { ativou, host: chS37.host_ativado, nome: maqS37.nome });
+    f.check("dois cliques: o cliente ativa a máquina, que se batiza com o próprio nome", ativouA && maqA.nome === "cli37-a" && Number(chS37.ativacoes) === 1, { ativouA, nome: maqA.nome, ativacoes: chS37.ativacoes });
 
-    const confJson = JSON.parse(leArq("/tmp/c37.json") || "{}");
-    f.check("cliente adotou a chave definitiva no conf (trailer queimou atrás)", typeof confJson.token === "string" && confJson.token.length === 40, Object.keys(confJson).join(","));
+    const confA = JSON.parse(leArq("/tmp/c37.json") || "{}");
+    f.check("cliente adotou a chave definitiva no conf (trailer queimou atrás)", typeof confA.token === "string" && confA.token.length === 40, Object.keys(confA).join(","));
 
-    execD("nohup /tmp/cli37 --url http://127.0.0.1:8000 --conf /tmp/c37b.json >/tmp/c37b.out 2>&1 & sleep 4; echo ido");
-    const logB = await ate(async () => leArq("/tmp/c37b.log").includes("já usada") || leArq("/tmp/c37b.out").includes("já usada"), 12000);
-    f.check("cópia do mesmo arquivo em outra config é recusada (chave queimada)", logB, (leArq("/tmp/c37b.log") + leArq("/tmp/c37b.out")).slice(-160));
+    /* 2ª máquina, MESMO arquivo: v3.10 — chave de conta serve para várias máquinas */
+    execD("rm -f /tmp/c37b.json /tmp/c37b.log /tmp/c37b.out; nohup /tmp/cli37 --url http://127.0.0.1:8000 --conf /tmp/c37b.json --host cli37-b >/tmp/c37b.out 2>&1 & sleep 2; echo ido");
+    const ativouB = await ate(async () => {
+      const x = await call("GET", "/maquinas", { key: TESTKEY });
+      const m = (x.json?.maquinas ?? []).find((y: any) => y.host === "cli37-b");
+      return m?.online === true;
+    }, 25000);
+    r = await call("GET", "/maquinas", { key: TESTKEY });
+    const chDepois = (r.json?.chaves ?? []).find((c: any) => c.nome === "s37") ?? {};
+    const confB = JSON.parse(leArq("/tmp/c37b.json") || "{}");
+    f.check("mesmo arquivo ativa uma SEGUNDA máquina (chave de várias máquinas)", ativouB && Number(chDepois.ativacoes) === 2, { ativouB, ativacoes: chDepois.ativacoes });
+    f.check("cada máquina fica com token PRÓPRIO (não compartilham a chave)", typeof confB.token === "string" && confB.token.length === 40 && confB.token !== confA.token, { a: String(confA.token).slice(0, 6), b: String(confB.token).slice(0, 6) });
 
-    execD(`node -e "const fs=require('fs');for(const d of fs.readdirSync('/proc')){if(!/^[0-9]+$/.test(d))continue;try{const c=fs.readFileSync('/proc/'+d+'/cmdline','utf8').split(String.fromCharCode(0)).join(' ');if(new RegExp(['cliente'+'-painel[.]js','cli'+'37'].join('|')).test(c))process.kill(Number(d),'SIGKILL')}catch(e){}}console.log('ok')"; echo ok`);
+    /* bloqueio é POR MÁQUINA: desligar a b derruba só a b */
+    r = await call("PATCH", "/maquinas/cli37-b", { key: TESTKEY, corpo: { ativo: false } });
+    const caiuB = await ate(async () => {
+      const x = await call("GET", "/maquinas", { key: TESTKEY });
+      const b = (x.json?.maquinas ?? []).find((y: any) => y.host === "cli37-b");
+      const a = (x.json?.maquinas ?? []).find((y: any) => y.host === "cli37-a");
+      return r.status === 200 && b?.ativo === false && b?.online === false && a?.online === true;
+    }, 15000);
+    f.check("bloquear uma máquina não afeta a outra", caiuB, JSON.stringify(r.json).slice(0, 120));
+
+    /* cortar a chave: para NOVAS ativações, mantém as máquinas que já ativaram */
+    r = await call("DELETE", `/maquinas/chave/${String(chS37.id ?? "nao")}`, { key: TESTKEY });
+    f.check("cortar chave mantém as máquinas já ativadas", r.status === 200 && r.json?.maquinas_mantidas === 2, r.texto.slice(0, 140));
+    r = await call("GET", "/maquinas", { key: TESTKEY });
+    const hostsS37 = (r.json?.maquinas ?? []).filter((m: any) => m.host === "cli37-a" || m.host === "cli37-b");
+    f.check(
+      "chave some da lista e as duas máquinas continuam lá",
+      (r.json?.chaves ?? []).every((c: any) => c.nome !== "s37") && hostsS37.length === 2,
+      JSON.stringify({ chaves: (r.json?.chaves ?? []).map((c: any) => c.nome), maqs: hostsS37.map((m: any) => m.host) }).slice(0, 150),
+    );
+
+    execD("node /tmp/matar-clientes.js");
+    for (const h of ["cli37-a", "cli37-b"]) await call("DELETE", `/maquinas/${h}`, { key: TESTKEY });
     await ate(async () => {
       const x = await call("GET", "/maquinas", { key: TESTKEY });
-      return (x.json?.maquinas ?? []).every((m: any) => !m.online);
+      return (x.json?.maquinas ?? []).every((m: any) => m.host !== "cli37-a" && m.host !== "cli37-b");
     }, 12000);
-    r = await call("DELETE", `/maquinas/chave/${String(chS37.id ?? "nao")}`, { key: TESTKEY });
-    f.check("cortar chave ativada apaga a máquina junto", r.status === 200 && r.json?.maquina_removida === true, r.texto.slice(0, 140));
-    r = await call("GET", "/maquinas", { key: TESTKEY });
-    f.check("máquina e chave sumiram da lista", (r.json?.maquinas ?? []).every((m: any) => m.nome !== "s37") && (r.json?.chaves ?? []).every((c: any) => c.nome !== "s37"), JSON.stringify(r.json).slice(0, 120));
 
     const rGen2 = await fetch(BASE + "/maquinas/cliente/linux?nome=s37virgem", { headers: { authorization: "Bearer " + TESTKEY }, signal: AbortSignal.timeout(30000) });
     await rGen2.arrayBuffer();
     r = await call("GET", "/maquinas", { key: TESTKEY });
     const chV = (r.json?.chaves ?? []).find((c: any) => c.nome === "s37virgem") ?? {};
     r = await call("DELETE", `/maquinas/chave/${String(chV.id ?? "nao")}`, { key: TESTKEY });
-    f.check("cortar chave virgem some com ela antes de ativar", r.status === 200 && r.json?.maquina_removida === false, r.texto.slice(0, 120));
+    f.check("cortar chave virgem some com ela sem mexer em máquina", r.status === 200 && r.json?.maquinas_mantidas === 0, r.texto.slice(0, 120));
 
     const chavePlana = execD(
       `node -e "const fs=require('fs');const b=fs.readFileSync('/tmp/cli37');const len=b.readUInt32BE(b.length-8);console.log(JSON.parse(b.slice(b.length-8-len,b.length-8)).k)"`,
@@ -2460,7 +2497,7 @@ test("minirag v2 — suíte completa", async (t) => {
     f.check("gerar cliente Windows também sai com trailer", rWin.status === 200 && lenWin > 80_000_000, { status: rWin.status, len: lenWin });
     await rWin.arrayBuffer();
 
-    execD(`node -e "const fs=require('fs');for(const d of fs.readdirSync('/proc')){if(!/^[0-9]+$/.test(d))continue;try{const c=fs.readFileSync('/proc/'+d+'/cmdline','utf8').split(String.fromCharCode(0)).join(' ');if(new RegExp(['cliente'+'-painel[.]js','cli'+'37'].join('|')).test(c))process.kill(Number(d),'SIGKILL')}catch(e){}}console.log('ok')"; rm -f /tmp/c37v.json`);
+    execD("node /tmp/matar-clientes.js; rm -f /tmp/c37v.json");
     f.fechar("v3.7 chave-cliente");
   });
 
@@ -2469,8 +2506,8 @@ test("minirag v2 — suíte completa", async (t) => {
     const CONTAINER = process.env.CONTAINER ?? "";
     const BASE = process.env.BASE ?? "";
     const execD = (sh: string) => execFileSync("docker", ["exec", CONTAINER, "sh", "-c", sh], { encoding: "utf8" });
-    const matarClientes = () =>
-      execD(`node -e "const fs=require('fs');for(const d of fs.readdirSync('/proc')){if(!/^[0-9]+$/.test(d))continue;try{const c=fs.readFileSync('/proc/'+d+'/cmdline','utf8').split(String.fromCharCode(0)).join(' ');if(new RegExp(['cliente'+'-painel[.]js','cli'+'37'].join('|')).test(c))process.kill(Number(d),'SIGKILL')}catch(e){}}console.log('ok')"; echo ok`);
+    instalarMatador(CONTAINER);
+    const matarClientes = () => execD("node /tmp/matar-clientes.js; echo ok").trim();
     const portaLivre = (p: number) =>
       execD(`node -e "fetch('http://127.0.0.1:${p}/api/estado').then(()=>console.log('ocupada')).catch(()=>console.log('livre'))"`).trim() === "livre";
     const fonte = readFileSync(join(process.cwd(), "agente", "cliente.js"));
