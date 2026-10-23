@@ -20,6 +20,14 @@ parecidos com a pergunta, com uma nota de 0 a 1.
 
 ---
 
+---
+
+## v3.12.1 (23/10) — a janela do cliente voltou a mostrar dados
+
+- **Causa raiz**: o script da página da janela tinha um `;` faltando e uma `}` não fechada, então o navegador **não executava nada**: a janela ficava em "carregando…" para sempre, sem pedir os dados ao programa e sem abrir conexão com o painel local. Corrigido e validado (o script compila e todos os elementos que ele usa existem na página).
+- **Página sem cache**: o servidor manda a página com `no-store` e a janela abre com endereço novo a cada vez, para nunca reaproveitar uma página velha.
+- **Nunca fica muda**: se o estado não vier, a página tenta de novo a cada 2 s e mostra "sem resposta do programa local — tentando de novo…" em vez de ficar parada; os eventos também reconectam sozinhos.
+
 ## v3.12 (23/10) — máquina apagada não volta sozinha e o cliente para de insistir
 
 - **Apagar é definitivo**: a máquina removida no painel fica marcada, e o cliente que já está instalado **não** reativa com a chave antiga — ele avisa "máquina removida do painel — baixe um cliente novo". Cliente gerado depois da remoção entra normalmente.
