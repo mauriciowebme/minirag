@@ -10,6 +10,14 @@ parecidos com a pergunta, com uma nota de 0 a 1.
 
 ---
 
+## v3.8.1 (23/10) — auto-update do cliente: progresso visível e reabertura de verdade
+
+- **Progresso no download**: `baixar()` agora imprime MB, % (a cada 5%), velocidade e a linha final com tempo — na janela do duplo clique e no `minirag-cliente.log`.
+- **Reabrir como o Go fazia**: o sucessor nasce em JANELA PRÓPRIA minimizada (`start /min`, sem roubar a tela; Linux: sessão destacada). Antes o filho herdava o console do pai: o pai saía e a janela fechava com o agente vivo por trás.
+- **Re-checagem em toda conexão** (herança Go v1.11): a novidade é consultada na primeira conexão e em cada reconexão, não só no boot.
+
+---
+
 ## v3.8 (23/10) — o túnel inteiro na boca do agente + falas que ficam na tela
 
 - **Vocabulário do túnel como ferramentas**: 20 nomes (`listar_arquivos`, `ler_arquivo`, `escrever_arquivo`, `buscar_arquivos`, `grep_remoto`, `editar_no_local`, `estado_maquina`, `processos`, `janelas`, `area_transferencia`, `falar`, `abrir`, `servicos`, `eventos`, `rede`, `esperar_arquivo`, `power`, `rodar_lote`, `sessao`, `git_remoto`) montados no servidor (`src/maquinas_tools.ts`: tabela nome→comando, PowerShell/sh por SO) e expostos no MCP, no chat e no REST da mesma porta — 46 tools no `tools/list`; o cliente Node não muda por verbo novo.
