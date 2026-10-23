@@ -99,6 +99,7 @@ que o segredo some da tela, não que a escrita é idempotente.
 
 ## 9. Estado da suíte hoje
 
-19 blocos, **358 checagens** (somadas na saída real da rodada de 23/10/2026, v3.8.0, exit 0),
+18 blocos nomeados (o runner reporta `tests 19` porque conta o teste-raiz da suíte junto), **358 checagens**
+(somadas na saída real da rodada de 23/10/2026, v3.8.0, exit 0),
 v1.8 33 · MCP 27 · v1.10 24 · arquivos 20 · imagem/OCR 10 · v2.7 33 · v2.8 39 · v2.9 29 ·
 v3.0 31 · v3.1 3 · v3.2 9 · v3.3 17 · v3.4 11 · v3.5 19 · v3.6 30 · v3.7 10 · v3.8 11 · rate-limit 2.
