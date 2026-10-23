@@ -10,9 +10,16 @@ parecidos com a pergunta, com uma nota de 0 a 1.
 
 ---
 
+## v3.8.2 (23/10) — um log só, 30 dias; progresso de download só na tela
+
+- **Log único com memória de 30 dias**: no boot o cliente apaga linhas mais velhas que 30 dias, corta o topo se passar de 2 MB e **não cria mais o `.old` de log** (se o fósforo antigo existir, ele é removido). Um arquivo só para tomar conta de tudo.
+- **Progresso não polui o log**: as linhas de porcentagem aparecem só na janela; o arquivo guarda apenas início da atualização, conclusão (MB/tempo) e a reabertura — três linhas por update.
+
+---
+
 ## v3.8.1 (23/10) — auto-update do cliente: progresso visível e reabertura de verdade
 
-- **Progresso no download**: `baixar()` agora imprime MB, % (a cada 5%), velocidade e a linha final com tempo — na janela do duplo clique e no `minirag-cliente.log`.
+- **Progresso no download**: `baixar()` mostra MB, % (a cada 5%), velocidade e a linha final com tempo na janela do duplo clique (a v3.8.2 depois tirou essas linhas do log — só a tela).
 - **Reabrir como o Go fazia**: o sucessor nasce em JANELA PRÓPRIA minimizada (`start /min`, sem roubar a tela; Linux: sessão destacada). Antes o filho herdava o console do pai: o pai saía e a janela fechava com o agente vivo por trás.
 - **Re-checagem em toda conexão** (herança Go v1.11): a novidade é consultada na primeira conexão e em cada reconexão, não só no boot.
 
