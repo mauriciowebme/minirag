@@ -410,7 +410,13 @@ const PAINEL_HTML = "<!doctype html><html lang=pt-br><head><meta charset=utf-8>"
 "if(L.length){t.innerHTML='';for(var i=0;i<L.length;i++){var c=L[i],tr=document.createElement('tr');" +
 "tr.innerHTML='<td>'+hora(c.ts)+'</td><td>'+c.rotulo+'</td><td class=\"'+(c.exit===0?'ok':'ruim')+'\">'+c.exit+'</td><td>'+c.bytes+'</td>';t.appendChild(tr);}}}" +
 "function logAppend(l){var lg=document.getElementById('lg');var e=lg.textContent?lg.textContent.split(String.fromCharCode(10)):[];e.push(l);if(e.length>200)e.splice(0,e.length-200);lg.textContent=e.join(String.fromCharCode(10));lg.scrollTop=lg.scrollHeight;}" +
-"var es;function liga(){es=new EventSource('/evento');es.onmessage=function(x){try{var o=JSON.parse(x.data);if(o.estado)apply(o.estado);if(o.tipo==='log')logAppend(o.linha);}catch{}};es.onerror=function(){try{es.close();}catch(e2){};setTimeout(liga,3000);};}liga();" +
+"var es,ultimo={};" +
+"function liga(){es=new EventSource('/evento');es.onmessage=function(x){try{var o=JSON.parse(x.data);" +
+"if(o.estado){ultimo=o.estado;apply(ultimo);}" +
+"else if(o.tipo==='status'&&ultimo.host){ultimo.online=o.online;ultimo.conectou_em=o.conectou_em;ultimo.negado=o.negado;apply(ultimo);}" +
+"else if(o.tipo==='atualizacao'&&ultimo.host){ultimo.atualizacao=o.atualizacao;apply(ultimo);}" +
+"else if(o.tipo==='comando'&&o.comando&&ultimo.host){ultimo.comandos=[o.comando].concat(ultimo.comandos||[]).slice(0,15);apply(ultimo);}" +
+"if(o.tipo==='log')logAppend(o.linha);}catch(e3){}};es.onerror=function(){try{es.close();}catch(e2){};setTimeout(liga,3000);};}liga();" +
 "var lg0=document.getElementById('lg'),tent=0;" +
 "function puxar(){fetch('/api/estado',{cache:'no-store'}).then(function(r){return r.json()}).then(function(j){tent=0;apply(j);lg0.textContent=j.log||'';}).catch(function(){tent++;if(tent>2)document.getElementById('ctxt').textContent='sem resposta do programa local — tentando de novo…';setTimeout(puxar,2000);});}puxar();" +
 "</script></body></html>";
@@ -426,6 +432,16 @@ function conectar() {
   if (morrendo) return;
   log("conectando em " + URL_WS + " como " + host + " (v" + VERSAO_CLIENTE + ")");
   ws = new WebSocket(URL_WS);
+  /* v3.12.2: no deploy o pedido de conexão pode ficar pendurado — antes o programa
+   * esperava para sempre e a janela ficava "desconectado" até reiniciar à mão */
+  const relogioConexao = setTimeout(() => {
+    if (ws && ws.readyState === WebSocket.CONNECTING) {
+      log("conexão sem resposta em 15 s — tento de novo");
+      try { ws.close(); } catch { /* ignored */ }
+    }
+  }, 15000);
+  ws.addEventListener("open", () => clearTimeout(relogioConexao));
+  ws.addEventListener("close", () => clearTimeout(relogioConexao));
   ws.addEventListener("open", () => {
     nivelBackoff = 0;
     ws.send(JSON.stringify({ token, host, os: process.platform + " " + os.release(), user: os.userInfo().username }));
