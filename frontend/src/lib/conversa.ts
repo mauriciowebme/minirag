@@ -12,6 +12,8 @@
 
 export type EventoTransporte =
   | { tipo: "delta"; texto: string }
+  /** v3.13: pedaço do raciocínio do modelo (estilo Open WebUI) */
+  | { tipo: "raciocinio"; texto: string }
   /** v3.3: fotografia do texto acumulado no servidor (stream reanexável); o client usa
    *  como BASE e descarta o delta cujo efeito não passa dela (duplicata da corrida R2). */
   | { tipo: "parcial"; texto: string }
@@ -44,6 +46,12 @@ export type Linha = {
   escrevendo?: boolean;
   /** fala de caminho (rascunho da rodada virou balão fixo) */
   fala?: boolean;
+  /** v3.13: o que o modelo pensou (mostrado recolhido, estilo Open WebUI) */
+  raciocinio?: string;
+  /** ms desde o começo do turno até o 1º pedaço de pensamento */
+  raciocinioInicio?: number;
+  /** ms desde o começo do turno até a resposta começar (fecha o "Pensou por Ns") */
+  raciocinioFim?: number;
   aviso?: string | null;
   compacto?: string;
 };
@@ -191,11 +199,16 @@ export async function reativar(
         if (bruto.length >= base) {
           bruto += pedaco;
           bolha.texto = bruto;
+          if (bolha.raciocinio && bolha.raciocinioFim === undefined) bolha.raciocinioFim = Math.max(0, Date.now() - c.inicio);
         } // abaixo da base: o delta já está contido na fotografia — descarta (R2)
+      } else if (e.tipo === "raciocinio") {
+        bolha.raciocinio = (bolha.raciocinio ?? "") + String(e.texto ?? "");
+        if (bolha.raciocinioInicio === undefined) bolha.raciocinioInicio = Math.max(0, Date.now() - c.inicio);
       } else if (e.tipo === "fala") {
         const txt = String(e.texto ?? "");
         if (txt) {
           falou = true;
+          if (bolha.raciocinio && bolha.raciocinioFim === undefined) bolha.raciocinioFim = Math.max(0, Date.now() - c.inicio);
           const idx = c.msgs.findIndex((m) => m.id === vivoId);
           c.msgs.splice(idx < 0 ? c.msgs.length : idx, 0, {
             id: proximoId(), papel: "assistant", texto: txt, ferramentas: [], fala: true,
@@ -203,6 +216,7 @@ export async function reativar(
           bruto = ""; base = 0; bolha.texto = "";
         }
       } else if (e.tipo === "ferramenta") {
+        if (bolha.raciocinio && bolha.raciocinioFim === undefined) bolha.raciocinioFim = Math.max(0, Date.now() - c.inicio);
         bolha.ferramentas.push({ servidor: String(e.servidor), nome: String(e.nome), ok: Boolean(e.ok), ms: Number(e.ms), args: {}, resumo: "" });
       } else if (e.tipo === "fim") {
         caixa.dados = e.dados;
@@ -215,6 +229,7 @@ export async function reativar(
     if (bolha) {
       const r = caixa.dados ?? saida ?? { resposta: bruto };
       bolha.texto = erro ? "não consegui responder: " + erro : String(r.resposta ?? bruto);
+      if (!bolha.raciocinio && r.raciocinio) bolha.raciocinio = String(r.raciocinio);
       /* servidor sem stream (ou reanexar de tarefa): as falas vêm no remanescente do `fim` */
       const fl = Array.isArray(r.falas) ? (r.falas as string[]) : [];
       if (fl.length && !falou) {
@@ -276,12 +291,17 @@ async function bombeia(chave: string, memoria: string, tenant: string | undefine
       if (e.tipo === "delta") {
         bruto += String(e.texto ?? "");
         bolha.texto = bruto;
+        if (bolha.raciocinio && bolha.raciocinioFim === undefined) bolha.raciocinioFim = Math.max(0, Date.now() - c.inicio);
+      } else if (e.tipo === "raciocinio") {
+        bolha.raciocinio = (bolha.raciocinio ?? "") + String(e.texto ?? "");
+        if (bolha.raciocinioInicio === undefined) bolha.raciocinioInicio = Math.max(0, Date.now() - c.inicio);
       } else if (e.tipo === "fala") {
         /* a rodada chamou ferramenta e falou no caminho: o texto deixa de ser rascunho
            e vira BALÃO PRÓPRIO, cravado antes da bolha viva (conversa corrida, v3.8) */
         const txt = String(e.texto ?? "");
         if (txt) {
           falou = true;
+          if (bolha.raciocinio && bolha.raciocinioFim === undefined) bolha.raciocinioFim = Math.max(0, Date.now() - c.inicio);
           const idx = c.msgs.findIndex((m) => m.id === vivoId);
           c.msgs.splice(idx < 0 ? c.msgs.length : idx, 0, {
             id: proximoId(), papel: "assistant", texto: txt, ferramentas: [], fala: true,
@@ -293,6 +313,7 @@ async function bombeia(chave: string, memoria: string, tenant: string | undefine
         bruto = "";
         bolha.texto = "";
       } else if (e.tipo === "ferramenta") {
+        if (bolha.raciocinio && bolha.raciocinioFim === undefined) bolha.raciocinioFim = Math.max(0, Date.now() - c.inicio);
         bolha.ferramentas.push({ servidor: String(e.servidor), nome: String(e.nome), ok: Boolean(e.ok), ms: Number(e.ms), args: {}, resumo: "" });
       } else if (e.tipo === "fim") {
         caixa.dados = e.dados;
@@ -305,6 +326,7 @@ async function bombeia(chave: string, memoria: string, tenant: string | undefine
     if (bolha) {
       const r = caixa.dados ?? saida ?? { resposta: bruto, ferramentas: [] };
       bolha.texto = erro ? "não consegui responder: " + erro : String(r.resposta ?? bruto);
+      if (!bolha.raciocinio && r.raciocinio) bolha.raciocinio = String(r.raciocinio);
       /* servidor sem stream (ou reanexar de tarefa): as falas vêm no remanescente do `fim` */
       const fl = Array.isArray(r.falas) ? (r.falas as string[]) : [];
       if (fl.length && !falou) {

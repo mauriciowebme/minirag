@@ -131,13 +131,17 @@ export function Chat({
   const carregarHistorico = useCallback(async () => {
     try {
       const h = await get<ChatHistorico>("/chat?" + qs({ memoria, ...(tenantParam ? { tenant: tenantParam } : {}) }));
-      const linhas: { id: string; papel: "user" | "assistant"; texto: string; ferramentas: (typeof h.mensagens)[number]["ferramentas"]; fala?: boolean }[] = [];
+      const linhas: { id: string; papel: "user" | "assistant"; texto: string; ferramentas: (typeof h.mensagens)[number]["ferramentas"]; fala?: boolean; raciocinio?: string }[] = [];
       for (const m of h.mensagens) {
         /* v3.8: as falas de caminho voltam como balões próprios na ordem em que foram escritas —
            a conversa fica corrida também depois de recarregar a página */
         for (const [k, ft] of (m.falas ?? []).entries())
           linhas.push({ id: `h${m.id}f${k}`, papel: "assistant", texto: String(ft), ferramentas: [], fala: true });
-        linhas.push({ id: `h${m.id}`, papel: m.papel as "user" | "assistant", texto: m.texto, ferramentas: m.ferramentas ?? [] });
+        /* v3.13: o raciocínio gravado volta recolhido — "Pensou" clicável, como no Open WebUI */
+        linhas.push({
+          id: `h${m.id}`, papel: m.papel as "user" | "assistant", texto: m.texto,
+          ferramentas: m.ferramentas ?? [], ...(m.raciocinio ? { raciocinio: String(m.raciocinio) } : {}),
+        });
       }
       semear(chave, linhas);
     } catch (e) {
@@ -322,14 +326,33 @@ export function Chat({
           {msgs.map((m, i) => (
             <div key={m.id ?? i} className={"msg " + (m.papel === "user" ? "msg-eu" : "msg-ia") + (m.falha ? " msg-falha" : "")}>
               {m.papel === "assistant" ? (
-                m.escrevendo && !m.texto ? (
-                  <span className="sub2" id="chatPensando">
-                    pensando… {espera}s
-                    {naFila > 0 ? ` · ${naFila} na fila` : ""}
-                  </span>
-                ) : (
-                  <div className={(m.escrevendo ? "md vivo" : "md") + (m.fala ? " fala" : "")} dangerouslySetInnerHTML={{ __html: mdParaHtml(m.texto) }} />
-                )
+                <>
+                  {/* v3.13 — bloco de raciocínio no estilo do Open WebUI: "Pensando… Ns"
+                      aberto enquanto pensa, "Pensou por Ns" recolhido quando a resposta começa */}
+                  {m.raciocinio ? (
+                    <details className="racio" open={Boolean(m.escrevendo) && !m.texto}>
+                      <summary className="racio-cab">
+                        <span className="racio-ico">🧠</span>
+                        {m.escrevendo && !m.texto
+                          ? `Pensando… ${espera}s`
+                          : `Pensou${m.raciocinioInicio !== undefined && m.raciocinioFim !== undefined
+                              ? ` por ${Math.max(1, Math.round((m.raciocinioFim - m.raciocinioInicio) / 1000))}s`
+                              : ""}`}
+                      </summary>
+                      <div className="racio-txt">{m.raciocinio}</div>
+                    </details>
+                  ) : null}
+                  {m.escrevendo && !m.texto ? (
+                    m.raciocinio ? null : (
+                      <span className="sub2" id="chatPensando">
+                        pensando… {espera}s
+                        {naFila > 0 ? ` · ${naFila} na fila` : ""}
+                      </span>
+                    )
+                  ) : (
+                    <div className={(m.escrevendo ? "md vivo" : "md") + (m.fala ? " fala" : "")} dangerouslySetInnerHTML={{ __html: mdParaHtml(m.texto) }} />
+                  )}
+                </>
               ) : (
                 <>
                   {m.texto}

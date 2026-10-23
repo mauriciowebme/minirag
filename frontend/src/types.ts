@@ -269,6 +269,8 @@ export type ChatHistorico = {
     texto: string;
     ferramentas: ChamadaFerramenta[];
     falas?: string[];
+    /** v3.13: raciocínio do modelo (bloco "Pensou" ao reabrir a conversa) */
+    raciocinio?: string;
     quando: string;
   }[];
 };

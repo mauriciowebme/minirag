@@ -373,6 +373,32 @@
   .fontes {
     @apply mt-2 flex flex-col gap-1;
   }
+  /* v3.13 — bloco de raciocínio (estilo Open WebUI): cabeçalho discreto, texto apagado,
+     aberto enquanto pensa e recolhido assim que a resposta começa */
+  .racio {
+    @apply mb-2 rounded-md border border-borda bg-sup3/40;
+  }
+  .racio-cab {
+    @apply flex cursor-pointer select-none items-center gap-1.5 px-2 py-1 text-[11.5px] text-txt3;
+  }
+  .racio-cab::marker {
+    content: "";
+  }
+  .racio-cab::-webkit-details-marker {
+    display: none;
+  }
+  .racio-cab:hover {
+    @apply text-txt2;
+  }
+  .racio[open] .racio-cab {
+    @apply border-b border-borda text-txt2;
+  }
+  .racio-ico {
+    @apply text-[11px];
+  }
+  .racio-txt {
+    @apply max-h-40 overflow-auto whitespace-pre-wrap px-2.5 py-1.5 text-[11.5px] leading-relaxed text-txt3;
+  }
   .fonte {
     @apply border-l-2 border-borda pl-2 text-[12px] text-txt3;
   }
