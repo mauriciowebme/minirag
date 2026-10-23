@@ -61,6 +61,17 @@ export async function initMaquinas(): Promise<void> {
        PRIMARY KEY (tenant, host)
      )`,
   );
+  /* v3.12: apagar a máquina é definitivo — o cliente que já está instalado só volta
+   * com um cliente baixado DEPOIS da remoção (regra do dono: apagar exige chave nova).
+   * A marca fica registrada aqui para o servidor conferir na ativação. */
+  await q(
+    `CREATE TABLE IF NOT EXISTS maquinas_revogadas (
+       tenant      VARCHAR(64) NOT NULL,
+       host        VARCHAR(128) NOT NULL,
+       revogado_em TIMESTAMPTZ NOT NULL DEFAULT now(),
+       PRIMARY KEY (tenant, host)
+     )`,
+  );
   await q(
     `CREATE TABLE IF NOT EXISTS pareamentos (
        id         SERIAL PRIMARY KEY,
@@ -198,6 +209,11 @@ export async function apagarMaquina(alvo: string, host: string) {
     ligacoes.delete(chaveDe(alvo, host));
   }
   if (!r.rowCount) throw new HttpError(404, "máquina não encontrada");
+  await q(
+    `INSERT INTO maquinas_revogadas (tenant, host, revogado_em) VALUES ($1, $2, now())
+     ON CONFLICT (tenant, host) DO UPDATE SET revogado_em = now()`,
+    [alvo, host],
+  );
   return { removida: r.rows[0] };
 }
 
@@ -392,7 +408,7 @@ async function receberOi(ws: WebSocket, oi: OiFrame, httpBase = ""): Promise<voi
       lin.tenant, lin.host, String(oi.os ?? "").slice(0, 40), String(oi.user ?? "").slice(0, 64),
     ]);
   } else {
-    const c = await q<any>(`SELECT tenant, nome, usada, expira_em FROM chaves_cliente WHERE token_hash = $1`, [hash]);
+    const c = await q<any>(`SELECT tenant, nome, usada, expira_em, criado_em FROM chaves_cliente WHERE token_hash = $1`, [hash]);
     if (c.rowCount) {
       // 1b) chave assada no cliente baixado do painel: ativa na primeira maquina e queima
       const ch = c.rows[0];
@@ -403,6 +419,17 @@ async function receberOi(ws: WebSocket, oi: OiFrame, httpBase = ""): Promise<voi
       if (new Date(ch.expira_em).getTime() < Date.now()) {
         ws.send(JSON.stringify({ ack: "negado", motivo: "chave do cliente expirada — gere um cliente novo" }));
         log(`maquinas: TENTATIVA com chave vencida host=${host}`);
+        ws.close();
+        return;
+      }
+      /* v3.12: máquina apagada no painel não volta com o MESMO cliente baixado */
+      const rev = await q<any>(
+        `SELECT revogado_em FROM maquinas_revogadas WHERE tenant = $1 AND host = $2`,
+        [ch.tenant, host],
+      );
+      if (rev.rowCount && new Date(ch.criado_em).getTime() <= new Date(rev.rows[0].revogado_em).getTime()) {
+        ws.send(JSON.stringify({ ack: "negado", motivo: "máquina removida do painel — baixe um cliente novo" }));
+        log(`maquinas: REJEITADO ${ch.tenant}|${host} (máquina revogada; chave anterior à remoção)`);
         ws.close();
         return;
       }
