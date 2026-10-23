@@ -22,6 +22,7 @@ import { healthAtual } from "./ferramentas";
 import { criarUsuario, listarUsuarios, exigirOperador, removerUsuario } from "./usuarios";
 import { escreverEsquecimento, lerEsquecimento } from "./esquecimento";
 import { alvoMaquina, criarPareamento, controleDeMaquinaAtivo, listarMaquinas, rodar } from "./maquinas";
+import { NOMES_MAQUINA_TOOLS, toolMaquina, wrapComando } from "./maquinas_tools";
 import { responderChat, salvarProvider, testarProvider, verProvider } from "./provider";
 import {
   atualizarFerramentas,
@@ -34,7 +35,7 @@ import {
 /** As ferramentas que o Chat pode chamar: todas do MCP, menos o próprio chat (recursivo). */
 export function toolsParaChat(): Tool[] {
   // com o controle de maquinas desligado, nem o chat sonha que existe rodar_comando
-  return TOOLS.filter((t) => t.name !== "chat" && (controleDeMaquinaAtivo() || t.name !== "rodar_comando"));
+  return TOOLS.filter((t) => t.name !== "chat" && (controleDeMaquinaAtivo() || !eDaMaquinas(t.name)));
 }
 
 /** Executa uma ferramenta interna no MESMO processo — é o mesmo caminho do POST /mcp, sem HTTP. */
@@ -315,7 +316,7 @@ export const TOOLS: Tool[] = [
         temperatura: { type: "number" },
         system_prompt: { type: "string", description: "instrucoes iniciais do modelo; vazio = nenhuma instrucao" },
         mcp_interno: { type: "boolean", description: "ligar as ferramentas do proprio minirag no chat" },
-        max_rodadas: { type: "integer", description: "rodadas de ferramenta por pergunta (0-10; default 5)" },
+        max_rodadas: { type: "integer", description: "rodadas de ferramenta por pergunta (0-60; default 5)" },
         ativo: { type: "boolean" },
         global: { type: "boolean", description: "gravar como padrao global (so operador)" },
       },
@@ -390,11 +391,219 @@ export const TOOLS: Tool[] = [
         cmd: { type: "string", description: "comando de shell (ate 4000 chars)" },
         timeout: { type: "integer", description: "segundos aguardando; default 30, max 120" },
         tenant: { type: "string", description: "so operador: dono da maquina" },
+        sessao: { type: "string", description: "nome de sessao aberta (tool sessao) — roda dentro daquela pasta" },
+        env: { type: "object", description: "variaveis SO nesta execucao ({NOME: valor}); nao persistem" },
       },
       required: ["host", "cmd"],
     },
   },
+  /* --------------------------------------------------- v3.8: vocabulario do tunel (20 tools) */
+  {
+    name: "listar_arquivos",
+    description: "Lista um diretorio da maquina remota (nome, tamanho, modificacao, tipo).",
+    inputSchema: { type: "object", properties: {
+      host: { type: "string" },
+      caminho: { type: "string", description: "diretorio, ex.: C:\\\\DAM ou /opt" },
+      padrao: { type: "string", description: "filtro de nome (padrao *)" },
+      tenant: { type: "string", description: "so operador: dono da maquina" } }, required: ["host", "caminho"] },
+  },
+  {
+    name: "ler_arquivo",
+    description: "Le um arquivo da maquina remota. Texto: conteudo utf-8 (offset/limite em bytes). binario=true: base64 ate 800KB por chamada.",
+    inputSchema: { type: "object", properties: {
+      host: { type: "string" },
+      caminho: { type: "string" },
+      offset: { type: "integer", description: "byte inicial (padrao 0)" },
+      limite: { type: "integer", description: "max bytes (padrao 200000, max 800000)" },
+      binario: { type: "boolean", description: "true = devolver base64 cru" },
+      tenant: { type: "string", description: "so operador" } }, required: ["host", "caminho"] },
+  },
+  {
+    name: "escrever_arquivo",
+    description: "Escreve um arquivo na maquina remota. TEXTO: conteudo (utf-8 cru, o servidor codifica — NUNCA cole base64 na mao). BINARIO: conteudo_base64. append=true acrescenta. Cria pastas-mae. Devolve bytes_no_arquivo. Limite 16MB.",
+    inputSchema: { type: "object", properties: {
+      host: { type: "string" },
+      caminho: { type: "string" },
+      conteudo: { type: "string", description: "texto cru utf-8" },
+      conteudo_base64: { type: "string", description: "bytes em base64" },
+      append: { type: "boolean" },
+      tenant: { type: "string", description: "so operador" } }, required: ["host", "caminho"] },
+  },
+  {
+    name: "buscar_arquivos",
+    description: "Busca arquivos no disco da maquina: por nome (glob, recursivo) e/ou conteudo (texto fixo).",
+    inputSchema: { type: "object", properties: {
+      host: { type: "string" },
+      raiz: { type: "string", description: "onde procurar (ex.: C:\\\\ ou /opt)" },
+      nome: { type: "string", description: "glob de nome (ex.: *.log)" },
+      conteudo: { type: "string", description: "texto fixo dentro dos arquivos" },
+      max_resultados: { type: "integer", description: "padrao 200, max 1000" },
+      tenant: { type: "string", description: "so operador" } }, required: ["host", "raiz"] },
+  },
+  {
+    name: "grep_remoto",
+    description: "Busca CONTEUDO em arquivos com linhas e contexto: 'caminho:linha: texto'. RAIZ ESTREITA obrigatoria. Glob filtra; regex opcional; padrao e texto fixo.",
+    inputSchema: { type: "object", properties: {
+      host: { type: "string" },
+      raiz: { type: "string", description: "pasta estreita (ex.: C:\\\\logs\\\\hoje)" },
+      padrao: { type: "string" },
+      glob: { type: "string", description: "filtro de nome (padrao *)" },
+      contexto: { type: "integer", description: "linhas antes/depois (0-10)" },
+      regex: { type: "boolean" },
+      ignore_case: { type: "boolean", description: "padrao true" },
+      max_resultados: { type: "integer", description: "padrao 100, max 1000" },
+      tenant: { type: "string", description: "so operador" } }, required: ["host", "raiz", "padrao"] },
+  },
+  {
+    name: "editar_no_local",
+    description: "EDICAO de arquivo na maquina: busca EXATA unica (0 ocorrencias = erro, >1 sem replace_all = erro); troca texto utf-8 ate 16MB; recusa binario; casa LF->CRLF e avisa; seca=true previsualiza sem gravar.",
+    inputSchema: { type: "object", properties: {
+      host: { type: "string" },
+      caminho: { type: "string" },
+      busca: { type: "string", description: "texto exato unico (ou replace_all)" },
+      substituicao: { type: "string", description: "texto novo (vazio = apagar)" },
+      replace_all: { type: "boolean" },
+      seca: { type: "boolean", description: "so mostra, nao grava" },
+      tenant: { type: "string", description: "so operador" } }, required: ["host", "caminho", "busca", "substituicao"] },
+  },
+  {
+    name: "estado_maquina",
+    description: "Diagnostico num disparo: SO, uptime, RAM, CPU%, disco por unidade (Linux: load). Antes de culpar a ferramenta por escrita falha, veja o disco.",
+    inputSchema: { type: "object", properties: {
+      host: { type: "string" },
+      tenant: { type: "string", description: "so operador" } }, required: ["host"] },
+  },
+  {
+    name: "processos",
+    description: "Processos: listar top por memoria (PID MEM CPU APP TITULO); matar encerra por nome exato (Stop-Process/pkill) e diz quantos.",
+    inputSchema: { type: "object", properties: {
+      host: { type: "string" },
+      acao: { type: "string", enum: ["listar", "matar"] },
+      nome: { type: "string", description: "para matar: nome sem .exe" },
+      top: { type: "integer", description: "padrao 15, max 100" },
+      tenant: { type: "string", description: "so operador" } }, required: ["host", "acao"] },
+  },
+  {
+    name: "janelas",
+    description: "Janelas visiveis da maquina (Windows): listar devolve 'PID APP TITULO'; focar traz a janela cujo titulo contem 'titulo'. Mire por NOME, nunca por coordenada chutada.",
+    inputSchema: { type: "object", properties: {
+      host: { type: "string" },
+      acao: { type: "string", enum: ["listar", "focar"] },
+      titulo: { type: "string", description: "para focar: substring do titulo" },
+      tenant: { type: "string", description: "so operador" } }, required: ["host", "acao"] },
+  },
+  {
+    name: "area_transferencia",
+    description: "Le (get) ou escreve (set) a area de transferencia da maquina. set pisa o que estava. Linux precisa xclip.",
+    inputSchema: { type: "object", properties: {
+      host: { type: "string" },
+      acao: { type: "string", enum: ["get", "set"] },
+      texto: { type: "string", description: "para set" },
+      tenant: { type: "string", description: "so operador" } }, required: ["host", "acao"] },
+  },
+  {
+    name: "falar",
+    description: "Sintetizador de voz da maquina fala o texto nos alto-falantes (recado sonoro). Bloqueia a fila do host ate terminar. Max 600 chars.",
+    inputSchema: { type: "object", properties: {
+      host: { type: "string" },
+      texto: { type: "string" },
+      tenant: { type: "string", description: "so operador" } }, required: ["host", "texto"] },
+  },
+  {
+    name: "abrir",
+    description: "Abre algo NA maquina como duplo clique: URL (navegador padrao), pasta (Explorador) ou caminho de programa. Nao espera terminar.",
+    inputSchema: { type: "object", properties: {
+      host: { type: "string" },
+      alvo: { type: "string", description: "URL, pasta ou exe" },
+      tenant: { type: "string", description: "so operador" } }, required: ["host", "alvo"] },
+  },
+  {
+    name: "servicos",
+    description: "Servicos Windows (systemctl no Linux): listar (glob, max N) ou start/stop/restart por nome exato. Costumam exigir admin; sem privilegio o erro vem honesto.",
+    inputSchema: { type: "object", properties: {
+      host: { type: "string" },
+      acao: { type: "string", enum: ["listar", "start", "stop", "restart"] },
+      nome: { type: "string" },
+      filtro: { type: "string", description: "para listar: glob (padrao *)" },
+      max_resultados: { type: "integer", description: "padrao 30, max 200" },
+      tenant: { type: "string", description: "so operador" } }, required: ["host", "acao"] },
+  },
+  {
+    name: "eventos",
+    description: "Event log da maquina (Application+System; journalctl -p err no Linux): erros/crashes/reboots das ultimas N horas, primeira linha de cada mensagem.",
+    inputSchema: { type: "object", properties: {
+      host: { type: "string" },
+      horas: { type: "integer", description: "janela (padrao 24, max 168)" },
+      nivel: { type: "string", enum: ["erro", "qualquer"] },
+      max_resultados: { type: "integer", description: "padrao 15, max 100" },
+      tenant: { type: "string", description: "so operador" } }, required: ["host"] },
+  },
+  {
+    name: "rede",
+    description: "Rede VISTA DA MAQUINA: ping (4 probes), dns, tracado, portas (TCP em escuta com dono), espera_porta (bloqueia ate a porta abrir) ou info (IPs/gateway/DNS proprios).",
+    inputSchema: { type: "object", properties: {
+      host: { type: "string" },
+      acao: { type: "string", enum: ["ping", "dns", "tracado", "portas", "espera_porta", "info"] },
+      alvo: { type: "string", description: "host/URL; em espera_porta: a porta (ex.: 5173)" },
+      timeout: { type: "integer", description: "espera_porta: segundos (padrao 30, max 120)" },
+      tenant: { type: "string", description: "so operador" } }, required: ["host", "acao"] },
+  },
+  {
+    name: "esperar_arquivo",
+    description: "Bloqueia (poll 700ms) ate existir arquivo novo na pasta da maquina; devolve caminho+bytes+hora. Ideal p/ aguardar XML cair na caixa; depois leia com ler_arquivo. Max 120s.",
+    inputSchema: { type: "object", properties: {
+      host: { type: "string" },
+      pasta: { type: "string" },
+      padrao: { type: "string", description: "glob (padrao *)" },
+      timeout: { type: "integer", description: "padrao 60, max 120" },
+      tenant: { type: "string", description: "so operador" } }, required: ["host", "pasta"] },
+  },
+  {
+    name: "power",
+    description: "Energia da maquina — POR PADRAO RECUSA: exige confirmar=true. acoes: lock (seguro), logout (derruba trabalho aberto!), restart, shutdown. SEM autostart: maquina desligada fica offline ate alguem reabrir o cliente.",
+    inputSchema: { type: "object", properties: {
+      host: { type: "string" },
+      acao: { type: "string", enum: ["lock", "logout", "restart", "shutdown"] },
+      confirmar: { type: "boolean", description: "true = ciente do efeito" },
+      tenant: { type: "string", description: "so operador" } }, required: ["host", "acao"] },
+  },
+  {
+    name: "rodar_lote",
+    description: "VARIOS comandos numa so ida ao host (economiza roundtrips): sequencia, cada um com exit proprio — falha de um nao impede o proximo. Blocos '### N exit=X'. Max 20 comandos, teto 120s.",
+    inputSchema: { type: "object", properties: {
+      host: { type: "string" },
+      comandos: { type: "array", items: { type: "string" }, description: "1 a 20 linhas" },
+      sessao: { type: "string", description: "roda tudo na pasta da sessao" },
+      env: { type: "object", description: "variaveis para todos do lote" },
+      tenant: { type: "string", description: "so operador" } }, required: ["host", "comandos"] },
+  },
+  {
+    name: "sessao",
+    description: "Memoria de pasta por maquina (no servidor): abrir fixa nome->diretorio existente; rodar_comando/rodar_lote com sessao='nome' rodam la dentro. listar mostra; fechar remove. Vive enquanto o servidor estiver de pe.",
+    inputSchema: { type: "object", properties: {
+      host: { type: "string" },
+      acao: { type: "string", enum: ["abrir", "listar", "fechar"] },
+      nome: { type: "string", description: "id da sessao (padrao: padrao)" },
+      pasta: { type: "string", description: "abrir: diretorio que ja existe" },
+      tenant: { type: "string", description: "so operador" } }, required: ["host", "acao"] },
+  },
+  {
+    name: "git_remoto",
+    description: "Git numa pasta da maquina remota com saida estruturada: status, diff, log, branches. ESCRITA GATEADA: add aceita path; commit/push/checkout exigem confirmar=true (governanca).",
+    inputSchema: { type: "object", properties: {
+      host: { type: "string" },
+      repo: { type: "string", description: "caminho do repositorio na maquina" },
+      acao: { type: "string", enum: ["status", "diff", "log", "branches", "add", "commit", "push", "checkout"] },
+      path: { type: "string" },
+      mensagem: { type: "string" },
+      ref: { type: "string", description: "checkout: branch; log: quantos" },
+      confirmar: { type: "boolean", description: "obrigatorio true em commit/push/checkout" },
+      tenant: { type: "string", description: "so operador" } }, required: ["host", "repo", "acao"] },
+  },
 ];
+
+const CONJUNTO_MAQUINAS = new Set<string>(["rodar_comando", ...NOMES_MAQUINA_TOOLS]);
+const eDaMaquinas = (n: string): boolean => CONJUNTO_MAQUINAS.has(n);
 
 const ok = (id: unknown, result: unknown) => ({ jsonrpc: "2.0", id, result });
 const falha = (id: unknown, code: number, message: string) => ({
@@ -587,16 +796,19 @@ async function executarTool(
       const alvo = user.operador ? String(args.tenant ?? "").trim() || null : user.tenant;
       return listarMaquinas(alvo);
     }
-    case "rodar_comando":
+    case "rodar_comando": {
+      const cmdEnrolado = await wrapComando(user, args, String(args.cmd ?? ""));
       return rodar(
         user,
         alvoMaquina(user, args.tenant),
         String(args.host ?? ""),
-        String(args.cmd ?? ""),
+        cmdEnrolado,
         args.timeout === undefined || args.timeout === null ? undefined : Number(args.timeout),
         "mcp",
       );
+    }
     default:
+      if ((NOMES_MAQUINA_TOOLS as readonly string[]).includes(name)) return toolMaquina(user, name, args, "mcp");
       throw new Error(`tool desconhecida: ${name}`);
   }
 }
@@ -623,7 +835,7 @@ export async function despachar(msg: any, deps: McpDeps): Promise<unknown | null
   if (method.startsWith("notifications/")) return null;
   if (method === "initialize") return ok(id, initialize(params));
   if (method === "ping") return ok(id, {});
-  if (method === "tools/list") return ok(id, { tools: controleDeMaquinaAtivo() ? TOOLS : TOOLS.filter((t) => t.name !== "rodar_comando") });
+  if (method === "tools/list") return ok(id, { tools: controleDeMaquinaAtivo() ? TOOLS : TOOLS.filter((t) => !eDaMaquinas(t.name)) });
 
   if (method === "tools/call") {
     let user: Usuario;

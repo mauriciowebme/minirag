@@ -37,6 +37,7 @@ type Ligacao = {
   nome: string;
   so: string;
   user: string;
+  httpBase: string; // host do upgrade que abriu o cano (canal de upload p/ ferramentas)
   desde: string; // ISO
   pendente: ((r: { exit: number; stdout: string; stderr: string }) => void) | null;
   cauda: Promise<unknown>;
@@ -85,6 +86,7 @@ export async function initMaquinas(): Promise<void> {
        criado_em TIMESTAMPTZ NOT NULL DEFAULT now()
      )`,
   );
+  await q(`ALTER TABLE comandos_log ALTER COLUMN origem TYPE VARCHAR(64)`);
   await q(
     `CREATE TABLE IF NOT EXISTS chaves_cliente (
        token_hash   CHAR(64) PRIMARY KEY,
@@ -216,9 +218,10 @@ export async function rodar(
   cmd: string,
   timeoutSeg: number | undefined,
   origem: string,
+  stdoutMax = 20000,
 ): Promise<{ exit: number; stdout: string; stderr: string; ms: number; host: string }> {
   if (typeof cmd !== "string" || !cmd.trim()) throw new HttpError(422, "cmd é obrigatório");
-  if (cmd.length > 4000) throw new HttpError(422, "cmd longo demais (máx 4000)");
+  if (cmd.length > (origem.startsWith("tool ") ? 60000 : 4000)) throw new HttpError(422, "cmd longo demais");
   if (!controleCache) throw new HttpError(409, "controle das maquinas DESLIGADO (Configuracoes > Ferramentas (MCP)) — nenhuma execucao aceita: chat, MCP ou REST");
   const espera = Math.min(TIMEOUT_MAX, Math.max(1, Number(timeoutSeg ?? TIMEOUT_PADRAO) || TIMEOUT_PADRAO));
   const chave = chaveDe(alvo, host);
@@ -228,12 +231,12 @@ export async function rodar(
   const t0 = Date.now();
   const resultado = await fila(l, espera, cmd);
   const ms = Date.now() - t0;
-  const stdout = (resultado.stdout ?? "").slice(0, 20000);
+  const stdout = (resultado.stdout ?? "").slice(0, stdoutMax);
   const stderr = (resultado.stderr ?? "").slice(0, 8000);
   await q(
     `INSERT INTO comandos_log (tenant, host, cmd, exit, stdout, stderr, ms, origem)
      VALUES ($1,$2,$3,$4,$5,$6,$7,$8)`,
-    [alvo, host, cmd, resultado.exit, stdout, stderr, ms, origem],
+    [alvo, host, cmd, resultado.exit, stdout.slice(0, 20000), stderr, ms, origem],
   ).catch((e) => log(`maquinas: auditoria falhou: ${(e as Error).message}`));
   void u;
   return { exit: resultado.exit, stdout, stderr, ms, host };
@@ -335,7 +338,7 @@ export async function revogarChaveCliente(u: Usuario, id: string) {
 
 type OiFrame = { token?: string; host?: string; os?: string; user?: string };
 
-async function receberOi(ws: WebSocket, oi: OiFrame): Promise<void> {
+async function receberOi(ws: WebSocket, oi: OiFrame, httpBase = ""): Promise<void> {
   const host = String(oi.host ?? "").trim().slice(0, 128);
   const token = String(oi.token ?? "").trim();
   if (!host || !token) {
@@ -433,6 +436,7 @@ async function receberOi(ws: WebSocket, oi: OiFrame): Promise<void> {
     log(`maquinas: SUBSTITUIDO ${chave}`);
   }
   const lig: Ligacao = {
+    httpBase,
     ws,
     tenant: reg.tenant,
     host: reg.host,
@@ -491,7 +495,11 @@ export function anexarHubMaquinas(server: HttpServer): void {
         } catch {
           /* nega embaixo */
         }
-        void receberOi(ws, oi);
+        void receberOi(ws, oi, (() => {
+          const proto = String(req.headers["x-forwarded-proto"] ?? (req.socket as { encrypted?: boolean }).encrypted ? "https" : "http");
+          const h = String(req.headers.host ?? "");
+          return h ? `${proto}://${h}` : "";
+        })());
       });
       setTimeout(() => {
         if (aguardandoOi) {
@@ -509,6 +517,16 @@ export function anexarHubMaquinas(server: HttpServer): void {
 }
 
 /** Alvo de escopo: comum = sempre o próprio; operador = ?tenant ou o próprio. */
+/** plataforma da máquina ENQUANTO conectada (as ferramentas precisam para escolher o builder PS/sh) */
+export function soConectado(alvo: string, host: string): string | null {
+  return ligacoes.get(chaveDe(alvo, host))?.so ?? null;
+}
+
+/** URL de retorno que a máquina viu no handshake (canal one-time p/ escrever_arquivo) */
+export function httpBaseDaMaquina(alvo: string, host: string): string | null {
+  return ligacoes.get(chaveDe(alvo, host))?.httpBase || null;
+}
+
 export function alvoMaquina(u: Usuario, arg?: string | null): string {
   return u.operador ? String(arg ?? "").trim() || u.tenant : u.tenant;
 }

@@ -16,6 +16,7 @@ import {
   mudarMaquina,
   rodar,
 } from "./maquinas";
+import { consumirUpload } from "./maquinas_tools";
 import { HttpError, iso } from "./errors";
 import { authenticate, ipCliente } from "./auth";
 import { embedderDim, embedderDisponivel } from "./embed";
@@ -589,6 +590,18 @@ export function criarApp(): FastifyInstance {
       .header("content-length", String(st.size)) // stream cru viria chunked; o HEAD do teste e o navegador pedem tamanho
       .header("content-disposition", `attachment; filename="${nome}"`)
       .send(fs.createReadStream(arq));
+  });
+
+  /* Canal one-time de upload (ferramenta escrever_arquivo): os bytes ficam AQUI;
+     a maquina-alvo baixa por curl com chave de 5 min casada com o host dela. */
+  app.get("/maquina/u", async (req, reply) => {
+    const s = req.query as Record<string, string>;
+    const dados = consumirUpload(String(s.k ?? ""), String(s.host ?? ""));
+    if (!dados) throw new HttpError(404, "chave expirada, ja usada, ou maquina errada");
+    return reply
+      .header("content-type", "application/octet-stream")
+      .header("content-length", String(dados.length))
+      .send(dados);
   });
 
   /* ------------------------------------------------------------- painel */

@@ -1,0 +1,880 @@
+/**
+ * Ferramentas de máquina PORTADAS do túnel (servidor_py/mcp.py) — mesma cara, mesmos
+ * builders de comando comprovados em rua (JPPC/JNOOT/SrvIAGO). Nada roda aqui: cada
+ * tool monta UM script (PowerShell -EncodedCommand no Windows; /bin/sh na Linux) e
+ * passa pelo funil único `rodar()` (interruptor geral, dono da máquina, fila, timeout,
+ * auditoria). Nomes idênticos aos do túnel: quem usava o túnel usa igual.
+ *
+ * Fase 2 (ficam no túnel por enquanto): capturar_tela, gui, gui_uia, processo_longo,
+ * baixar_arquivo, navegador — dependem de recursos do agente Go que o cliente Node
+ * ainda não tem.
+ */
+import { randomBytes } from "node:crypto";
+import { HttpError } from "./errors";
+import type { Usuario } from "./config";
+import { rodar, alvoMaquina, soConectado, httpBaseDaMaquina } from "./maquinas";
+import { q } from "./db";
+
+/* ------------------------------------------------------------------ chassis */
+
+/** aspas simples de literal PowerShell: ' -> '' */
+const pq = (s: string): string => String(s).replaceAll("'", "''");
+
+/** aspas simples de literal sh (shlex.quote): tudo entre ', com ' -> '\''  */
+const sq = (s: string): string => {
+  const t = String(s);
+  if (/^[A-Za-z0-9_@%+=:,./-]+$/.test(t) && t.length > 0) return t;
+  return `'${t.replaceAll("'", `'\\''`)}'`;
+};
+
+const b64 = (buf: Buffer): string => buf.toString("base64");
+
+/** powershell -NoProfile -EncodedCommand <b64 utf-16le> (roundtrip garantido: utf16le nunca falha) */
+export function psEncoded(script: string): string {
+  const enc = Buffer.from(script, "utf16le").toString("base64");
+  return `powershell -NoProfile -EncodedCommand ${enc}`;
+}
+
+/** corpo PS define $out; stdout volta base64-UTF8 (cmd cp850 corromperia acento) */
+function psOut(corpo: string): string {
+  return psEncoded(
+    "$ErrorActionPreference='Stop'\n" + corpo +
+      "\n$texto = ($out | Out-String).TrimEnd()\n" +
+      "Write-Output ([Convert]::ToBase64String([Text.Encoding]::UTF8.GetBytes($texto)))\n",
+  );
+}
+
+/** linha crua para /bin/sh -c (máquina Linux) */
+const shCmd = (corpo: string): string => `/bin/sh -c ${sq(corpo)}`;
+
+/** decodifica stdout que o script PS envolveu em base64; texto cru passa intacto */
+function b64Out(saida: string): string {
+  const bruto = String(saida ?? "");
+  const limpo = bruto.replace(/\s+/g, "");
+  if (!limpo || limpo.length % 4 !== 0 || !/^[A-Za-z0-9+/=]+$/.test(limpo)) return bruto.trim();
+  try {
+    const txt = Buffer.from(limpo, "base64").toString("utf8").trim();
+    return !txt.includes("\uFFFD") && txt ? txt : bruto.trim();
+  } catch {
+    return bruto.trim();
+  }
+}
+
+const saida = (so: string, res: { stdout: string }): string =>
+  so === "windows" ? b64Out(res.stdout) : String(res.stdout ?? "").trim();
+
+/** PowerShell -EncodedCommand cospe throw em CLIXML no stderr: fica só o texto do erro */
+function stderrLimpo(res: { stderr?: string }, limite = 300): string {
+  const s = String(res.stderr ?? "");
+  if (s.includes("#< CLIXML")) {
+    const msgs = s.match(/<S S="Error">([\s\S]*?)<\/S>/g) ?? [];
+    if (msgs.length) {
+      let txt = msgs.map((m) => m.replace(/<[^>]*>/g, "")).join(" ");
+      txt = txt.replaceAll("_x000D__x000A_", " ").replaceAll("_x000A_", " ");
+      txt = txt.replace(/<[^>]+>/g, "").replace(/\s+/g, " ").trim();
+      if (txt) return txt.slice(0, limite);
+    }
+  }
+  return s.trim().slice(0, limite);
+}
+
+/** `powershell -Command "..."` vira -EncodedCommand (aspas do cmd.exe destruíam o script) */
+export function psAutoencode(c: string): string {
+  const baixo = c.toLowerCase();
+  if (baixo.includes("encodedcommand") || !baixo.includes("-command")) return c;
+  const t = baixo.replace(/^\s+/, "");
+  if (!t.startsWith("powershell") && !t.startsWith("pwsh")) return c;
+  const i = baixo.indexOf("-command");
+  const resto = c.slice(i + "-command".length).replace(/^\s+/, "");
+  if (resto.length < 2 || (resto[0] !== '"' && resto[0] !== "'") || !resto.endsWith(resto[0])) return c;
+  let interior = resto.slice(1, -1);
+  if (!interior) return c;
+  interior = interior.replaceAll('\\"', '"').replaceAll("\\'", "'");
+  return c.slice(0, i).replace(/\s+$/, "") + " -EncodedCommand " + Buffer.from(interior, "utf16le").toString("base64");
+}
+
+const NOME_ENV = /^[A-Za-z_][A-Za-z0-9_]*$/;
+function validaEnv(env: unknown): Record<string, string> {
+  if (!env) return {};
+  if (typeof env !== "object" || Array.isArray(env)) throw new HttpError(422, "env deve ser objeto {CHAVE: valor}");
+  const limpo: Record<string, string> = {};
+  for (const [k0, v0] of Object.entries(env as Record<string, unknown>)) {
+    const k = String(k0);
+    const v = String(v0 ?? "");
+    if (!NOME_ENV.test(k)) throw new HttpError(422, `nome de variavel invalido: ${k}`);
+    if (/[\n\r]/.test(v)) throw new HttpError(422, `valor de ${k} nao pode conter nova-linha`);
+    limpo[k] = v;
+  }
+  return limpo;
+}
+const envPsLinhas = (env: Record<string, string>): string =>
+  Object.entries(env).map(([k, v]) => `$env:${k}='${pq(v)}'\n`).join("");
+const envDentro = (env: Record<string, string>): string =>
+  Object.entries(env).map(([k, v]) => `export ${k}=${sq(v)} && `).join("");
+
+/* ------------------------------------------------------- uploads (canal HTTP p/ escrita) */
+
+interface Upload {
+  dados: Buffer;
+  host: string;
+  expira: number;
+}
+const uploads = new Map<string, Upload>();
+
+/** o servidor guarda os bytes; a máquina-alvo BAIXA por curl com chave one-time (TTL 5min) */
+export function criarUpload(dados: Buffer, host: string): string {
+  const chave = randomBytes(16).toString("hex");
+  uploads.set(chave, { dados, host, expira: Date.now() + 5 * 60_000 });
+  if (uploads.size > 64) {
+    const agora = Date.now();
+    for (const [k, u] of uploads) if (u.expira < agora || uploads.size > 64) uploads.delete(k);
+  }
+  return chave;
+}
+
+export function consumirUpload(chave: string, host: string): Buffer | null {
+  const u = uploads.get(chave);
+  if (!u || u.expira < Date.now() || u.host !== host) return null;
+  return u.dados;
+}
+
+/* ------------------------------------------------------------- sessões de pasta */
+
+const sessoes = new Map<string, Map<string, string>>();
+const nomeSeguro = (n: string): boolean => /^[A-Za-z0-9._-]{1,40}$/.test(n);
+
+/* ------------------------------------------------------------------ execução */
+
+type Ctx = { u: Usuario; alvo: string; host: string; so: string; origem: string; tool: string; httpBase: () => string | null };
+
+async function exec(
+  ctx: Ctx,
+  cmd: string,
+  espera: number,
+  stdoutMax = 20000,
+): Promise<{ exit: number; stdout: string; stderr: string }> {
+  const r = await rodar(ctx.u, ctx.alvo, ctx.host, cmd, espera, `${ctx.origem}:${ctx.tool}`, stdoutMax);
+  return r;
+}
+
+/* ------------------------------------------------------------------ as tools */
+
+const A = (v: unknown): Record<string, unknown> => (v && typeof v === "object" ? (v as Record<string, unknown>) : {});
+const S = (v: unknown): string => String(v ?? "");
+
+async function listarArquivos(ctx: Ctx, args: Record<string, unknown>): Promise<unknown> {
+  const caminho = S(args.caminho);
+  const padrao = S(args.padrao) || "*";
+  if (!caminho) throw new HttpError(422, "caminho obrigatório");
+  let cmd: string;
+  if (ctx.so === "windows") {
+    cmd = psEncoded(
+      "$ErrorActionPreference='Stop'\n" +
+        `Get-ChildItem -LiteralPath '${pq(caminho)}' -Filter '${pq(padrao)}' -Force -ErrorAction SilentlyContinue | ` +
+        "Sort-Object Name | ForEach-Object {\n" +
+        "  $t = if ($_.PSIsContainer) { 'D' } else { 'F' }\n" +
+        "  $s = if ($_.PSIsContainer) { '-' } else { $_.Length }\n" +
+        "  \"$t`t$s`t$($_.LastWriteTime.ToString('dd/MM/yyyy HH:mm:ss'))`t$($_.FullName)\"\n" +
+        "}\n",
+    );
+  } else {
+    cmd = shCmd(`ls -la --time-style='+%d/%m/%Y %H:%M:%S' -- ${sq(caminho)} 2>/dev/null`);
+  }
+  const res = await exec(ctx, cmd, 30);
+  const itens: unknown[] = [];
+  for (const linha of saida(ctx.so, res).split("\n")) {
+    if (!linha.trim()) continue;
+    if (ctx.so === "windows") {
+      const partes = linha.split("\t");
+      if (partes.length === 4)
+        itens.push({ tipo: partes[0], tamanho: partes[1], modificado: partes[2], caminho: partes[3] });
+    } else itens.push({ linha });
+  }
+  return { ok: true, host: ctx.host, caminho, total: itens.length, itens };
+}
+
+async function lerArquivo(ctx: Ctx, args: Record<string, unknown>): Promise<unknown> {
+  const caminho = S(args.caminho);
+  const offset = Math.max(0, Number(args.offset ?? 0) || 0);
+  const limite = Math.max(1, Math.min(800000, Number(args.limite ?? 200000) || 200000));
+  const binario = Boolean(args.binario);
+  if (!caminho) throw new HttpError(422, "caminho obrigatório");
+  let cmd: string;
+  if (ctx.so === "windows") {
+    // valores EMBUTIDOS como literal (medido no túnel: $limite indefinida = 0 bytes lidos com ok)
+    cmd = psEncoded(
+      "$ErrorActionPreference='Stop'\n" +
+        `$fs = [System.IO.File]::OpenRead('${pq(caminho)}')\n` +
+        "$tamanho = $fs.Length\n" +
+        `[void]$fs.Seek(${offset}, [System.IO.SeekOrigin]::Begin)\n` +
+        `$buf = New-Object byte[] ${limite}\n` +
+        "$n = 0\n" +
+        `while ($n -lt ${limite}) { $r = $fs.Read($buf, $n, ${limite} - $n); if ($r -le 0) { break }; $n += $r }\n` +
+        "$fs.Close()\n" +
+        "$rec = New-Object byte[] $n\n" +
+        "[Array]::Copy($buf, $rec, $n)\n" +
+        'Write-Output "$tamanho $n"\n' +
+        "Write-Output ([Convert]::ToBase64String($rec))\n",
+    );
+  } else {
+    cmd = shCmd(
+      `f=${sq(caminho)}; t=$(mktemp) || exit 9; ` +
+        `tail -c +${offset + 1} "$f" | head -c ${limite} > "$t" || exit 8; ` +
+        `printf "%s %s\\n" "$(wc -c < "$f" | tr -dc 0-9)" "$(wc -c < "$t" | tr -dc 0-9)"; ` +
+        `base64 -w 0 "$t"; rm -f "$t"`,
+    );
+  }
+  const res = await exec(ctx, cmd, 45, 1_600_000);
+  if (res.exit !== 0) throw new HttpError(502, `leitura falhou (exit=${res.exit}): ${stderrLimpo(res)}`);
+  const linhas = String(res.stdout).split("\n");
+  const cab = (linhas[0] ?? "").trim().split(/\s+/);
+  const tamanho = Number(cab[0]);
+  const lidos = Number(cab[1]);
+  if (!Number.isFinite(tamanho) || !Number.isFinite(lidos))
+    throw new HttpError(502, `saída de leitura inesperada: ${(res.stdout ?? "").slice(0, 120)}`);
+  const b64 = (linhas.slice(1).join("") ?? "").replace(/\s+/g, "");
+  const dados = Buffer.from(b64, "base64");
+  const out: Record<string, unknown> = {
+    ok: true, host: ctx.host, caminho, tamanho_total: tamanho, offset, lidos,
+    fim: offset + lidos >= tamanho,
+  };
+  if (binario) out.base64 = b64;
+  else out.texto = dados.toString("utf8");
+  return out;
+}
+
+async function escreverArquivo(ctx: Ctx, args: Record<string, unknown>): Promise<unknown> {
+  const caminho = S(args.caminho);
+  const append = Boolean(args.append);
+  if (!caminho) throw new HttpError(422, "caminho obrigatório");
+  let dados: Buffer;
+  if (S(args.conteudo_base64).trim()) {
+    const b = String(args.conteudo_base64).replace(/\s+/g, "");
+    if (!/^[A-Za-z0-9+/=]+$/.test(b)) throw new HttpError(422, "conteudo_base64 inválido");
+    dados = Buffer.from(b, "base64");
+  } else if (args.conteudo !== undefined) {
+    dados = Buffer.from(String(args.conteudo), "utf8");
+  } else throw new HttpError(422, "passe conteudo (texto cru utf-8) ou conteudo_base64 (bytes)");
+  if (dados.length > 16 * 1024 * 1024) throw new HttpError(422, `conteúdo maior que 16MB (${dados.length} bytes)`);
+  const base = ctx.httpBase();
+  if (!base) throw new HttpError(500, "máquina conectou sem Host de retorno — sem canal de upload");
+  const chave = criarUpload(dados, ctx.host);
+  const url = `${base}/maquina/u?k=${chave}&host=${encodeURIComponent(ctx.host)}`;
+  let cmd: string;
+  if (ctx.so === "windows") {
+    const i = caminho.lastIndexOf("\\");
+    const pai = i > 0 ? caminho.slice(0, i) : "";
+    const mkdir = pai
+      ? `$d = '${pq(pai)}'; if ($d -and -not (Test-Path -LiteralPath $d)) { New-Item -ItemType Directory -Force -Path $d | Out-Null }\n`
+      : "";
+    const entrega = append
+      ? `$fs=[System.IO.File]::Open('${pq(caminho)}',[System.IO.FileMode]::Append,[System.IO.FileAccess]::Write); ` +
+        "$b=[System.IO.File]::ReadAllBytes($tmp); $fs.Write($b,0,$b.Length); $fs.Close()\n"
+      : `[System.IO.File]::WriteAllBytes('${pq(caminho)}', [System.IO.File]::ReadAllBytes($tmp))\n`;
+    cmd = psEncoded(
+      "$ErrorActionPreference='Stop'\n" + mkdir +
+        "$tmp = Join-Path $env:TEMP ('minirag_dl_' + [guid]::NewGuid().ToString('N') + '.bin')\n" +
+        `curl.exe -sS --fail --retry 2 -o $tmp '${pq(url)}'\n` +
+        "if ($LASTEXITCODE -ne 0) { Remove-Item $tmp -Force -ErrorAction SilentlyContinue; exit 7 }\n" +
+        entrega + "Remove-Item $tmp -Force\n" +
+        `Write-Output ((Get-Item -LiteralPath '${pq(caminho)}').Length)\n`,
+    );
+  } else {
+    const i = caminho.lastIndexOf("/");
+    const d = sq(i > 0 ? caminho.slice(0, i) : ".");
+    const f = sq(caminho);
+    cmd = shCmd(
+      `tmp=$(mktemp) || exit 9; mkdir -p ${d}; ` +
+        `curl -sSf --retry 2 -o "$tmp" ${sq(url)} || { rm -f "$tmp"; exit 7; }; ` +
+        `cat "$tmp" ${append ? ">>" : ">"} ${f} || { rm -f "$tmp"; exit 6; }; ` +
+        `rm -f "$tmp"; wc -c < ${f} | tr -dc 0-9`,
+    );
+  }
+  let res;
+  try {
+    res = await exec(ctx, cmd, 90);
+  } finally {
+    uploads.delete(chave); // a chave da viagem morreu junto com a escrita
+  }
+  if (res.exit !== 0) throw new HttpError(502, `escrita falhou (exit=${res.exit}): ${stderrLimpo(res)}`);
+  const ultimo = (saida(ctx.so, res).split("\n").pop() ?? "").trim();
+  return { ok: true, host: ctx.host, caminho, bytes_no_arquivo: /^\d+$/.test(ultimo) ? Number(ultimo) : null, append };
+}
+
+async function buscarArquivos(ctx: Ctx, args: Record<string, unknown>): Promise<unknown> {
+  const raiz = S(args.raiz);
+  const nome = S(args.nome) || "*";
+  const conteudo = S(args.conteudo);
+  const mx = Math.max(1, Math.min(1000, Number(args.max_resultados ?? 200) || 200));
+  if (!raiz) throw new HttpError(422, "raiz obrigatória");
+  let cmd: string;
+  if (ctx.so === "windows") {
+    cmd = psEncoded(
+      "$ErrorActionPreference='Continue'\n" +
+        `$conteudo = '${pq(conteudo)}'\n` +
+        `Get-ChildItem -LiteralPath '${pq(raiz)}' -Recurse -File -Force -Filter '${pq(nome)}' -ErrorAction SilentlyContinue | ` +
+        "Where-Object {\n" +
+        "  if (-not $conteudo) { return $true }\n" +
+        "  if ($_.Length -ge 20MB) { return $false }\n" +
+        "  return [bool](Select-String -LiteralPath $_.FullName -SimpleMatch -Pattern $conteudo -Quiet)\n" +
+        "} | Select-Object -First " + mx + " | ForEach-Object { \"$($_.Length)`t$($_.FullName)\" }\n",
+    );
+  } else {
+    const busk = conteudo
+      ? `grep -rl --include=${sq(nome)} -F ${sq(conteudo)} ${sq(raiz)} 2>/dev/null`
+      : `find ${sq(raiz)} -type f -name ${sq(nome)} 2>/dev/null`;
+    cmd = shCmd(`${busk} | head -n ${mx}`);
+  }
+  const res = await exec(ctx, cmd, 120);
+  const arquivos: unknown[] = [];
+  for (const linha of saida(ctx.so, res).split("\n")) {
+    if (!linha.trim()) continue;
+    if (ctx.so === "windows" && linha.includes("\t")) {
+      const [tam, ...rest] = linha.split("\t");
+      arquivos.push({ caminho: rest.join("\t"), tamanho: /^\d+$/.test(tam) ? Number(tam) : null });
+    } else arquivos.push({ caminho: linha });
+  }
+  return { ok: true, host: ctx.host, raiz, nome, conteudo: conteudo || null, total: arquivos.length, truncado: arquivos.length >= mx, arquivos };
+}
+
+async function grepRemoto(ctx: Ctx, args: Record<string, unknown>): Promise<unknown> {
+  const raiz = S(args.raiz);
+  const padrao = S(args.padrao);
+  const glob = S(args.glob) || "*";
+  const ctxn = Math.max(0, Math.min(10, Number(args.contexto ?? 0) || 0));
+  const mx = Math.max(1, Math.min(1000, Number(args.max_resultados ?? 100) || 100));
+  const rx = Boolean(args.regex);
+  const ic = args.ignore_case === undefined ? true : Boolean(args.ignore_case);
+  if (!raiz || !padrao) throw new HttpError(422, "raiz e padrao obrigatórios");
+  if (padrao.includes("\n")) throw new HttpError(422, "grep_remoto busca UMA linha; use buscar_arquivos/editar p/ multiline");
+  let cmd: string;
+  if (ctx.so === "windows") {
+    const flags = (rx ? "" : " -SimpleMatch") + (ctxn ? ` -Context ${ctxn},${ctxn}` : "");
+    const sens = ic ? "" :
+      " | Where-Object { if ($hregex) { $_.Line -cmatch $hpat } else { $_.Line.Contains($hpat) } }";
+    cmd = psOut(
+      `$hpat = '${pq(padrao)}'\n` +
+      `$hregex = ${rx ? "$true" : "$false"}\n` +
+      `$hits = @(Get-ChildItem -LiteralPath '${pq(raiz)}' -Recurse -File -Force -Filter '${pq(glob)}' -ErrorAction SilentlyContinue | ` +
+      "Where-Object { $_.Length -lt 20MB } | Select-String -Pattern $hpat" + flags +
+      " -ErrorAction SilentlyContinue" + sens + ` | Select-Object -First ${mx})\n` +
+      "$sb = New-Object System.Collections.Generic.List[string]\n" +
+      "foreach ($h in $hits) {\n" +
+      "  foreach ($pre in $h.Context.PreContext) { $sb.Add('  | ' + $pre) }\n" +
+      '  $sb.Add("$($h.Path):$($h.LineNumber): $($h.Line)")\n' +
+      "  foreach ($pos in $h.Context.PostContext) { $sb.Add('  | ' + $pos) }\n" +
+      "}\n" +
+      '$out = (($sb -join "`n") + "`nTOTAL=$($hits.Count)")\n',
+    );
+  } else {
+    cmd = shCmd(
+      "grep -rn " + (rx ? "-E " : "-F ") + (ic ? "-i " : "") + `--include=${sq(glob)} ` +
+      (ctxn ? `-C ${ctxn} ` : "") + `-- ${sq(padrao)} ${sq(raiz)} 2>/dev/null | head -n ${mx * 3}`,
+    );
+  }
+  const res = await exec(ctx, cmd, 120);
+  if (res.exit !== 0) throw new HttpError(502, `grep falhou (exit=${res.exit}): ${stderrLimpo(res)}`);
+  return { ok: true, host: ctx.host, raiz, padrao, resumo: saida(ctx.so, res).slice(0, 60000) };
+}
+
+async function editarNoLocal(ctx: Ctx, args: Record<string, unknown>): Promise<unknown> {
+  const caminho = S(args.caminho);
+  const busca = args.busca;
+  const subs = args.substituicao;
+  if (!caminho || typeof busca !== "string" || !busca) throw new HttpError(422, "caminho e busca (texto nao-vazio) obrigatorios");
+  if (typeof subs !== "string") throw new HttpError(422, "substituicao deve ser texto (vazio = apagar a busca)");
+  const ra = Boolean(args.replace_all);
+  const seca = Boolean(args.seca);
+  let cmd: string;
+  if (ctx.so === "windows") {
+    cmd = psOut(
+      "function Count-Of([string]$t, [string]$b) {\n" +
+      "  $n = 0; $i = 0\n" +
+      "  while (($i = $t.IndexOf($b, $i, [System.StringComparison]::Ordinal)) -ge 0) { $n = $n + 1; $i += $b.Length }\n" +
+      "  return $n }\n" +
+      `$p = '${pq(caminho)}'\n` + `$busca = '${pq(busca)}'\n` + `$subs = '${pq(subs)}'\n` +
+      `$RA = ${ra ? "$true" : "$false"}\n$SECA = ${seca ? "$true" : "$false"}\n` +
+      "if (-not (Test-Path -LiteralPath $p -PathType Leaf)) { throw 'arquivo nao existe' }\n" +
+      "$fi = Get-Item -LiteralPath $p\n" +
+      "if ($fi.Length -gt 16MB) { throw ('grande demais p/ edicao local: ' + $fi.Length + ' bytes (teto 16MB)') }\n" +
+      "$txt = [System.IO.File]::ReadAllText($p)\n" +
+      "if ($txt.Contains([char]0)) { throw 'parece binario (NUL no conteudo) — use escrever_arquivo' }\n" +
+      "$n = Count-Of $txt $busca\n" +
+      "$eol = ''\n" +
+      "if ($n -eq 0 -and $busca.Contains(\"`n\")) {\n" +
+      "  $busca = $busca.Replace(\"`n\", \"`r`n\"); $subs = $subs.Replace(\"`n\", \"`r`n\")\n" +
+      "  $n = Count-Of $txt $busca\n" +
+      "  if ($n -gt 0) { $eol = 'lf->crlf' }\n" +
+      "}\n" +
+      "if ($n -eq 0) { throw 'NAO ENCONTRADO: busca com 0 ocorrencias' }\n" +
+      "if ($n -gt 1 -and -not $RA) { throw ('MULTIPLOS: ' + $n + ' ocorrencias — use replace_all') }\n" +
+      "$novo = $txt.Replace($busca, $subs)\n" +
+      "if (-not $SECA) {\n" +
+      "  $enc = New-Object System.Text.UTF8Encoding($false)\n" +
+      "  [System.IO.File]::WriteAllText($p, $novo, $enc)\n" +
+      "}\n" +
+      "$d = (Get-Item -LiteralPath $p).Length\n" +
+      "$ini = 0; if ($novo.Length -gt 200) { $ini = [Math]::Max(0, [Math]::Min($novo.Length - 200, 200)) }\n" +
+      "$tam = [Math]::Min(200, $novo.Length - $ini)\n" +
+      "$tag = if ($SECA) { 'SECA local' } else { 'EDITADO local' }\n" +
+      "$out = $tag + ' ocorrencias=' + $n + ' bytes=' + $d + ' eol=' + $eol + [Environment]::NewLine + $novo.Substring($ini, $tam)\n",
+    );
+  } else {
+    const code =
+      "import io,sys\n" +
+      `p=${JSON.stringify(caminho)}; b=${JSON.stringify(busca)}; s=${JSON.stringify(subs)}; ra=${ra}; seca=${seca}\n` +
+      "t=io.open(p,encoding='utf-8',errors='strict').read()\n" +
+      "n=t.count(b)\n" +
+      "if n==0: sys.exit('NAO ENCONTRADO: busca com 0 ocorrencias')\n" +
+      "if n>1 and not ra: sys.exit('MULTIPLOS: '+str(n)+' ocorrencias - use replace_all')\n" +
+      "if seca: print('SECA local ocorrencias='+str(n))\n" +
+      "else: io.open(p,'w',encoding='utf-8').write(t.replace(b,s)); print('EDITADO local ocorrencias='+str(n))";
+    cmd = shCmd("python3 -c " + sq(code));
+  }
+  const res = await exec(ctx, cmd, 60);
+  if (res.exit !== 0)
+    throw new HttpError(502, `editar_no_local: ${(saida(ctx.so, res) || stderrLimpo(res)).slice(0, 200)}`);
+  return { ok: true, host: ctx.host, caminho, resumo: saida(ctx.so, res).slice(0, 2000) };
+}
+
+async function estadoMaquina(ctx: Ctx): Promise<unknown> {
+  let cmd: string;
+  if (ctx.so === "windows") {
+    cmd = psOut(
+      "$os = Get-CimInstance Win32_OperatingSystem\n" +
+      "$cs = Get-CimInstance Win32_ComputerSystem\n" +
+      "$cpu = @(Get-CimInstance Win32_Processor)[0]\n" +
+      "$lin = @()\n" +
+      '$lin += "HOST=$($cs.Name) SO=$($os.Caption)"\n' +
+      '$lin += "UP=$([int](([DateTime]::Now - $os.LastBootUpTime).TotalHours))h (boot $($os.LastBootUpTime))"\n' +
+      '$lin += "RAM=$([int]($os.FreePhysicalMemory/1024))MB livres de $([int]($os.TotalVisibleMemorySize/1024))MB"\n' +
+      '$lin += "CPU=$($cpu.LoadPercentage)% $($($cpu.Name))"\n' +
+      "foreach ($d in Get-PSDrive -PSProvider FileSystem) {\n" +
+      "  $tot = [int](($d.Used + $d.Free) / 1GB)\n" +
+      '  if ($tot -gt 0) { $lin += "DISCO $($d.Name): $([int]($d.Free/1GB))GB livres de ${tot}GB" }\n' +
+      "}\n" +
+      '$out = $lin -join "`n"\n',
+    );
+  } else {
+    cmd = shCmd("hostname; uptime; free -m | sed -n 2p; df -B1G 2>/dev/null | tail -n +2");
+  }
+  const res = await exec(ctx, cmd, 45);
+  if (res.exit !== 0) throw new HttpError(502, `estado falhou (exit=${res.exit}): ${stderrLimpo(res)}`);
+  return { ok: true, host: ctx.host, resumo: saida(ctx.so, res) };
+}
+
+async function processos(ctx: Ctx, args: Record<string, unknown>): Promise<unknown> {
+  const acao = S(args.acao) || "listar";
+  let cmd: string;
+  if (acao === "listar") {
+    const top = Math.max(1, Math.min(100, Number(args.top ?? 15) || 15));
+    cmd = ctx.so === "windows"
+      ? psOut(
+          '$lin = Get-Process | Sort-Object WorkingSet64 -Descending | Select-Object -First ' + top +
+          ' | ForEach-Object { "PID=$($_.Id) MEM=$([int]($_.WorkingSet64/1MB))MB CPU=$([int]($_.CPU))s APP=$($_.ProcessName) TITULO=$($_.MainWindowTitle)" }\n' +
+          '$out = $lin -join "`n"\n',
+        )
+      : shCmd(`ps -eo pid,rss,pcpu,comm --sort=-rss | head -n ${top + 1}`);
+  } else if (acao === "matar") {
+    const nome = S(args.nome).trim();
+    if (!nome) throw new HttpError(422, "matar exige nome");
+    cmd = ctx.so === "windows"
+      ? psOut(`$ids = @(Get-Process -Name '${pq(nome)}' -ErrorAction SilentlyContinue | ForEach-Object { $_.Id })\nif ($ids.Count -eq 0) { throw 'nenhum processo com nome ${pq(nome)}' }\nStop-Process -Id $ids -Force\n$out = "MATOU $($ids.Count): $($ids -join ',')"\n`)
+      : shCmd(`pkill -x ${sq(nome)} && echo MATOU || { echo NAO_ENCONTRADO; exit 9; }`);
+  } else throw new HttpError(422, "acao deve ser listar ou matar");
+  const res = await exec(ctx, cmd, 45);
+  if (res.exit !== 0) throw new HttpError(502, `processos falhou (exit=${res.exit}): ${stderrLimpo(res)}`);
+  return { ok: true, host: ctx.host, acao, resumo: saida(ctx.so, res).slice(0, 40000) };
+}
+
+async function janelas(ctx: Ctx, args: Record<string, unknown>): Promise<unknown> {
+  if (ctx.so !== "windows") throw new HttpError(422, `janelas so em Windows (host ${ctx.host} e ${ctx.so})`);
+  const acao = S(args.acao) || "listar";
+  let corpo: string;
+  if (acao === "listar") {
+    corpo = '$out = (Get-Process | Where-Object { $_.MainWindowTitle } | ForEach-Object { "PID=$($_.Id) APP=$($_.ProcessName) TITULO=$($_.MainWindowTitle)" }) -join "`n"\n';
+  } else if (acao === "focar") {
+    const t = S(args.titulo);
+    if (!t) throw new HttpError(422, "focar exige titulo (substring)");
+    corpo =
+      'Add-Type -Namespace Win32 -Name FW -MemberDefinition \'[DllImport("user32.dll")] public static extern bool SetForegroundWindow(IntPtr h); [DllImport("user32.dll")] public static extern bool ShowWindowAsync(IntPtr h, int n);\'\n' +
+      `$hpat = '*${pq(t)}*'\n` +
+      "$alvo = Get-Process | Where-Object { $_.MainWindowTitle -like $hpat } | Select-Object -First 1\n" +
+      "if (-not $alvo) { throw ('janela nao encontrada: ' + $hpat) }\n" +
+      "[void][Win32.FW]::ShowWindowAsync($alvo.MainWindowHandle, 9)\n" +
+      "[void][Win32.FW]::SetForegroundWindow($alvo.MainWindowHandle)\n" +
+      '$out = "FOCOU PID=$($alvo.Id) TITULO=$($alvo.MainWindowTitle)"\n';
+  } else throw new HttpError(422, "acao deve ser listar ou focar");
+  const res = await exec(ctx, psOut(corpo), 45);
+  if (res.exit !== 0) throw new HttpError(502, `janelas falhou (exit=${res.exit}): ${stderrLimpo(res)}`);
+  return { ok: true, host: ctx.host, janelas: saida(ctx.so, res).slice(0, 40000) };
+}
+
+async function areaTransferencia(ctx: Ctx, args: Record<string, unknown>): Promise<unknown> {
+  const acao = S(args.acao) || "get";
+  if (acao !== "get" && acao !== "set") throw new HttpError(422, "acao deve ser get ou set");
+  const texto = args.texto;
+  if (acao === "set") {
+    if (typeof texto !== "string" || !texto) throw new HttpError(422, "set exige texto nao-vazio");
+    if (texto.length > 200000) throw new HttpError(422, "texto grande demais p/ clipboard (200KB)");
+  }
+  let cmd: string;
+  if (ctx.so === "windows") {
+    const nucleo = acao === "get" ? "$out = Get-Clipboard -Raw; if (-not $out) { $out = '' }" : `Set-Clipboard -Value '${pq(String(texto))}'; $out = 'AREA_SET_OK'`;
+    cmd = psOut("$erro = ''\nfor ($i = 0; $i -lt 4; $i++) { try { " + nucleo + "; $erro = ''; break } catch { $erro = $_.Exception.Message; Start-Sleep -Milliseconds 300 } }\nif ($erro) { throw ('AREA_BLOQUEADA: ' + $erro) }\n");
+  } else {
+    cmd = acao === "get"
+      ? shCmd("command -v xclip >/dev/null 2>&1 || { echo SEM_XCLIP; exit 9; }; xclip -o -selection clipboard 2>/dev/null")
+      : shCmd(`command -v xclip >/dev/null 2>&1 || { echo SEM_XCLIP; exit 9; }; printf '%s' ${sq(String(texto))} | xclip -selection clipboard`);
+  }
+  const res = await exec(ctx, cmd, 45);
+  if (res.exit !== 0) {
+    const limpo = (stderrLimpo(res) || String(res.stdout)).slice(0, 250);
+    throw new HttpError(502, limpo.includes("AREA_BLOQUEADA")
+      ? "area_transferencia: clipboard bloqueado por sessao remota (RustDesk/AnyDesk costumam travar) — encerre e tente de novo: " + limpo.slice(0, 200)
+      : `area_transferencia falhou (exit=${res.exit}): ${limpo}`);
+  }
+  return acao === "get"
+    ? { ok: true, host: ctx.host, conteudo: saida(ctx.so, res).slice(0, 200000) }
+    : { ok: true, host: ctx.host, set_chars: String(texto).length };
+}
+
+async function falar(ctx: Ctx, args: Record<string, unknown>): Promise<unknown> {
+  const texto = S(args.texto);
+  if (!texto.trim()) throw new HttpError(422, "texto vazio");
+  if (texto.length > 600) throw new HttpError(422, "maximo 600 chars");
+  const cmd = ctx.so === "windows"
+    ? psOut("Add-Type -AssemblyName System.Speech\n$s = New-Object System.Speech.Synthesis.SpeechSynthesizer\n$s.Volume = 70\n$s.Speak('" + pq(texto) + "')\n$out = 'FALOU " + texto.length + " chars'\n")
+    : shCmd(`if command -v espeak-ng >/dev/null 2>&1; then espeak-ng -v pt -- ${sq(texto)}; elif command -v espeak >/dev/null 2>&1; then espeak -v pt+f2 -- ${sq(texto)}; else echo SEM_ESPEAK; exit 9; fi`);
+  const res = await exec(ctx, cmd, 90);
+  if (res.exit !== 0) throw new HttpError(502, `falar falhou (exit=${res.exit}): ${(saida(ctx.so, res).slice(0, 120) || stderrLimpo(res))}`);
+  return { ok: true, host: ctx.host, resumo: saida(ctx.so, res).slice(0, 200) };
+}
+
+async function abrir(ctx: Ctx, args: Record<string, unknown>): Promise<unknown> {
+  const alvo = S(args.alvo).trim();
+  if (!alvo || alvo.length > 500) throw new HttpError(422, "alvo invalido (vazio ou >500 chars)");
+  const cmd = ctx.so === "windows"
+    ? psOut("Start-Process -FilePath '" + pq(alvo) + "'\n$out = 'ABRIU'\n")
+    : shCmd("command -v xdg-open >/dev/null 2>&1 || { echo SEM_XDG; exit 9; }; xdg-open " + sq(alvo));
+  const res = await exec(ctx, cmd, 30);
+  if (res.exit !== 0) throw new HttpError(502, `abrir falhou (exit=${res.exit}): ${stderrLimpo(res)}`);
+  return { ok: true, host: ctx.host, alvo };
+}
+
+async function servicos(ctx: Ctx, args: Record<string, unknown>): Promise<unknown> {
+  const acao = S(args.acao) || "listar";
+  let cmd: string;
+  if (acao === "listar") {
+    const mx = Math.max(1, Math.min(200, Number(args.max_resultados ?? 30) || 30));
+    const filtro = S(args.filtro) || "*";
+    cmd = ctx.so === "windows"
+      ? psOut("$lin = Get-Service -Name '" + pq(filtro) + "' -ErrorAction SilentlyContinue | Select-Object -First " + mx + ' | ForEach-Object { "$($_.Status) $($_.Name) :: $($_.DisplayName)" }\n$out = ($lin -join "`n"); if (-not $out) { $out = \'NENHUM_SERVICO\' }\n')
+      : shCmd(`systemctl list-units --type=service --no-pager 2>/dev/null | head -n ${mx}`);
+  } else if (acao === "start" || acao === "stop" || acao === "restart") {
+    const nome = S(args.nome).trim();
+    if (!nome) throw new HttpError(422, "start/stop/restart exigem nome exato do servico");
+    cmd = ctx.so === "windows"
+      ? psOut(`${acao === "start" ? "Start-Service" : acao === "stop" ? "Stop-Service" : "Restart-Service"} -Name '${pq(nome)}' -ErrorAction Stop\n$out = "${pq(nome)} agora = $((Get-Service -Name '${pq(nome)}').Status)"\n`)
+      : shCmd(`systemctl ${acao} -- ${sq(nome)} && systemctl is-active -- ${sq(nome)}`);
+  } else throw new HttpError(422, "acao invalida");
+  const res = await exec(ctx, cmd, 60);
+  if (res.exit !== 0)
+    throw new HttpError(502, `servicos falhou (exit=${res.exit} — precisa de admin?): ${(saida(ctx.so, res).slice(0, 120) || stderrLimpo(res))}`);
+  return { ok: true, host: ctx.host, resumo: saida(ctx.so, res).slice(0, 40000) };
+}
+
+async function eventos(ctx: Ctx, args: Record<string, unknown>): Promise<unknown> {
+  const h = Math.max(1, Math.min(168, Number(args.horas ?? 24) || 24));
+  const mx = Math.max(1, Math.min(100, Number(args.max_resultados ?? 15) || 15));
+  const nivel = (S(args.nivel) || "erro").toLowerCase();
+  let cmd: string;
+  if (ctx.so === "windows") {
+    let corpo = "$ini = (Get-Date).AddHours(-" + h + ")\n$fl = @{ LogName = 'Application','System'; StartTime = $ini }\n";
+    if (nivel !== "qualquer") corpo += "$fl.Level = 1,2,3\n";
+    corpo += "$ev = @(Get-WinEvent -FilterHashtable $fl -MaxEvents " + mx + " -ErrorAction SilentlyContinue)\n" +
+      "$sb = New-Object System.Collections.Generic.List[string]\n" +
+      "foreach ($e in $ev) {\n" +
+      '  $m = (($e.Message -split "`n") | Where-Object { $_ } | Select-Object -First 1)\n' +
+      "  if ($m -and $m.Length -gt 160) { $m = $m.Substring(0,160) }\n" +
+      '  $sb.Add("$($e.TimeCreated) [$($e.LevelDisplayName)] $($e.ProviderName): $m")\n' +
+      "}\n" +
+      '$out = if ($sb.Count) { $sb -join "`n" } else { \'NENHUM_EVENTO\' }\n';
+    cmd = psOut(corpo);
+  } else {
+    cmd = shCmd(`journalctl -p err --since '${h} hours ago' --no-pager 2>/dev/null | tail -n ${mx}`);
+  }
+  const res = await exec(ctx, cmd, 60);
+  if (res.exit !== 0) throw new HttpError(502, `eventos falhou (exit=${res.exit}): ${stderrLimpo(res)}`);
+  return { ok: true, host: ctx.host, janela_horas: h, resumo: saida(ctx.so, res).slice(0, 40000) };
+}
+
+async function rede(ctx: Ctx, args: Record<string, unknown>): Promise<unknown> {
+  const acao = S(args.acao);
+  const alvo = S(args.alvo).trim();
+  if ((acao === "ping" || acao === "dns" || acao === "tracado") && !alvo) throw new HttpError(422, `${acao} exige alvo`);
+  let espera = 45;
+  let timeoutEp = 30;
+  if (acao === "espera_porta") {
+    if (!/^\d+$/.test(alvo) || Number(alvo) < 1 || Number(alvo) > 65535)
+      throw new HttpError(422, "espera_porta: alvo deve ser a porta numerica (ex.: 5173)");
+    timeoutEp = Math.max(1, Math.min(120, Number(args.timeout ?? 30) || 30));
+    espera = timeoutEp + 20;
+  }
+  let cmd: string;
+  if (ctx.so === "windows") {
+    let corpo: string;
+    if (acao === "ping")
+      corpo = "$r = @(Test-Connection -ComputerName '" + pq(alvo) + "' -Count 4 -ErrorAction SilentlyContinue)\nif ($r.Count -eq 0) { throw 'sem resposta de " + pq(alvo) + "' }\n$out = ($r | ForEach-Object { \"PING $($_.Address) $($_.ResponseTime)ms\" }) -join \"`n\"\n";
+    else if (acao === "dns")
+      corpo = "$r = @(Resolve-DnsName '" + pq(alvo) + "' -ErrorAction SilentlyContinue | Select-Object -First 10)\nif ($r.Count -eq 0) { throw 'sem resposta dns para " + pq(alvo) + "' }\n$out = ($r | ForEach-Object { \"DNS $($_.Name) TIPO=$($_.Type) IP=$($_.IPAddress)\" }) -join \"`n\"\n";
+    else if (acao === "tracado") corpo = '$out = (tracert -d -w 1000 -h 16 \'' + pq(alvo) + "') -join \"`n\"\n";
+    else if (acao === "portas")
+      corpo = "$lin = @(Get-NetTCPConnection -State Listen -ErrorAction SilentlyContinue | Where-Object { $_.OwningProcess } | ForEach-Object {\n  $pr = (Get-Process -Id $_.OwningProcess -ErrorAction SilentlyContinue).ProcessName\n  \"LISTEN $($_.LocalAddress):$($_.LocalPort) PID=$($_.OwningProcess) $pr\" } | Sort-Object -Unique)\n$out = if ($lin.Count) { $lin -join \"`n\" } else { 'NENHUMA' }\n";
+    else if (acao === "espera_porta")
+      corpo = `$porta = ${alvo}\n$limite = (Get-Date).AddSeconds(${timeoutEp})\nwhile ($true) {\n  $l = @(Get-NetTCPConnection -State Listen -LocalPort $porta -ErrorAction SilentlyContinue)\n  if ($l.Count -gt 0) { $out = ('ABERTA porta=' + $porta + ' PID=' + $l[0].OwningProcess); break }\n  if ((Get-Date) -gt $limite) { $out = ('TEMPO_ESGOTADO porta=' + $porta); break }\n  Start-Sleep -Milliseconds 700\n}\n`;
+    else if (acao === "info")
+      corpo = "$lin = @(Get-NetIPAddress -AddressFamily IPv4 | Where-Object { $_.PrefixOrigin -ne 'WellKnown' } | ForEach-Object { \"IP $($_.IPAddress)/$($_.PrefixLength) if=$($_.InterfaceAlias)\" })\n$lin += @(Get-NetRoute -DestinationPrefix '0.0.0.0/0' -ErrorAction SilentlyContinue | Select-Object -First 3 | ForEach-Object { \"GW $($_.NextHop)\" })\n$lin += @(Get-DnsClientServerAddress -AddressFamily IPv4 -ErrorAction SilentlyContinue | Where-Object { $_.ServerAddresses } | Select-Object -First 4 | ForEach-Object { \"DNS $($_.InterfaceAlias): $($_.ServerAddresses -join ',')\" })\n$out = ($lin -join \"`n\")\n";
+    else throw new HttpError(422, "acao deve ser ping, dns, tracado, portas, espera_porta ou info");
+    if (acao === "tracado") espera = 90;
+    cmd = psOut(corpo);
+  } else {
+    if (acao === "ping") cmd = shCmd(`ping -c 4 -W 2 ${sq(alvo)} 2>&1 | tail -n 3`);
+    else if (acao === "dns") cmd = shCmd(`getent hosts ${sq(alvo)}`);
+    else if (acao === "tracado") cmd = shCmd(`command -v traceroute >/dev/null || { echo SEM_TRACEROUTE; exit 9; }; traceroute -w 2 ${sq(alvo)} | head -20`);
+    else if (acao === "info") cmd = shCmd("ip -brief addr 2>/dev/null || ifconfig | grep 'inet '; ip route 2>/dev/null | head -3");
+    else if (acao === "portas") cmd = shCmd("ss -tlnp 2>/dev/null | tail -n +2 | head -60 || netstat -tlnp 2>/dev/null | tail -n +3 | head -60");
+    else if (acao === "espera_porta")
+      cmd = shCmd(`limite=$(( $(date +%s) + ${timeoutEp} ))\nwhile true; do\n  if command -v bash >/dev/null 2>&1 && bash -c 'exec 3<>/dev/tcp/127.0.0.1/${alvo}' 2>/dev/null; then echo ABERTA porta=${alvo}; break; fi\n  if command -v python3 >/dev/null 2>&1 && python3 -c 'import socket;socket.create_connection(("127.0.0.1",${alvo}),1)' 2>/dev/null; then echo ABERTA porta=${alvo}; break; fi\n  if [ $(date +%s) -gt $limite ]; then echo TEMPO_ESGOTADO porta=${alvo}; break; fi\n  sleep 0.7\ndone`);
+    else throw new HttpError(422, "acao deve ser ping, dns, tracado, portas, espera_porta ou info");
+  }
+  const res = await exec(ctx, cmd, espera);
+  if (res.exit !== 0)
+    throw new HttpError(502, `rede falhou (exit=${res.exit}): ${(saida(ctx.so, res).slice(0, 120) || stderrLimpo(res))}`);
+  const txt = saida(ctx.so, res);
+  if (acao === "espera_porta" && txt.includes("TEMPO_ESGOTADO")) throw new HttpError(502, `porta ${alvo} nao abriu em ${timeoutEp}s`);
+  return { ok: true, host: ctx.host, acao, alvo: alvo || null, resumo: txt.slice(0, 20000) };
+}
+
+async function esperarArquivo(ctx: Ctx, args: Record<string, unknown>): Promise<unknown> {
+  const pasta = S(args.pasta);
+  const padrao = S(args.padrao) || "*";
+  const t = Math.max(1, Math.min(120, Number(args.timeout ?? 60) || 60));
+  if (!pasta) throw new HttpError(422, "pasta obrigatória");
+  let cmd: string;
+  if (ctx.so === "windows") {
+    cmd = psOut(
+      "$fim = (Get-Date).AddSeconds(" + t + ")\n$f = $null\n" +
+      "while ((Get-Date) -lt $fim) {\n" +
+      "  $f = Get-ChildItem -LiteralPath '" + pq(pasta) + "' -Filter '" + pq(padrao) + "' -File -Force -ErrorAction SilentlyContinue | Sort-Object LastWriteTime -Descending | Select-Object -First 1\n" +
+      "  if ($f) { break }\n  Start-Sleep -Milliseconds 700\n}\n" +
+      "if (-not $f) { throw 'TEMPO_ESGOTADO (" + t + "s) em " + pq(pasta) + "' }\n" +
+      '$out = "ACHOU $($f.FullName)|$($f.Length) bytes|$($f.LastWriteTime)"\n',
+    );
+  } else {
+    cmd = shCmd(
+      `fim=$(( $(date +%s) + ${t} )); f=''\nwhile [ $(date +%s) -lt $fim ]; do\n  f=$(find ${sq(pasta)} -maxdepth 1 -type f -name ${sq(padrao)} 2>/dev/null | head -1)\n  [ -n "$f" ] && break; sleep 0.7\ndone\n[ -n "$f" ] || { echo TEMPO_ESGOTADO; exit 8; }\nls -l "$f"`,
+    );
+  }
+  const res = await exec(ctx, cmd, t + 20);
+  if (res.exit !== 0) throw new HttpError(502, `esperar_arquivo: ${(saida(ctx.so, res).slice(0, 120) || stderrLimpo(res))}`);
+  return { ok: true, host: ctx.host, resumo: saida(ctx.so, res).slice(0, 2000) };
+}
+
+async function power(ctx: Ctx, args: Record<string, unknown>): Promise<unknown> {
+  const acao = S(args.acao);
+  if (!["lock", "logout", "restart", "shutdown"].includes(acao))
+    throw new HttpError(422, "acao deve ser lock, logout, restart ou shutdown");
+  if (!args.confirmar) throw new HttpError(409, `power ${acao} exige confirmar=true — NADA foi feito nesta chamada`);
+  let cmd: string;
+  if (ctx.so === "windows") {
+    const corpo = acao === "lock"
+      ? "Start-Process -FilePath rundll32.exe -ArgumentList 'user32.dll,LockWorkStation'\n$out = 'TELA BLOQUEADA'\n"
+      : `$out = 'EXECUTADO ${acao} — maquina sem autostart: fica offline ate alguem reabrir o cliente'\nshutdown ${acao === "logout" ? "/l" : acao === "restart" ? "/r /t 10" : "/s /t 10"}\n`;
+    cmd = psEncoded("$ErrorActionPreference='Stop'\n" + corpo);
+  } else {
+    cmd = shCmd(({ lock: "loginctl lock-session", logout: "loginctl terminate-user $(whoami)", restart: "systemctl reboot || shutdown -r now", shutdown: "systemctl poweroff || shutdown -h now" } as Record<string, string>)[acao]);
+  }
+  const res = await exec(ctx, cmd, 30);
+  if (res.exit !== 0) throw new HttpError(502, `power ${acao} falhou (exit=${res.exit}): ${stderrLimpo(res)}`);
+  return { ok: true, host: ctx.host, acao, resumo: (saida(ctx.so, res) || "EXECUTADO").slice(0, 300) };
+}
+
+async function rodarLote(ctx: Ctx, args: Record<string, unknown>): Promise<unknown> {
+  const comandos = args.comandos;
+  if (!Array.isArray(comandos) || comandos.length < 1 || comandos.length > 20)
+    throw new HttpError(422, "comandos: lista de 1 a 20 strings");
+  if (!comandos.every((c) => typeof c === "string" && c.trim()))
+    throw new HttpError(422, "todo comando deve ser texto nao-vazio");
+  const lista = (comandos as string[]).map(psAutoencode);
+  const env = validaEnv(args.env);
+  let prefixo = "";
+  const sessNome = S(args.sessao).trim();
+  if (sessNome) {
+    const pasta = sessoes.get(ctx.host)?.get(sessNome);
+    if (!pasta) throw new HttpError(422, `sessao '${sessNome}' nao existe — abra com a tool sessao`);
+    prefixo = ctx.so === "windows" ? `cd /d ${pasta} && ` : `cd ${sq(pasta)} && `;
+  }
+  let cmd: string;
+  if (ctx.so === "windows") {
+    let script = "$ErrorActionPreference='Continue'\n$out = @()\n$i = 0\n" + envPsLinhas(env);
+    for (const c of lista) {
+      script += "$i = $i + 1\n" + "$r = (cmd.exe /c '" + pq(prefixo + c) + "' 2>&1) | Out-String\n" +
+        "$out += ('### ' + $i + ' exit=' + $LASTEXITCODE + [Environment]::NewLine + $r.TrimEnd())\n";
+    }
+    script += "$out += '### LOTE-FIM'\n$out = $out -join \"`n\"\n";
+    cmd = psOut(script);
+  } else {
+    const envpre = envDentro(env);
+    cmd = shCmd(
+      lista.map((c, i) => `echo '### ${i + 1}'; ${envpre}${prefixo}bash -c ${sq(c)} 2>&1; echo "exit=$?"`).join("; ") + "; echo '### LOTE-FIM'",
+    );
+  }
+  const res = await exec(ctx, cmd, 120, 60000);
+  const txt = saida(ctx.so, res);
+  if (res.exit !== 0) throw new HttpError(502, `rodar_lote falhou (exit=${res.exit}): ${(txt.slice(0, 120) || stderrLimpo(res).slice(0, 200))}`);
+  return { ok: true, host: ctx.host, resumo: txt.slice(0, 60000) };
+}
+
+async function sessao(ctx: Ctx, args: Record<string, unknown>): Promise<unknown> {
+  const acao = S(args.acao);
+  const nome = (S(args.nome) || "padrao").trim();
+  if (!["abrir", "listar", "fechar"].includes(acao)) throw new HttpError(422, "acao deve ser abrir, listar ou fechar");
+  if (!nomeSeguro(nome)) throw new HttpError(422, "nome deve ser alfanumerico simples (letras/digitos/._-, ate 40)");
+  const secs = sessoes.get(ctx.host) ?? new Map<string, string>();
+  sessoes.set(ctx.host, secs);
+  if (acao === "listar")
+    return { ok: true, host: ctx.host, sessoes: [...secs.entries()].map(([n, p]) => ({ nome: n, pasta: p })) };
+  if (acao === "fechar") {
+    if (!secs.has(nome)) throw new HttpError(422, `sessao '${nome}' nao existe no servidor`);
+    secs.delete(nome);
+    return { ok: true, resumo: `SESSAO FECHADA: ${nome}` };
+  }
+  const pasta = S(args.pasta).trim();
+  if (!pasta) throw new HttpError(422, "abrir exige pasta (diretorio que ja existe na maquina)");
+  const cmd = ctx.so === "windows"
+    ? psOut(`$p = '${pq(pasta)}'\nif (-not (Test-Path -LiteralPath $p -PathType Container)) { throw ('pasta nao encontrada: ' + $p) }\ntry { $s = (New-Object -ComObject Scripting.FileSystemObject).GetFolder($p).ShortPath } catch { $s = $p }\nif (-not (Test-Path -LiteralPath $s -PathType Container)) { $s = $p }\n$out = 'EXISTE|' + $s\n`)
+    : shCmd(`[ -d ${sq(pasta)} ] && echo EXISTE || { echo NAO; exit 9; }`);
+  const res = await exec(ctx, cmd, 30);
+  if (res.exit !== 0) throw new HttpError(502, `pasta invalida: ${(saida(ctx.so, res).slice(0, 120) || stderrLimpo(res).slice(0, 160))}`);
+  let pastaUsar = pasta;
+  if (ctx.so === "windows") {
+    pastaUsar = saida(ctx.so, res).split("|").slice(1).join("|").trim();
+    if (pastaUsar.includes(" "))
+      throw new HttpError(502, "sessao: o caminho tem espacos e a maquina nao expoe nome curto 8.3; abra a sessao numa pasta sem espacos");
+  }
+  secs.set(nome, pastaUsar);
+  return { ok: true, host: ctx.host, sessao: nome, pasta, resumo: `SESSAO ABERTA — use rodar_comando/rodar_lote com sessao="${nome}"` };
+}
+
+async function gitRemoto(ctx: Ctx, args: Record<string, unknown>): Promise<unknown> {
+  const repo = S(args.repo);
+  const acao = S(args.acao);
+  if (!["status", "diff", "log", "branches", "add", "commit", "push", "checkout"].includes(acao))
+    throw new HttpError(422, "acao invalida");
+  if ((acao === "commit" || acao === "push" || acao === "checkout") && !args.confirmar)
+    throw new HttpError(409, `git ${acao} exige confirmar=true (governanca) — nada foi feito`);
+  if (!repo) throw new HttpError(422, "repo obrigatorio");
+  const path = S(args.path).trim();
+  const ref = S(args.ref).trim();
+  const msg = S(args.mensagem);
+  let ga: string[];
+  if (acao === "status") ga = ["status", "--porcelain", "-b"];
+  else if (acao === "diff") ga = ["diff", ...(path ? ["--", path] : [])];
+  else if (acao === "log") ga = ["log", "--oneline", "-n", String(Math.max(1, Math.min(50, /^\d+$/.test(ref) ? Number(ref) : 15)))];
+  else if (acao === "branches") ga = ["branch", "-a"];
+  else if (acao === "add") {
+    if (!path) throw new HttpError(422, "add exige path (caminho relativo no repo)");
+    ga = ["add", "--", path];
+  } else if (acao === "commit") {
+    if (!msg.trim()) throw new HttpError(422, "commit exige mensagem");
+    ga = ["commit", "-m", msg.slice(0, 500)];
+  } else if (acao === "push") ga = ["push", ...(ref ? ["origin", ref] : [])];
+  else {
+    if (!ref) throw new HttpError(422, "checkout exige ref (branch)");
+    ga = ["checkout", ref];
+  }
+  const base = ["-C", repo, ...ga];
+  let cmd: string;
+  if (ctx.so === "windows") {
+    const arr = base.map((x) => `'${pq(x)}'`).join(",");
+    cmd = psOut("[Console]::OutputEncoding=[Text.Encoding]::UTF8\n$gargs = @(" + arr + ")\n$oi = & git @gargs 2>&1\n$out = (($oi | Out-String).TrimEnd() + \"`nEXIT=$LASTEXITCODE\")\n");
+  } else {
+    cmd = shCmd(`{ git ${base.map(sq).join(" ")} 2>&1; echo "EXIT=$?"; } | tail -c 60000`);
+  }
+  const res = await exec(ctx, cmd, 60, 60000);
+  if (res.exit !== 0) throw new HttpError(502, `git_remoto falhou (git instalado?): ${(saida(ctx.so, res).slice(0, 200) || stderrLimpo(res))}`);
+  let txt = saida(ctx.so, res);
+  let exitCode = -1;
+  const i = txt.lastIndexOf("EXIT=");
+  if (i >= 0) {
+    exitCode = Number(txt.slice(i + 5).trim());
+    txt = txt.slice(0, i).replace(/\s+$/, "");
+  }
+  return { ok: exitCode === 0, host: ctx.host, acao, exit: exitCode, saida: txt.slice(0, 60000) };
+}
+
+/* ------------------------------------------------------------------ dispatch */
+
+export const NOMES_MAQUINA_TOOLS = [
+  "listar_arquivos", "ler_arquivo", "escrever_arquivo", "buscar_arquivos", "grep_remoto",
+  "editar_no_local", "estado_maquina", "processos", "janelas", "area_transferencia",
+  "falar", "abrir", "servicos", "eventos", "rede", "esperar_arquivo", "power",
+  "rodar_lote", "sessao", "git_remoto",
+] as const;
+
+type Fn = (ctx: Ctx, args: Record<string, unknown>) => Promise<unknown>;
+const TABELA: Record<string, Fn> = {
+  listar_arquivos: listarArquivos, ler_arquivo: lerArquivo, escrever_arquivo: escreverArquivo,
+  buscar_arquivos: buscarArquivos, grep_remoto: grepRemoto, editar_no_local: editarNoLocal,
+  estado_maquina: (ctx) => estadoMaquina(ctx), processos: processos, janelas: janelas,
+  area_transferencia: areaTransferencia, falar, abrir, servicos, eventos, rede,
+  esperar_arquivo: esperarArquivo, power, rodar_lote: rodarLote, sessao, git_remoto: gitRemoto,
+};
+
+/** plataforma: ao vivo (hub) > gravada (DB) > windows (nunca chutar sh num PC) */
+async function soDaMaquina(alvo: string, host: string): Promise<string> {
+  const vivo = soConectado(alvo, host);
+  if (vivo) return vivo;
+  const r = await q<{ so: string }>(`SELECT so FROM maquinas WHERE tenant = $1 AND host = $2`, [alvo, host]);
+  return r.rows[0]?.so || "windows";
+}
+
+export async function toolMaquina(
+  u: Usuario,
+  nome: string,
+  args: Record<string, unknown>,
+  origem: string,
+): Promise<unknown> {
+  const fn = TABELA[nome];
+  if (!fn) throw new HttpError(404, `tool de maquina desconhecida: ${nome}`);
+  const host = S(args.host);
+  if (!host) throw new HttpError(422, "host obrigatório (veja maquinas_online)");
+  const alvo = alvoMaquina(u, args.tenant as string);
+  const ctx: Ctx = {
+    u, alvo, host, so: await soDaMaquina(alvo, host), origem, tool: nome,
+    httpBase: () => httpBaseDaMaquina(alvo, host),
+  };
+  return fn(ctx, args);
+}
+
+/** rodar_comando com sessao/env (portado do túnel): cd + variáveis só nesta chamada */
+export async function wrapComando(
+  u: Usuario, args: Record<string, unknown>, cmdBruto: string,
+): Promise<string> {
+  const host = S(args.host);
+  const sessNome = S(args.sessao).trim();
+  const env = validaEnv(args.env);
+  let cmd = psAutoencode(cmdBruto);
+  if (!sessNome && Object.keys(env).length === 0) return cmd;
+  const alvo = alvoMaquina(u, args.tenant as string);
+  const so = await soDaMaquina(alvo, host);
+  if (sessNome) {
+    const pasta = sessoes.get(host)?.get(sessNome);
+    if (!pasta) throw new HttpError(422, `sessao '${sessNome}' não existe — abra com a tool sessao`);
+    cmd = so === "windows" ? `cd /d ${pasta} && (${cmd})` : `cd ${sq(pasta)} && ${cmd}`;
+  }
+  if (Object.keys(env).length)
+    cmd = so === "windows" ? psEncoded(envPsLinhas(env) + `cmd.exe /c '${pq(cmd)}'\n`) : envDentro(env) + cmd;
+  return cmd;
+}

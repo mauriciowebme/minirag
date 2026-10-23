@@ -145,7 +145,7 @@ function rodar(cmd, esperaSeg) {
     const rel = setTimeout(() => {
       matarArvore();
       stderr += "\n[cliente: mata-árvore após " + teto + "s]";
-      resolve({ exit: -124, stdout: stdout.slice(0, 20000), stderr: stderr.slice(0, 8000) });
+      resolve({ exit: -124, stdout: stdout.slice(0, 1500000), stderr: stderr.slice(0, 8000) });
     }, teto * 1000);
     filho.stdout && filho.stdout.on("data", (b) => { stdout += b; if (stdout.length > 40000) matarArvore(); });
     filho.stderr && filho.stderr.on("data", (b) => { stderr += b; if (stderr.length > 16000) matarArvore(); });
@@ -156,7 +156,7 @@ function rodar(cmd, esperaSeg) {
     filho.on("close", (code) => {
       clearTimeout(rel);
       if (morto) return; // o timeout já resolveu com -124
-      resolve({ exit: code == null ? -9 : code, stdout: stdout.slice(0, 20000), stderr: stderr.slice(0, 8000) });
+      resolve({ exit: code == null ? -9 : code, stdout: stdout.slice(0, 1500000), stderr: stderr.slice(0, 8000) });
     });
   });
 }
