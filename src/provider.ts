@@ -132,6 +132,8 @@ export async function initProvider(): Promise<void> {
   );
   await q(`ALTER TABLE chat_mensagens ADD COLUMN IF NOT EXISTS ferramentas JSONB`);
   await q(`ALTER TABLE chat_mensagens ADD COLUMN IF NOT EXISTS falas JSONB`);
+  /* v3.13: raciocínio do modelo gravado junto da resposta (bloco "Pensou por Ns" ao reabrir) */
+  await q(`ALTER TABLE chat_mensagens ADD COLUMN IF NOT EXISTS raciocinio TEXT`);
   await q(`CREATE INDEX IF NOT EXISTS chat_tenant_idx ON chat_mensagens (tenant, memoria, id)`);
 }
 
@@ -394,8 +396,22 @@ async function lerPedaco<T>(
 export async function chamarModelo(
   cfg: { base_url: string; modelo: string; chave: string; temperatura: number; tipo: TipoProvider; silencio_s?: number },
   mensagens: Mensagem[],
-  opts: { tools?: unknown[]; timeoutMs?: number; tetoMs?: number; stream?: boolean; onDelta?: (t: string) => void } = {},
-): Promise<{ message: { role: "assistant"; content: string; tool_calls?: ChamadaTool[] }; texto: string; ms: number }> {
+  opts: {
+    tools?: unknown[];
+    timeoutMs?: number;
+    tetoMs?: number;
+    stream?: boolean;
+    onDelta?: (t: string) => void;
+    /** pedaços do raciocínio do modelo (reasoning_content/thinking) — o chat mostra ao vivo */
+    onRaciocinio?: (t: string) => void;
+  } = {},
+): Promise<{
+  message: { role: "assistant"; content: string; tool_calls?: ChamadaTool[] };
+  texto: string;
+  /** tudo que o modelo pensou nesta rodada (vazio nos modelos que não expõem) */
+  pensamento: string;
+  ms: number;
+}> {
   /* v3.2: `timeoutMs` deixou de ser "tempo total da resposta" e virou ORÇAMENTO DE SILÊNCIO.
      O valor da tela (provider_config.silencio_s) manda em cima do padrão do código. */
   const silencioMs =
@@ -431,6 +447,7 @@ export async function chamarModelo(
   const tipoConteudo = r.headers.get("content-type") ?? "";
   if (corpo.stream && tipoConteudo.includes("event-stream") && r.body) {
     const pecas: string[] = [];
+    const pensado: string[] = [];
     const chamadas: Record<number, { id: string; nome: string; args: string }> = {};
     const leitor = r.body.getReader();
     const dec = new TextDecoder();
@@ -451,6 +468,16 @@ export async function chamarModelo(
           continue; /* comentário de manutenção de conexão */
         }
         const delta = j?.choices?.[0]?.delta ?? {};
+        /* raciocínio do modelo (v3.13): os três nomes que os providers usam para o mesmo campo */
+        const pens =
+          typeof delta.reasoning_content === "string" ? delta.reasoning_content
+          : typeof delta.reasoning === "string" ? delta.reasoning
+          : typeof delta.thinking === "string" ? delta.thinking
+          : "";
+        if (pens) {
+          pensado.push(pens);
+          opts.onRaciocinio?.(pens);
+        }
         if (typeof delta.content === "string" && delta.content) {
           pecas.push(delta.content);
           opts.onDelta?.(delta.content);
@@ -473,6 +500,7 @@ export async function chamarModelo(
     return {
       message: { role: "assistant", content: texto, ...(toolCalls.length ? { tool_calls: toolCalls } : {}) },
       texto: texto.trim(),
+      pensamento: pensado.join("").trim(),
       ms: Date.now() - inicio,
     };
   }
@@ -499,6 +527,7 @@ export async function chamarModelo(
   return {
     message: { role: "assistant", content: conteudo, ...(toolCalls ? { tool_calls: toolCalls } : {}) },
     texto: conteudo.trim(),
+    pensamento: String(mensagem.reasoning_content ?? mensagem.reasoning ?? mensagem.thinking ?? "").trim(),
     ms: Date.now() - inicio,
   };
 }
@@ -557,6 +586,8 @@ export async function testarProvider(user: Usuario, body: Record<string, unknown
 /** Evento do chat com streaming (rota /chat/stream). */
 export type EventoChat =
   | { tipo: "delta"; texto: string }
+  /** v3.13: pedaço do raciocínio do modelo (estilo Open WebUI) — mostrado ao vivo, recolhido no fim */
+  | { tipo: "raciocinio"; texto: string }
   | { tipo: "descartar" }
   | { tipo: "ferramenta"; servidor: string; nome: string; ok: boolean; ms: number }
   | { tipo: "fala"; texto: string }
@@ -653,6 +684,9 @@ export async function responderChat(
 
   const chamadas: ChamadaFerramenta[] = [];
   const falas: string[] = []; // v3.8: as falas de caminho da rodada ficam na tela (e na gaveta)
+  /* v3.13: o raciocínio do modelo (reasoning_content/thinking) vai para a tela AO VIVO e
+     fica gravado na mensagem — o Open WebUI faz assim ("Thinking…" → "Thought for Ns"). */
+  let pensamento = "";
   const inicio = Date.now();
   let texto = "";
   let rodadas = 0;
@@ -687,8 +721,14 @@ export async function responderChat(
             emitir({ tipo: "delta", texto: t });
           }
         : undefined,
+      /* sempre coleta (para gravar); só emite quando há tela ouvindo */
+      onRaciocinio: (t) => {
+        pensamento += t;
+        emitir?.({ tipo: "raciocinio", texto: t });
+      },
     });
     const pedidas = r.message.tool_calls ?? [];
+    if (!emitir && r.pensamento) pensamento += r.pensamento + "\n\n";
     if (!pedidas.length) {
       texto = r.texto;
       break;
@@ -756,11 +796,13 @@ export async function responderChat(
         : "nenhuma ferramenta está ligada em Configurações → Ferramentas (MCP)");
   }
 
-  await gravarMensagens(tenant, memoria, pergunta, texto, chamadas, falas);
+  await gravarMensagens(tenant, memoria, pergunta, texto, chamadas, falas, pensamento.trim());
   return {
     resposta: texto,
     ferramentas: chamadas,
     falas,
+    /** v3.13: raciocínio do modelo, para a tela recolher "Pensou por Ns" ao reabrir a conversa */
+    raciocinio: pensamento.trim(),
     rodadas,
     modelo: cfg.modelo,
     provider: cfg.escopo,
@@ -781,14 +823,15 @@ async function gravarMensagens(
   resposta: string,
   chamadas: ChamadaFerramenta[],
   falas: string[] = [],
+  raciocinio = "",
 ): Promise<void> {
   await q(
     `INSERT INTO chat_mensagens (tenant, memoria, papel, texto, ferramentas) VALUES ($1, $2, 'user', $3, NULL)`,
     [tenant, memoria, pergunta],
   );
   await q(
-    `INSERT INTO chat_mensagens (tenant, memoria, papel, texto, ferramentas, falas) VALUES ($1, $2, 'assistant', $3, $4::jsonb, $5::jsonb)`,
-    [tenant, memoria, resposta, JSON.stringify(chamadas), JSON.stringify(falas)],
+    `INSERT INTO chat_mensagens (tenant, memoria, papel, texto, ferramentas, falas, raciocinio) VALUES ($1, $2, 'assistant', $3, $4::jsonb, $5::jsonb, $6)`,
+    [tenant, memoria, resposta, JSON.stringify(chamadas), JSON.stringify(falas), raciocinio || null],
   );
 }
 
@@ -800,7 +843,7 @@ export async function historicoChat(
   const memoria = (opts.memoria ?? "").trim();
   const limite = Math.min(Math.max(opts.limit ?? 40, 1), 200);
   const r = await q(
-    `SELECT id, papel, texto, ferramentas, falas, criado_em FROM chat_mensagens
+    `SELECT id, papel, texto, ferramentas, falas, raciocinio, criado_em FROM chat_mensagens
      WHERE tenant = $1 AND memoria = $2 ORDER BY id DESC LIMIT $3`,
     [tenant, memoria, limite],
   );
@@ -813,6 +856,7 @@ export async function historicoChat(
       texto: m.texto,
       ferramentas: m.ferramentas ?? [],
       falas: m.falas ?? [],
+      raciocinio: m.raciocinio ?? "",
       quando: m.criado_em,
     })),
   };
