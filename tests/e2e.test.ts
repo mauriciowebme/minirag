@@ -2432,7 +2432,7 @@ test("minirag v2 — suíte completa", async (t) => {
     const logB = await ate(async () => leArq("/tmp/c37b.log").includes("já usada") || leArq("/tmp/c37b.out").includes("já usada"), 12000);
     f.check("cópia do mesmo arquivo em outra config é recusada (chave queimada)", logB, (leArq("/tmp/c37b.log") + leArq("/tmp/c37b.out")).slice(-160));
 
-    execFileSync("docker", ["exec", CONTAINER, "sh", "-c", "pkill -f cli37 || true"]);
+    execD(`node -e "const fs=require('fs');for(const d of fs.readdirSync('/proc')){if(!/^[0-9]+$/.test(d))continue;try{const c=fs.readFileSync('/proc/'+d+'/cmdline','utf8').split(String.fromCharCode(0)).join(' ');if(new RegExp(['cliente'+'-painel[.]js','cli'+'37'].join('|')).test(c))process.kill(Number(d),'SIGKILL')}catch(e){}}console.log('ok')"; echo ok`);
     await ate(async () => {
       const x = await call("GET", "/maquinas", { key: TESTKEY });
       return (x.json?.maquinas ?? []).every((m: any) => !m.online);
@@ -2460,8 +2460,88 @@ test("minirag v2 — suíte completa", async (t) => {
     f.check("gerar cliente Windows também sai com trailer", rWin.status === 200 && lenWin > 80_000_000, { status: rWin.status, len: lenWin });
     await rWin.arrayBuffer();
 
-    execD("rm -f /tmp/c37v.json");
+    execD(`node -e "const fs=require('fs');for(const d of fs.readdirSync('/proc')){if(!/^[0-9]+$/.test(d))continue;try{const c=fs.readFileSync('/proc/'+d+'/cmdline','utf8').split(String.fromCharCode(0)).join(' ');if(new RegExp(['cliente'+'-painel[.]js','cli'+'37'].join('|')).test(c))process.kill(Number(d),'SIGKILL')}catch(e){}}console.log('ok')"; rm -f /tmp/c37v.json`);
     f.fechar("v3.7 chave-cliente");
+  });
+
+  await bloco(t, "v3.9: painel local do cliente — estado, SSE, comandos e porta alternativa", async () => {
+    const f = fiscal();
+    const CONTAINER = process.env.CONTAINER ?? "";
+    const BASE = process.env.BASE ?? "";
+    const execD = (sh: string) => execFileSync("docker", ["exec", CONTAINER, "sh", "-c", sh], { encoding: "utf8" });
+    const matarClientes = () =>
+      execD(`node -e "const fs=require('fs');for(const d of fs.readdirSync('/proc')){if(!/^[0-9]+$/.test(d))continue;try{const c=fs.readFileSync('/proc/'+d+'/cmdline','utf8').split(String.fromCharCode(0)).join(' ');if(new RegExp(['cliente'+'-painel[.]js','cli'+'37'].join('|')).test(c))process.kill(Number(d),'SIGKILL')}catch(e){}}console.log('ok')"; echo ok`);
+    const portaLivre = (p: number) =>
+      execD(`node -e "fetch('http://127.0.0.1:${p}/api/estado').then(()=>console.log('ocupada')).catch(()=>console.log('livre'))"`).trim() === "livre";
+    const fonte = readFileSync(join(process.cwd(), "agente", "cliente.js"));
+    execFileSync("docker", ["exec", "-i", CONTAINER, "sh", "-c", "cat > /tmp/cliente-painel.js"], { input: fonte });
+
+    const rPar = await call("POST", "/maquinas", { key: TESTKEY, corpo: { nome: "painel-s39" } });
+    const tokenS39 = String(rPar.json?.token ?? "");
+    f.check("v3.9 pareamento criado para a sonda do painel", rPar.status === 201 && tokenS39.length === 40, rPar.status);
+
+    matarClientes();
+    for (let i = 0; i < 30 && !portaLivre(48123); i++) await dormir(500);
+    execD("rm -f /tmp/conf-p39.json /tmp/conf-p39b.json /tmp/minirag-cliente.log");
+    execD(`nohup env MINIRAG_MAQUINA_CONF=/tmp/conf-p39.json node /tmp/cliente-painel.js --token ${tokenS39} --url ${BASE} --host maq-s39 --sem-janela >/tmp/c39.out 2>&1 & sleep 1; echo ok`);
+
+    /* porta REAL do painel: sai do log que acabou de nascer (só este cliente vivo) */
+    let porta = 0;
+    for (let i = 0; i < 30 && !porta; i++) {
+      const m = execD("grep -oE 'painel local em http://127.0.0.1:[0-9]+/' /tmp/minirag-cliente.log 2>/dev/null | tail -1").match(/:([0-9]+)\//);
+      if (m) porta = Number(m[1]);
+      else await dormir(500);
+    }
+    f.check("v3.9 painel abriu e anunciou a porta", porta >= 48123, "porta=" + porta);
+
+    const ate = async (cond: () => Promise<boolean>, tetoMs = 15000) => {
+      const fim = Date.now() + tetoMs;
+      for (;;) {
+        if (await cond()) return true;
+        if (Date.now() > fim) return false;
+        await dormir(500);
+      }
+    };
+    const estado = () =>
+      JSON.parse(
+        execD(`node -e "fetch('http://127.0.0.1:${porta}/api/estado').then(r=>r.json()).then(j=>console.log(JSON.stringify({online:j.online,host:j.host,porta:j.porta,comandos:j.comandos||[]}))).catch(()=>console.log('{}'))"`) || "{}",
+      );
+    const online39 = await ate(async () => {
+      const e = estado();
+      return e.online === true && e.host === "maq-s39";
+    }, 25000);
+    f.check("v3.9 painel fala do próprio cliente: online e máquina no estado", online39, JSON.stringify(estado()).slice(0, 150));
+
+    const html39 = execD(`node -e "fetch('http://127.0.0.1:${porta}/').then(r=>r.text()).then(t=>console.log(t.includes('minirag')&&t.includes('Conex')&&t.includes('Log')?'tem':'falta'))"`).trim();
+    f.check("v3.9 página do painel sai com as seções (conexão, log)", html39 === "tem", html39);
+
+    const sse39 = execD(`node -e "const c=new AbortController();setTimeout(()=>c.abort(),3000);fetch('http://127.0.0.1:${porta}/evento',{signal:c.signal}).then(async r=>{const rd=r.body.getReader();const a=await rd.read();console.log(a.value?Buffer.from(a.value).toString().slice(0,40):'vazio')}).catch(()=>{})"`);
+    f.check("v3.9 SSE entrega o estado inicial", sse39.includes("oi"), sse39.slice(0, 60));
+
+    const rRun39 = await call("POST", "/maquinas/maq-s39/run", { key: TESTKEY, corpo: { cmd: "echo painel-s39-dentro" } });
+    await dormir(900);
+    const noPainel = estado().comandos ?? [];
+    f.check(
+      "v3.9 comando do servidor aparece no painel (exit e rótulo)",
+      rRun39.status === 200 && noPainel.some((c: any) => String(c.rotulo ?? "").includes("painel-s39-dentro") && c.exit === 0),
+      JSON.stringify(noPainel).slice(0, 150),
+    );
+
+    execD(`nohup env MINIRAG_MAQUINA_CONF=/tmp/conf-p39b.json node /tmp/cliente-painel.js --token ${tokenS39} --url ${BASE} --host maq-s39b --sem-janela >/tmp/c39b.out 2>&1 & sleep 1; echo ok`);
+    const segunda = await ate(async () => {
+      try {
+        const j = JSON.parse(execD(`node -e "fetch('http://127.0.0.1:${porta + 1}/api/estado').then(r=>r.json()).then(j=>console.log(JSON.stringify({porta:j.porta}))).catch(()=>console.log('{}'))"`) || "{}");
+        return j.porta === porta + 1;
+      } catch {
+        return false;
+      }
+    }, 12000);
+    f.check("v3.9 segunda instância usa a porta seguinte sem briga", segunda, "esperada=" + (porta + 1));
+
+    matarClientes();
+    execD("rm -f /tmp/conf-p39.json /tmp/conf-p39b.json");
+    await call("DELETE", `/maquinas/chave/${String(rPar.json?.id ?? "nao")}`, { key: TESTKEY });
+    f.fechar("v3.9 painel");
   });
 
   await bloco(t, "v3.8: vocabulário do túnel no MCP + falas que ficam na tela", async () => {
