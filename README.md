@@ -10,6 +10,16 @@ parecidos com a pergunta, com uma nota de 0 a 1.
 
 ---
 
+## v3.8 (23/10) — o túnel inteiro na boca do agente + falas que ficam na tela
+
+- **Vocabulário do túnel como ferramentas**: 20 nomes (`listar_arquivos`, `editar_no_local`, `rodar_comando`, `capturar_tela`, `rede`, `servicos`, `power`, `gui`, `janelas`, `processos`, `git_remoto`, `esperar_arquivo`, `estado_maquina`, `abrir`, `eventos`, `falar`, `area_transferencia`, `rodar_lote`, `grep_remoto`, `escrever_arquivo`) montados no servidor (`src/maquinas_tools.ts`: tabela nome→comando, PowerShell/sh por SO) e expostos no MCP, no chat e no REST da mesma porta — 46 tools no `tools/list`; o cliente Node não muda por verbo novo.
+- **Governança**: `confirmar: true` trava `power`/`git_remoto(merge|reset|revert|push)` até o dono confirmar; `gui`/`falar` só no console ativo; serial por host; `rodar_comando` opcional com timeout/pid.
+- **Escrita de arquivo na máquina**: canal one-time `GET /maquina/u?k=…` (bytes ficam 120 s no servidor, chave casa com o host do cliente; curl com User-Agent de curl).
+- **Chat**: as falas de caminho da rodada viram balões próprios na tela, voltam no histórico (`chat_mensagens.falas`); teto de `max_rodadas` subiu de 10 para **60** (validação, MCP e Configurações).
+- **Auditoria**: `comandos_log.origem` alargada (16→64) e gravada como `canal:ferramenta` — o insert de ferramenta morria em silêncio no schema antigo.
+
+---
+
 ## v3.7 (22/10) — cliente pronto do painel (chave assada, um arquivo, dois cliques)
 
 - **`GET /maquinas/cliente/win|linux?nome=&tenant=`** (autenticado, mesmo escopo das rotas de
@@ -358,7 +368,7 @@ Agora são **três peças separadas**, cada uma controlando uma coisa:
 - **Execução direta, sem cartão de confirmação** (decisão do dono). O freio que ficou é o
   registro: `ferramentas` (servidor, nome, argumentos mascarados, ok, resumo, ms) vai na
   resposta, no painel embaixo da mensagem e no histórico (`chat_mensagens.ferramentas`).
-- **Trava de loop**: `max_rodadas` (0 a 10, padrão 5). `0` = não oferece ferramenta nenhuma.
+- **Trava de loop**: `max_rodadas` (0 a 60, padrão 5; teto 10→60 na v3.8). `0` = não oferece ferramenta nenhuma.
   Ao estourar, a resposta vem com `aviso` ("bateu o limite de N rodadas").
 - **Corte de contexto**: saída de ferramenta é truncada em 4.000 caracteres; base64 longo
   vira `[arquivo em base64: N caracteres, não mostrei]`.
