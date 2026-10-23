@@ -12,6 +12,13 @@ parecidos com a pergunta, com uma nota de 0 a 1.
 
 ---
 
+---
+
+## v3.10.1 (23/10) — o download do cliente virou link de verdade
+
+- **Fim do "Precisa de autorização para transferir"**: a tela baixava por `fetch`+blob e o Edge/Chrome passou a bloquear os downloads seguintes da mesma página. Agora o botão pede um **bilhete** de uso único (2 min, preso ao usuário) e abre o download por navegação comum — sem blob, sem prompt de permissão.
+- O bilhete não carrega a chave do painel: quem tem o endereço só consegue aquele download, uma vez. A rota com `Authorization` continua valendo para CLI e suíte.
+
 ## v3.10 (23/10) — um cliente para várias máquinas; bloquear é por máquina
 
 - **A chave do cliente deixou de queimar na primeira máquina**: o mesmo arquivo baixado ativa quantas máquinas você quiser. A validade da chave passou a ser a **janela de ativação** (o cliente antigo, de uso único, recusava a segunda cópia com "chave já usada").
