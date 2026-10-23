@@ -50,6 +50,8 @@ PY
   python3 scripts/strip_pe_assinatura.py agente/.build/node.exe
   npx --yes postject@1.0.0-alpha.5 agente/.build/node.exe NODE_SEA_BLOB agente/.build/sea.blob --sentinel-fuse "$FUSE" >/dev/null
   mv agente/.build/node.exe agente/bin/minirag-cliente-win.exe
+  # v3.11: sem console — o programa abre a própria janela e nada mais
+  python3 scripts/sem_console_pe.py agente/bin/minirag-cliente-win.exe
   echo "==> agente/bin/minirag-cliente-win.exe ($(stat -c%s agente/bin/minirag-cliente-win.exe) bytes)"
 fi
 

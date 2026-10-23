@@ -262,18 +262,52 @@ function iniciarPainel() {
       painelPorta = porta;
       const url = "http://127.0.0.1:" + porta + "/";
       log("painel local em " + url);
-      if (!semJanela) abrirNavegador(url);
+      if (!semJanela) abrirJanela(url);
     });
   };
   tenta(PAINEL_PORTA);
 }
-function abrirNavegador(url) {
-  // melhor esforço: sem navegador à mão o painel continua esperando na porta
+/* v3.11: UMA janela só. O programa deixou de ser "console + aba de navegador":
+ * no Windows ele abre a página em MODO APLICATIVO (janela própria, sem abas, sem
+ * barra de endereço) e o executável é compilado sem console. */
+function acharNavegadorApp() {
+  const pf = process.env.PROGRAMFILES || "C:\\Program Files";
+  const pf86 = process.env["PROGRAMFILES(X86)"] || "C:\\Program Files (x86)";
+  const la = process.env.LOCALAPPDATA || "";
+  return [
+    path.join(pf86, "Microsoft", "Edge", "Application", "msedge.exe"),
+    path.join(pf, "Microsoft", "Edge", "Application", "msedge.exe"),
+    la ? path.join(la, "Microsoft", "Edge", "Application", "msedge.exe") : "",
+    path.join(pf, "Google", "Chrome", "Application", "chrome.exe"),
+    path.join(pf86, "Google", "Chrome", "Application", "chrome.exe"),
+  ].filter(Boolean).find((c) => { try { return fs.existsSync(c); } catch { return false; } }) || "";
+}
+
+function abrirJanela(url) {
+  if (!EH_WIN) {
+    try { spawn("xdg-open", [url], { detached: true, stdio: "ignore" }).unref(); } catch { /* sem navegador */ }
+    return;
+  }
+  const navegador = acharNavegadorApp();
+  if (navegador) {
+    try {
+      const perfil = path.join(path.dirname(confPath), ".minirag-janela");
+      const f = spawn(navegador, ["--app=" + url, "--window-size=1180,820", "--user-data-dir=" + perfil], { detached: true, stdio: "ignore", windowsHide: true });
+      f.on("error", () => abrirNavegadorPadrao(url));
+      if (f.unref) f.unref();
+      return;
+    } catch { /* cai no padrão */ }
+  }
+  abrirNavegadorPadrao(url);
+}
+
+function abrirNavegadorPadrao(url) {
+  // última alternativa: navegador do sistema (a página é a mesma)
   try {
     const f = EH_WIN
       ? spawn("cmd.exe", ["/d", "/c", "start", "", url], { windowsHide: true })
       : spawn("xdg-open", [url], { detached: true, stdio: "ignore" });
-    f.on("error", () => log("não consegui abrir o navegador sozinho — abra " + url));
+    f.on("error", () => log("não consegui abrir a janela sozinho — abra " + url));
     if (!EH_WIN) f.unref();
   } catch { /* silencioso: o log já diz tudo */ }
 }
