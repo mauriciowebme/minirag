@@ -147,6 +147,15 @@ export async function enviar<T>(caminho: string, form: FormData): Promise<T> {
 }
 
 /** Download autenticado (o <a href> não manda o header). */
+/* v3.10.1: download por LINK de verdade (bilhete de uso único). O fetch+blob fazia
+ * o Edge/Chrome bloquear o segundo download da mesma página ("Precisa de
+ * autorização para transferir"). Navegação comum o navegador sempre permite. */
+export async function baixarPorLink(plataforma: "win" | "linux"): Promise<string> {
+  const r = await post<{ url: string }>(`/maquinas/cliente/${plataforma}/bilhete`);
+  window.location.assign(r.url);
+  return r.url;
+}
+
 export async function baixar(caminho: string, nomeArquivo: string): Promise<void> {
   const r = await fetch(caminho, { headers: cabecalhos(false) });
   if (!r.ok) throw new Error(`download: HTTP ${r.status}`);

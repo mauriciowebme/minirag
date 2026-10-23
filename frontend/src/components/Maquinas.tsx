@@ -1,5 +1,5 @@
 import { useCallback, useEffect, useState } from "react";
-import { baixar, del, get, patch, rodarAcao } from "../services/api";
+import { baixarPorLink, del, get, patch, rodarAcao } from "../services/api";
 import { useToast } from "./Toast";
 import type { ChaveClienteLinha, MaquinaLinha, MaquinasLogLinha, MaquinasResp } from "../types";
 
@@ -57,8 +57,8 @@ export function Maquinas({ operador }: { operador: boolean }) {
   async function gerarCliente(plat: "win" | "linux") {
     setGerandoCli(true);
     try {
-      await baixar(`/maquinas/cliente/${plat}`, plat === "win" ? "minirag-cliente-win.exe" : "minirag-cliente-linux");
-      toast("cliente gerado — o arquivo que baixou já é do teu usuário");
+      await baixarPorLink(plat);
+      toast("cliente gerado — o download começou; o arquivo já é do teu usuário");
       carregar();
     } catch (e) {
       toast("gerar cliente: " + (e as Error).message);
