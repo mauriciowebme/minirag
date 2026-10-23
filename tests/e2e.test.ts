@@ -349,7 +349,7 @@ test("minirag v2 — suíte completa", async (t) => {
     f.fechar("v1.8");
   });
 
-  await bloco(t, "MCP: JSON-RPC stateless com as 19 tools", async () => {
+  await bloco(t, "MCP: JSON-RPC stateless com as 46 tools", async () => {
     const f = fiscal();
     const H = { key: TESTKEY };
     const rpc = (id: unknown, method: string, params?: unknown, key: string | null = TESTKEY) =>
@@ -401,8 +401,13 @@ test("minirag v2 — suíte completa", async (t) => {
       "rodar_comando",
       "search",
       "upload_file",
+      /* v3.8: vocabulário do túnel entra na superfície (20 tools) */
+      "abrir", "area_transferencia", "buscar_arquivos", "editar_no_local", "estado_maquina",
+      "eventos", "esperar_arquivo", "falar", "git_remoto", "grep_remoto",
+      "janelas", "ler_arquivo", "listar_arquivos", "power", "processos",
+      "rede", "rodar_lote", "servicos", "sessao", "escrever_arquivo",
     ].sort();
-    f.check("tools/list tem 26 tools (paridade com a REST)", JSON.stringify(nomes) === JSON.stringify(ESPERADAS.sort()), nomes.length);
+    f.check("tools/list tem 46 tools (paridade com a REST)", JSON.stringify(nomes) === JSON.stringify(ESPERADAS.sort()), nomes.length);
 
     r = await rpc(5, "tools/call", { name: "health" }, null);
     f.check("tools/call sem Bearer -> 401", r.status === 401 && "error" in (r.json ?? {}), r.texto.slice(0, 150));
@@ -1560,7 +1565,7 @@ test("minirag v2 — suíte completa", async (t) => {
     f.check("content-type é text/event-stream", /text\/event-stream/.test(fluxoRes.ctype), fluxoRes.ctype);
     const tipos = fluxoRes.eventos.map((e) => e.tipo);
     f.check("pedaços chegaram um a um (>=2 delta)", fluxoRes.eventos.filter((e) => e.tipo === "delta").length >= 2, tipos.join(","));
-    f.check("o pensamento do modelo foi descartado antes da resposta", tipos.includes("descartar"), tipos.join(","));
+    f.check("a fala do caminho virou balão próprio antes da resposta (v3.8)", tipos.includes("fala") && !tipos.includes("descartar"), tipos.join(","));
     f.check("a chamada de ferramenta aparece ainda durante o fluxo", tipos.indexOf("ferramenta") < tipos.indexOf("fim") && tipos.includes("ferramenta"), tipos.join(","));
     f.check("o fluxo termina com fim", tipos[tipos.length - 1] === "fim", tipos[tipos.length - 1]);
     const dados = fluxoRes.eventos.find((e) => e.tipo === "fim")?.dados ?? {};
@@ -1568,9 +1573,11 @@ test("minirag v2 — suíte completa", async (t) => {
     f.check("nada de 'Thinking:' na resposta", !/Thinking:/.test(String(dados.resposta ?? "")), dados.resposta);
     /* o reducer do navegador, replicado aqui: o que a bolha mostra ao fim do fluxo */
     let tela = "";
+    const baloes: string[] = [];
     for (const e of fluxoRes.eventos) {
       if (e.tipo === "delta") tela += String(e.texto ?? "");
       else if (e.tipo === "descartar") tela = "";
+      else if (e.tipo === "fala") { baloes.push(String(e.texto ?? "")); tela = ""; }
       else if (e.tipo === "fim") tela = String(e.dados?.resposta ?? tela);
     }
     f.check("a bolha termina limpa: o que foi descartado sumiu da tela", tela === String(dados.resposta ?? "") && !/Thinking:/.test(tela), tela.slice(0, 140));
@@ -2084,7 +2091,9 @@ test("minirag v2 — suíte completa", async (t) => {
     const psql = (sql: string) =>
       execFileSync("docker", ["exec", DB, "sh", "-c", `psql -U \"$POSTGRES_USER\" -d \"$POSTGRES_DB\" -tAc \"${sql}\"`], { encoding: "utf8" }).trim();
 
-    /* ---- 1. defaults efetivos sem nada gravado na tela ---- */
+    /* ---- 1. defaults efetivos sem nada gravado na tela ----
+       (apaga ajustes de corridas anteriores: a suíte pode rodar sobre o mesmo volume) */
+    if (DB) psql("DELETE FROM esquecimento_cfg");
     let r = await call("GET", "/config", { key: OPKEY });
     const e0 = r.json?.esquecimento ?? {};
     f.check(
@@ -2353,7 +2362,7 @@ test("minirag v2 — suíte completa", async (t) => {
     f.check("desligado: MCP rodar_comando recusa com a mesma frase", txtBloq.includes("409") && txtBloq.includes("DESLIGADO"), txtBloq.slice(0, 140));
     r = await call("POST", "/mcp", { key: OPKEY, corpo: { jsonrpc: "2.0", id: 90, method: "tools/list" } });
     const nomesOff = ((r.json?.result?.tools ?? []) as any[]).map((t) => t.name);
-    f.check("desligado: rodar_comando some do tools/list MCP", !nomesOff.includes("rodar_comando") && nomesOff.length === nomesOn.length - 1, { on: nomesOn.length, off: nomesOff.length });
+    f.check("desligado: as 21 ferramentas de máquina somem do tools/list MCP", !nomesOff.includes("rodar_comando") && !nomesOff.includes("listar_arquivos") && nomesOn.includes("listar_arquivos") && nomesOff.length === nomesOn.length - 21, { on: nomesOn.length, off: nomesOff.length });
     r = await call("PATCH", "/config/mcp/maquinas", { key: OPKEY, corpo: { ativo: true } });
     r = await call("POST", "/maquinas/maq-mcp/run", { key: TESTKEY, corpo: { cmd: "echo liberado" } });
     f.check("religado: executa normal de novo", r.json?.stdout === "liberado", r.texto.slice(0, 140));
@@ -2453,6 +2462,90 @@ test("minirag v2 — suíte completa", async (t) => {
 
     execD("rm -f /tmp/c37v.json");
     f.fechar("v3.7 chave-cliente");
+  });
+
+  await bloco(t, "v3.8: vocabulário do túnel no MCP + falas que ficam na tela", async () => {
+    const f = fiscal();
+    const CONTAINER = process.env.CONTAINER ?? "";
+
+    /* provedor OpenAI-compatível falso DENTRO do container, com duas rodadas:
+       a 1ª responde texto + tool_call (vira FALA), a 2ª fecha a conversa */
+    if (CONTAINER) {
+      const codigo = [
+        "const http=require('http');let n=0;",
+        "http.createServer((req,res)=>{let b='';req.on('data',c=>b+=c);req.on('end',()=>{n++;",
+        "res.setHeader('content-type','application/json');let out;",
+        "if(n===1)out={choices:[{message:{role:'assistant',content:'vou ver a pasta',tool_calls:[{id:'c1',type:'function',function:{name:'listar_arquivos',arguments:'" + '{"host":"maq-8","caminho":"/tmp"}' + "'}}]}}]};",
+        "else out={choices:[{message:{role:'assistant',content:'PRONTO-V38'}}]};",
+        "res.end(JSON.stringify(out));",
+        "});}).listen(9912,'127.0.0.1');",
+        "setTimeout(()=>process.exit(0),90000);",
+      ].join("");
+      execFileSync("docker", ["exec", "-d", CONTAINER, "node", "-e", codigo]);
+      await dormir(1200);
+    }
+
+    let r = await call("PUT", "/config/provider", {
+      key: OPKEY,
+      corpo: { tipo: "litellm", base_url: "http://127.0.0.1:9912/v1", modelo: "modelo-v38", chave: "***", temperatura: 0.2, system_prompt: "", mcp_interno: true, max_rodadas: 60, ativo: true, global: true },
+    });
+    f.check("max_rodadas aceita 60 (teto novo)", r.status === 200, r.texto.slice(0, 160));
+    r = await call("PUT", "/config/provider", { key: OPKEY, corpo: { max_rodadas: 61, global: true } });
+    f.check("max_rodadas 61 e rejeitado (422)", r.status === 422, r.status);
+
+    /* máquina falsa (mesmo wire do v3.6) para as tools andarem de verdade */
+    const FAKE = [
+      'const WebSocket=require("/app/node_modules/ws");const fs=require("fs");',
+      'const url=process.env.FQ_URL||"ws://127.0.0.1:8000/maquina/ws";',
+      'const token=process.env.FQ_TOKEN||"", host=process.env.FQ_HOST||"maq", arq=process.env.FQ_ARQ;',
+      'let cur=token;const ws=new WebSocket(url);',
+      'ws.on("open",()=>ws.send(JSON.stringify({token:cur,host,os:"fake",user:"suite"})));',
+      'ws.on("message",(b)=>{let m={};try{m=JSON.parse(String(b))}catch{return}',
+      'if(m.ack){fs.writeFileSync(arq,JSON.stringify(m));if(m.token){cur=m.token}}',
+      'else if(typeof m.cmd==="string"){const e=m.cmd.indexOf("echo ");',
+      'if(e===0)setTimeout(()=>{try{ws.send(JSON.stringify({exit:0,stdout:m.cmd.slice(5),stderr:""}))}catch{}},100);',
+      'else ws.send(JSON.stringify({exit:0,stdout:"fake-listing",stderr:""}))}});',
+      'ws.on("error",()=>{});setTimeout(()=>process.exit(0),80000);',
+    ].join("");
+    execFileSync("docker", ["exec", "-i", CONTAINER, "sh", "-c", "cat > /app/maqfake8.js"], { input: FAKE });
+    r = await call("POST", "/maquinas", { key: TESTKEY, corpo: { nome: "suite-8" } });
+    execFileSync("docker", ["exec", "-d", CONTAINER, "sh", "-c", `FQ_TOKEN='${String(r.json?.token ?? "")}' FQ_HOST=maq-8 FQ_ARQ=/tmp/a8.json node /app/maqfake8.js`]);
+    let viuMaq = false;
+    for (let i = 0; i < 40 && !viuMaq; i++) {
+      await dormir(400);
+      viuMaq = (String((await call("GET", "/maquinas", { key: TESTKEY })).texto)).includes("maq-8");
+    }
+    f.check("maq-8 pareada e online", viuMaq);
+
+    /* as 20 tools do vocabulário na superfície MCP */
+    const VOCAB = ["listar_arquivos", "ler_arquivo", "escrever_arquivo", "buscar_arquivos", "grep_remoto", "editar_no_local", "estado_maquina", "processos", "janelas", "area_transferencia", "falar", "abrir", "servicos", "eventos", "rede", "esperar_arquivo", "power", "rodar_lote", "sessao", "git_remoto"];
+    r = await call("POST", "/mcp", { key: TESTKEY, corpo: { jsonrpc: "2.0", id: 1, method: "tools/list" } });
+    const nomes: string[] = (r.json?.result?.tools ?? []).map((x: any) => x.name);
+    f.check("tools/list traz as 20 ferramentas do vocabulário", VOCAB.every((n) => nomes.includes(n)), VOCAB.filter((n) => !nomes.includes(n)).join(","));
+
+    r = await call("POST", "/mcp", { key: TESTKEY, corpo: { jsonrpc: "2.0", id: 2, method: "tools/call", params: { name: "listar_arquivos", arguments: { host: "maq-8", caminho: "/tmp" } } } });
+    f.check("tools/call listar_arquivos trafega pelo hub", r.status === 200 && r.json?.result?.isError !== true && String(r.json?.result?.content?.[0]?.text ?? "").includes("fake-listing"), JSON.stringify(r.json).slice(0, 200));
+
+    r = await call("POST", "/mcp", { key: TESTKEY, corpo: { jsonrpc: "2.0", id: 3, method: "tools/call", params: { name: "power", arguments: { host: "maq-8", acao: "restart" } } } });
+    f.check("power sem confirmar recusa (governança)", r.json?.result?.isError === true, JSON.stringify(r.json).slice(0, 200));
+
+    r = await call("GET", "/maquinas/log?limit=10", { key: TESTKEY });
+    f.check("auditoria marcou origem mcp", (r.json?.log ?? []).some((l: any) => String(l.origem).startsWith("mcp:") && l.host === "maq-8"), JSON.stringify((r.json?.log ?? []).slice(0, 2)));
+
+    /* o chat de duas rodadas: a fala do caminho vira balão e é persistida */
+    r = await call("POST", "/chat", { key: TESTKEY, corpo: { pergunta: "lista a pasta tmp da maq-8", memoria: "suite-v38" } });
+    f.check("resposta final chega após rodada de ferramenta", r.status === 200 && String(r.json?.resposta) === "PRONTO-V38", r.texto.slice(0, 200));
+    f.check("falas voltam no corpo da resposta", Array.isArray(r.json?.falas) && r.json?.falas?.[0] === "vou ver a pasta", JSON.stringify(r.json?.falas));
+    f.check("ferramenta da rodada registrada", (r.json?.ferramentas ?? []).some((x: any) => x.nome === "listar_arquivos"), JSON.stringify(r.json?.ferramentas ?? []).slice(0, 200));
+
+    r = await call("GET", "/chat?memoria=suite-v38", { key: TESTKEY });
+    const ult = (r.json?.mensagens ?? []).filter((m: any) => m.papel === "assistant").pop();
+    f.check("histórico persiste a coluna falas", Array.isArray(ult?.falas) && ult?.falas?.[0] === "vou ver a pasta", JSON.stringify(ult).slice(0, 220));
+
+    /* volta o provider para inerte e derruba os falsos (não contaminar o freio final) */
+    await call("PUT", "/config/provider", { key: OPKEY, corpo: { ativo: false, global: true } });
+    if (CONTAINER) execFileSync("docker", ["exec", CONTAINER, "sh", "-c", "pkill -f maqfake8 || pkill -f 9912 || true; pkill -f 9912 || true"]);
+    f.fechar("v3.8 vocab e falas");
   });
 
   await bloco(t, "freio de força bruta (último: bloqueia o IP)", async () => {
