@@ -18,6 +18,15 @@ parecidos com a pergunta, com uma nota de 0 a 1.
 
 ---
 
+---
+
+## v3.12 (23/10) — máquina apagada não volta sozinha e o cliente para de insistir
+
+- **Apagar é definitivo**: a máquina removida no painel fica marcada, e o cliente que já está instalado **não** reativa com a chave antiga — ele avisa "máquina removida do painel — baixe um cliente novo". Cliente gerado depois da remoção entra normalmente.
+- **Token morto não trava mais o programa**: se o servidor não reconhece o token guardado (máquina apagada por engano, banco restaurado), o cliente esquece esse token e tenta de novo com a chave do próprio arquivo, em vez de repetir o erro.
+- **Fim do log gigante**: o log passou a girar por tamanho (2 MB) além dos 30 dias. Antes, uma recusa a cada 15 segundos enchia o arquivo em minutos.
+- **Uma instância só**: abrir o programa de novo não cria outro cliente — ele abre a janela do que já está rodando.
+
 ## v3.11 (23/10) — o cliente abre a própria janela
 
 - **Uma janela só**: o programa deixou de ser "janela preta + aba de navegador". O executável no Windows abre em modo aplicativo — janela própria, sem abas e sem barra de endereço — e é compilado **sem console**, então não aparece nenhuma janela preta.
