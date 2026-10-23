@@ -164,6 +164,7 @@ function rodar(cmd, esperaSeg) {
 /* ---------------- websocket (nativo do Node — SEA sem dependência) ---------------- */
 let ws = null;
 let morrendo = false;
+let atualizando = false;
 
 function conectar() {
   if (morrendo) return;
@@ -172,6 +173,8 @@ function conectar() {
   ws.addEventListener("open", () => {
     nivelBackoff = 0;
     ws.send(JSON.stringify({ token, host, os: process.platform + " " + os.release(), user: os.userInfo().username }));
+    // herança do Go v1.11: a novidade é reconsultada em TODA conexão (primeira e reconexões)
+    verificarAtualizacao().catch(() => {});
   });
   ws.addEventListener("message", async (ev) => {
     let m;
@@ -231,8 +234,28 @@ function baixar(para, urlBaixa) {
           r.resume();
           return rej(new Error("http " + r.statusCode));
         }
+        // progresso visível (janela do duplo clique + log): % a cada 5%, MB e velocidade
+        const total = Number(r.headers["content-length"] || 0);
+        const t0 = Date.now();
+        let feito = 0;
+        let ultimo = 0; // último valor publicado (pct, ou bytes se não houver total)
+        r.on("data", (chunk) => {
+          feito += chunk.length;
+          const passo = total ? Math.floor((feito * 100) / total) >= ultimo + 5 : feito - ultimo >= 2_000_000;
+          if (!passo) return;
+          ultimo = total ? Math.floor((feito * 100) / total) : feito;
+          const s = Math.max(0.5, (Date.now() - t0) / 1000);
+          const mb = (feito / 1048576).toFixed(1);
+          const de = total ? " de " + (total / 1048576).toFixed(1) + " MB (" + ultimo + "%)" : "";
+          log("download: " + mb + " MB" + de + " · " + (feito / 1048576 / s).toFixed(1) + " MB/s");
+        });
         r.pipe(arq);
-        arq.on("finish", () => arq.close(() => res()));
+        arq.on("finish", () => {
+          arq.close(() => {
+            log("download concluído: " + (feito / 1048576).toFixed(1) + " MB em " + ((Date.now() - t0) / 1000).toFixed(1) + " s — trocando arquivo");
+            res();
+          });
+        });
       })
       .on("error", rej);
     arq.on("error", rej);
@@ -240,7 +263,8 @@ function baixar(para, urlBaixa) {
 }
 
 async function verificarAtualizacao() {
-  if (VERSAO_CLIENTE === "dev") return; // build de desenvolvimento não se auto-atualiza
+  if (VERSAO_CLIENTE === "dev" || atualizando) return; // dev não se auto-atualiza; sem reentrância
+  atualizando = true;
   try {
     const r = await fetch(new URL("/maquina/atualizacao", base).toString(), { signal: AbortSignal.timeout(10000) });
     if (!r.ok) return;
@@ -266,14 +290,38 @@ async function verificarAtualizacao() {
     }
     fs.renameSync(tmp, eu);
     if (!EH_WIN) fs.chmodSync(eu, 0o755);
-    log("exe novo no lugar — reiniciando");
+    log("exe novo no lugar — reabrindo em janela própria (minimizada, sem roubar tua tela)");
     const semToken = (() => { const i = argv.indexOf("--token"); return i < 0 ? argv : [...argv.slice(0, i), ...argv.slice(i + 2)]; })();
-    const filho = spawn(eu, semToken, { detached: true, stdio: "inherit" }); // sem --token: o pareamento pode estar queimado; conf tem o de máquina
-    filho.unref();
+    const err = await relancar(eu, semToken);
+    if (err) log("update aplicado mas relancar falhou: " + err.message + " (reabra o exe; esta janela segue funcionando)");
     morrendo = true;
     process.exit(0);
   } catch (e) {
     log("atualização: " + e.message + " (sigo com a versão atual)");
+  } finally {
+    atualizando = false;
+  }
+}
+
+/* relancar: herança exata do agente Go (regra do dono 15/10): o sucessor nasce em
+ * janela NOVA, já minimizada (start /min = não rouba o foreground), e sobrevive à
+ * saída deste processo. O wrapper cmd fica invisível (windowsHide = CREATE_NO_WINDOW).
+ * Antes: spawn com stdio inherit — o filho morava NO console do pai; o pai saía e a
+ * janela fechava com o agente vivo por trás ("fechou e não reabriu", cobrado 23/10). */
+function relancar(caminho, args) {
+  if (EH_WIN) {
+    const w = spawn("cmd.exe", ["/d", "/c", "start", "", "/min", caminho, ...args], { windowsHide: true });
+    return new Promise((res) => {
+      w.on("error", res);
+      w.on("exit", (code) => res(code ? new Error("start saiu com código " + code) : null));
+    });
+  }
+  try {
+    const filho = spawn(caminho, args, { detached: true, stdio: "ignore" });
+    filho.unref();
+    return Promise.resolve(null);
+  } catch (e) {
+    return Promise.resolve(e);
   }
 }
 
