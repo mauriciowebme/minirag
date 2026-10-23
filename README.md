@@ -22,6 +22,12 @@ parecidos com a pergunta, com uma nota de 0 a 1.
 
 ---
 
+## v3.13.0 (23/10) — o chat mostra o que o modelo está pensando
+
+- **Bloco de raciocínio ao vivo**: enquanto o modelo pensa, aparece `🧠 Pensando… Ns` com o texto do raciocínio; quando a resposta começa, recolhe em `🧠 Pensou por Ns` (clicável para reabrir) — o mesmo desenho do Open WebUI ("Thinking…" → "Thought for Ns").
+- **O raciocínio não vem mais misturado com a resposta**: o servidor lê o campo próprio do modelo (`reasoning_content`, `reasoning` ou `thinking`) e manda num evento separado; modelos que não expõem raciocínio seguem como antes, sem bloco nenhum.
+- **Fica gravado**: o raciocínio é salvo junto da mensagem, então ao reabrir a conversa o bloco continua lá, recolhido. Nada dele entra no contexto enviado ao modelo nas próximas mensagens.
+
 ## v3.12.2 (23/10) — a janela acompanha o programa ao vivo e não fica presa
 
 - **A janela se atualiza sozinha**: quando o programa conectava, a janela continuava escrita "desconectado" até alguém recarregar — ela só entendia avisos que traziam tudo de uma vez e ignorava os avisos de "conectou", "baixando atualização" e "comando recebido". Agora ela acompanha os três ao vivo (provado num navegador de verdade: abre em "desconectado" e vira "ONLINE" sem recarregar).
