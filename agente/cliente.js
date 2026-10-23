@@ -15,9 +15,12 @@
  *    ele — a suíte pegou exatamente esse defeito no cliente falso da primeira vez;
  *  - reconexão com backoff (400ms → 30s), heartbeat por ping do protocolo
  *    (o WebSocket nativo do Node responde pong sozinho), kill de ÁRVORE em timeout;
- *  - auto-update: compara a versão embutida no build com o /maquina/atualizacao
- *    do servidor; se o servidor fala versão maior, baixa, troca e reinicia
- *    (no Windows o velho vira .old porque não se apaga arquivo em execução).
+ *  - auto-update: compara a versão embutida com o /maquina/atualizacao e reconsulta
+ *    em TODA conexão; se o servidor fala versão maior, mostra o progresso na TELA,
+ *    baixa, troca e reabre em janela própria minimizada (no Windows o exe velho vira
+ *    .old porque não se apaga arquivo em execução);
+ *  - UM log só (minirag-cliente.log), memória de 30 dias: faxina no boot apaga linhas
+ *    mais velhas e corta o topo se estourar 2 MB — sem arquivo .old de log.
  *
  * Uso:
  *   minirag-cliente-win.exe --token <token-da-tela>
@@ -108,11 +111,33 @@ function log(msg) {
     fs.appendFileSync(LOG_PATH, linha + "\n");
   } catch { /* sem disco de escrita? o console ainda salva a sessão */ }
 }
-function rotacionarLog() {
+function logTela(msg) {
+  // só a tela: o log do arquivo é para o essencial (um arquivo só, cobrado 23/10)
+  console.log(new Date().toISOString().slice(0, 19).replace("T", " ") + "  " + msg);
+}
+function faxinaLog() {
+  // UM log apenas, 30 dias de memória: linhas mais velhas morrem no boot e, se o
+  // arquivo estourar 2 MB, corta-se pelo começo (nunca renomeia para .old — o dono
+  // vetou o segundo arquivo: "um log só para tomar conta de tudo"). Sem atalho por
+  // tamanho: arquivo pequeno ainda pode guardar linha de 45 dias (pego pela sonda).
   try {
-    const st = fs.statSync(LOG_PATH);
-    if (st.size > 2_000_000) fs.renameSync(LOG_PATH, LOG_PATH + ".old"); // 2 MB, mantém o .old como fósforo
-  } catch { /* ainda não existe */ }
+    try { fs.unlinkSync(LOG_PATH + ".old"); } catch { /* fósforo antigo sumiu do mapa */ }
+    const corte = Date.now() - 30 * 864e5;
+    const vivas = fs.readFileSync(LOG_PATH, "utf8").split("\n").filter((l) => {
+      if (!l.trim()) return false;
+      const t = Date.parse(l.slice(0, 19).replace(" ", "T") + "Z");
+      return Number.isNaN(t) ? true : t >= corte; // linha sem data legível: fica
+    });
+    let texto = vivas.join("\n") + (vivas.length ? "\n" : "");
+    if (Buffer.byteLength(texto) > 2_000_000) {
+      const buf = Buffer.from(texto);
+      let inicio = buf.length - 1_900_000;
+      const nl = buf.indexOf(0x0a, inicio);
+      if (nl > 0) inicio = nl + 1;
+      texto = buf.subarray(inicio).toString("utf8");
+    }
+    fs.writeFileSync(LOG_PATH, texto);
+  } catch { /* sem permissão: o log segue gravando sem faxina */ }
 }
 function esperarEnter() {
   // duplo clique no Windows: sem isto a janela fecha antes de a pessoa ler
@@ -247,7 +272,7 @@ function baixar(para, urlBaixa) {
           const s = Math.max(0.5, (Date.now() - t0) / 1000);
           const mb = (feito / 1048576).toFixed(1);
           const de = total ? " de " + (total / 1048576).toFixed(1) + " MB (" + ultimo + "%)" : "";
-          log("download: " + mb + " MB" + de + " · " + (feito / 1048576 / s).toFixed(1) + " MB/s");
+          logTela("download: " + mb + " MB" + de + " · " + (feito / 1048576 / s).toFixed(1) + " MB/s");
         });
         r.pipe(arq);
         arq.on("finish", () => {
@@ -335,7 +360,7 @@ process.on("SIGINT", () => {
 });
 
 (async function principal() {
-  rotacionarLog();
+  faxinaLog();
   if (!token) {
     log("sem token ainda — assim funciona:");
     log("  1) painel " + base.replace(/\/$/, "") + "/painel/  → aba Máquinas → 'gerar token' (aparece 1 vez)");
