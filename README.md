@@ -22,6 +22,15 @@ parecidos com a pergunta, com uma nota de 0 a 1.
 
 ---
 
+## v3.13.1 (23/10) — o cliente para de ficar mudo quando o servidor reinicia
+
+- **O defeito, do jeito que tu viste**: publiquei uma versão nova, o servidor reiniciou no meio do pedido de conexão e o programa ficou com a janela aberta, escrito "desconectado", **sem nunca mais tentar**. Baixar o cliente novo também não adiantava: o arquivo novo via o programa travado na porta, abria a janela *daquele* e se fechava.
+- **Por que travava**: a ordem de tentar de novo estava pendurada num único aviso (o de conexão fechada). Quando o pedido de conexão é abandonado no meio, o motor do executável entrega o aviso de *erro* e nunca entrega o de fechamento — e o laço morria ali. A janela continuava aí, viva, fingindo que estava tudo certo.
+- **Agora o laço não depende de sorte**: qualquer saída (erro, conexão que fecha, o relógio dos 15 segundos) já remarca a tentativa seguinte na mesma escada (0,4 s até 30 s), e um vigia acorda a cada 30 segundos: se a hora marcada passou e ninguém tentou, ele recomeça. Medido com um servidor que engole a conexão: a versão antiga fez **1 tentativa em 45 segundos**; esta fez **3** e seguiu tentando.
+- **Dois cliques no arquivo novo voltam a resolver**: ele pergunta ao outro programa da máquina se aquele está *conectado*. Se está, abre a janela dele e sai (como antes). Se está vivo mas sem conexão, pede para ele sair e **assume** o lugar.
+- **A janela conta a verdade**: enquanto estiver desconectado mostra "última tentativa há Ns — o programa continua tentando sozinho", em vez da tela parada que não dizia se estava vivo.
+- **Do lado do servidor**: cada conexão de máquina que cai agora registra o código do fechamento e por quanto tempo viveu, e as recusas que antes eram mudas passam a aparecer no log. Na próxima vez o motivo sai do servidor, sem depender do arquivo de log da máquina.
+
 ## v3.13.0 (23/10) — o chat mostra o que o modelo está pensando
 
 - **Bloco de raciocínio ao vivo**: enquanto o modelo pensa, aparece `🧠 Pensando… Ns` com o texto do raciocínio; quando a resposta começa, recolhe em `🧠 Pensou por Ns` (clicável para reabrir) — o mesmo desenho do Open WebUI ("Thinking…" → "Thought for Ns").
