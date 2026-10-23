@@ -1,7 +1,7 @@
 import { useCallback, useEffect, useState } from "react";
 import { baixarPorLink, del, get, patch, rodarAcao } from "../services/api";
 import { useToast } from "./Toast";
-import type { ChaveClienteLinha, MaquinaLinha, MaquinasLogLinha, MaquinasResp } from "../types";
+import type { MaquinaLinha, MaquinasLogLinha, MaquinasResp } from "../types";
 
 /* v3.6: máquinas do usuário (o túnel absorvido). Cada login comum vê e gerencia
    as SUAS; o admin vê todas (a tela só gera cliente para o usuário logado).
@@ -20,7 +20,6 @@ export function Maquinas({ operador }: { operador: boolean }) {
   const { toast } = useToast();
   const [maquinas, setMaquinas] = useState<MaquinaLinha[]>([]);
   const [log, setLog] = useState<MaquinasLogLinha[]>([]);
-  const [chaves, setChaves] = useState<ChaveClienteLinha[]>([]);
   const [gerandoCli, setGerandoCli] = useState(false);
   /* v3.8: as ferramentas do vocabulário (túnel) também saem daqui, em modal */
   const [maqAcoes, setMaqAcoes] = useState<MaquinaLinha | null>(null);
@@ -67,28 +66,11 @@ export function Maquinas({ operador }: { operador: boolean }) {
     }
   }
 
-  async function cortarChave(c: ChaveClienteLinha) {
-    const n = Number(c.ativacoes ?? 0);
-    if (
-      !window.confirm(
-        `cancelar novas ativações desta chave? as ${n} ${n === 1 ? "máquina que já ativou continua" : "máquinas que já ativaram continuam"} funcionando — bloquear ou apagar é por máquina, na tabela.`,
-      )
-    )
-      return;
-    try {
-      await del(`/maquinas/chave/${c.id}`);
-      toast("novas ativações canceladas");
-      carregar();
-    } catch (e) {
-      toast("cancelar chave: " + (e as Error).message);
-    }
-  }
 
   const carregar = useCallback(() => {
     void get<MaquinasResp>("/maquinas")
       .then((r) => {
         setMaquinas(r.maquinas);
-        setChaves(r.chaves ?? []);
       })
       .catch((e) => toast("máquinas: " + (e as Error).message));
     void get<{ log: MaquinasLogLinha[] }>("/maquinas/log?limit=30")
@@ -158,40 +140,8 @@ export function Maquinas({ operador }: { operador: boolean }) {
         <p className="dica mt-2 mb-0">
           primeiro acesso no Windows: o SmartScreen avisa (binário sem assinatura) — escolha Manter/mais
           informações e rode mesmo, é o seu próprio programa. <b>O mesmo arquivo instala em quantas máquinas
-          você quiser</b> — cada uma vira uma linha na tabela abaixo, com bloqueio e remoção próprios.
+          você quiser</b> — cada uma aparece na tabela abaixo sozinha, e bloquear ou apagar é por linha.
         </p>
-        {chaves.length > 0 && (
-          <div className="mt-3 border-t border-white/10 pt-2" id="chavesClienteCard">
-            <div className="text-[12px] text-txt2">clientes gerados — a chave só serve para ativar máquinas novas:</div>
-            {chaves.map((c) => {
-              const n = Number(c.ativacoes ?? 0);
-              const vencida = new Date(c.expira_em).getTime() < Date.now();
-              return (
-                <div key={c.id} className="mt-1 flex flex-wrap items-center gap-2 text-[12px]">
-                  <span className="chip">{c.nome || "(sem nome)"}</span>
-                  {operador && <span className="sub2">{c.tenant}</span>}
-                  <span className={n > 0 ? "text-verde" : "sub2"}>
-                    {n} {n === 1 ? "máquina ativada" : "máquinas ativadas"}
-                  </span>
-                  <span className="sub2">
-                    {vencida
-                      ? "chave vencida — não ativa mais"
-                      : "novas ativações até " +
-                        new Date(c.expira_em).toLocaleString("pt-BR", {
-                          day: "2-digit",
-                          month: "2-digit",
-                          hour: "2-digit",
-                          minute: "2-digit",
-                        })}
-                  </span>
-                  <button className="btn btn-perigo" onClick={() => void cortarChave(c)}>
-                    cancelar novas ativações
-                  </button>
-                </div>
-              );
-            })}
-          </div>
-        )}
       </div>
 
       <table className="tabela" id="maquinasTabela">
