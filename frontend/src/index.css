@@ -285,6 +285,9 @@
   .chip-verde {
     @apply border-[rgba(63,185,80,.35)] bg-[color:var(--verde-suave)] text-verde;
   }
+  .chip-vermelho {
+    @apply border-[rgba(248,81,73,.4)] bg-[rgba(248,81,73,.12)] text-red-400;
+  }
   .chip-azul {
     @apply border-[rgba(108,182,255,.35)] bg-[color:var(--azul-suave)] text-azul;
   }

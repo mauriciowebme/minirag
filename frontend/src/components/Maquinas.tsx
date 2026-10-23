@@ -68,13 +68,19 @@ export function Maquinas({ operador }: { operador: boolean }) {
   }
 
   async function cortarChave(c: ChaveClienteLinha) {
-    if (!window.confirm(`cortar a chave ${c.id}${c.usada ? ` — isso APAGA a máquina ${c.host_ativado} junto` : " (ainda não ativada)"}?`)) return;
+    const n = Number(c.ativacoes ?? 0);
+    if (
+      !window.confirm(
+        `cancelar novas ativações desta chave? as ${n} ${n === 1 ? "máquina que já ativou continua" : "máquinas que já ativaram continuam"} funcionando — bloquear ou apagar é por máquina, na tabela.`,
+      )
+    )
+      return;
     try {
       await del(`/maquinas/chave/${c.id}`);
-      toast("chave cortada");
+      toast("novas ativações canceladas");
       carregar();
     } catch (e) {
-      toast("cortar chave: " + (e as Error).message);
+      toast("cancelar chave: " + (e as Error).message);
     }
   }
 
@@ -129,7 +135,7 @@ export function Maquinas({ operador }: { operador: boolean }) {
         <h3 className="mb-1 text-[13px] font-semibold text-txt2">Binários do cliente</h3>
         <p className="dica mt-0 mb-2">
           cada clique gera um cliente com a chave do teu usuário assada dentro: um arquivo só, dois cliques na
-          máquina e pronto. A máquina se batiza sozinha com o nome real do computador. Clientes desta versão se auto-atualizam.
+          máquina e pronto — e o mesmo arquivo serve para várias máquinas. A máquina se batiza sozinha com o nome real do computador. Clientes desta versão se auto-atualizam.
         </p>
         <div className="flex flex-wrap items-center gap-2">
           <button
@@ -151,8 +157,41 @@ export function Maquinas({ operador }: { operador: boolean }) {
         </div>
         <p className="dica mt-2 mb-0">
           primeiro acesso no Windows: o SmartScreen avisa (binário sem assinatura) — escolha Manter/mais
-          informações e rode mesmo, é o seu próprio programa.
+          informações e rode mesmo, é o seu próprio programa. <b>O mesmo arquivo instala em quantas máquinas
+          você quiser</b> — cada uma vira uma linha na tabela abaixo, com bloqueio e remoção próprios.
         </p>
+        {chaves.length > 0 && (
+          <div className="mt-3 border-t border-white/10 pt-2" id="chavesClienteCard">
+            <div className="text-[12px] text-txt2">clientes gerados — a chave só serve para ativar máquinas novas:</div>
+            {chaves.map((c) => {
+              const n = Number(c.ativacoes ?? 0);
+              const vencida = new Date(c.expira_em).getTime() < Date.now();
+              return (
+                <div key={c.id} className="mt-1 flex flex-wrap items-center gap-2 text-[12px]">
+                  <span className="chip">{c.nome || "(sem nome)"}</span>
+                  {operador && <span className="sub2">{c.tenant}</span>}
+                  <span className={n > 0 ? "text-verde" : "sub2"}>
+                    {n} {n === 1 ? "máquina ativada" : "máquinas ativadas"}
+                  </span>
+                  <span className="sub2">
+                    {vencida
+                      ? "chave vencida — não ativa mais"
+                      : "novas ativações até " +
+                        new Date(c.expira_em).toLocaleString("pt-BR", {
+                          day: "2-digit",
+                          month: "2-digit",
+                          hour: "2-digit",
+                          minute: "2-digit",
+                        })}
+                  </span>
+                  <button className="btn btn-perigo" onClick={() => void cortarChave(c)}>
+                    cancelar novas ativações
+                  </button>
+                </div>
+              );
+            })}
+          </div>
+        )}
       </div>
 
       <table className="tabela" id="maquinasTabela">
@@ -190,10 +229,15 @@ export function Maquinas({ operador }: { operador: boolean }) {
                 {m.usuario_win ? <div className="text-[11px] text-txt3">{m.usuario_win}</div> : null}
               </td>
               <td className="num" data-rot="estado">
-                <span className={"chip " + (m.online ? "chip-verde" : "")} title={m.online ? "conectada agora" : "offline"}>
-                  {m.online ? "● online" : "○ offline"}
-                </span>
-                {!m.ativo && <div className="text-[11px] text-red-400">desativada</div>}
+                {!m.ativo ? (
+                  <span className="chip chip-vermelho" title="bloqueada: o servidor recusa a conexão; histórico e registros ficam">
+                    ⛔ bloqueada
+                  </span>
+                ) : (
+                  <span className={"chip " + (m.online ? "chip-verde" : "")} title={m.online ? "conectada agora" : "offline"}>
+                    {m.online ? "● online" : "○ offline"}
+                  </span>
+                )}
               </td>
               <td className="num" data-rot="vista">
                 {minutesAgo(m.visto_em)}
@@ -229,40 +273,6 @@ export function Maquinas({ operador }: { operador: boolean }) {
           ))}
         </tbody>
       </table>
-
-      {chaves.length > 0 && (
-        <div className="cartao" id="chavesClienteCard">
-          <h3 className="mb-2 text-[13px] font-semibold text-txt2">
-            Chaves de cliente geradas <span className="sub2">— cada arquivo baixado tem uma; cortar aqui apaga o acesso na hora</span>
-          </h3>
-          <table className="tabela" id="chavesTabela">
-            <thead>
-              <tr>
-                <th>nome</th>
-                {operador && <th>donos</th>}
-                <th>estado</th>
-                <th className="num">expira</th>
-                <th className="acoes">ações</th>
-              </tr>
-            </thead>
-            <tbody>
-              {chaves.map((c) => (
-                <tr key={c.id}>
-                  <td>{c.nome || <span className="sub2">(sem nome)</span>}</td>
-                  {operador && <td>{c.tenant}</td>}
-                  <td>{c.usada ? <span className="text-verde">ativada em {c.host_ativado}</span> : <span className="sub2">aguardando o primeiro clique</span>}</td>
-                  <td className="num">{new Date(c.expira_em).toLocaleTimeString("pt-BR", { hour: "2-digit", minute: "2-digit" })}</td>
-                  <td className="acoes">
-                    <button className="btn btn-perigo" onClick={() => void cortarChave(c)}>
-                      cortar
-                    </button>
-                  </td>
-                </tr>
-              ))}
-            </tbody>
-          </table>
-        </div>
-      )}
 
       <div className="cartao" id="maqLogCard">
         <h3 className="mb-2 text-[13px] font-semibold text-txt2">

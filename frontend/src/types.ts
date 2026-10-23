@@ -120,6 +120,7 @@ export type ChaveClienteLinha = {
   nome: string;
   usada: boolean;
   host_ativado: string | null;
+  ativacoes?: number;
   criado_em: string;
   expira_em: string;
 };
