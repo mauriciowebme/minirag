@@ -91,8 +91,16 @@ function lerChaveEmbutida() {
   }
 }
 
-let token = flag("token", "") || lerConf().token || ""; // argv > conf adotado > chave embutida
-if (!token) token = lerChaveEmbutida();
+let chaveEmbutida = "";
+let tokenDoConf = false;
+let token = flag("token", "");
+if (!token) {
+  const doConf = lerConf().token || "";
+  if (doConf) { token = doConf; tokenDoConf = true; } // token adotado numa conexão anterior
+}
+if (!token) { chaveEmbutida = lerChaveEmbutida(); token = chaveEmbutida; }
+let tentouChaveDepoisDoErro = false;
+let negadoPermanente = false;
 
 /* ---------------- console + arquivo de log (ao lado do exe, como o túnel) ---- */
 let LOG_DIR = path.dirname(process.execPath); // SEA: o log nasce do lado do .exe
@@ -104,11 +112,25 @@ try {
 }
 const LOG_PATH = path.join(LOG_DIR, "minirag-cliente.log");
 let nivelBackoff = 0;
+let escritasLog = 0;
+/* v3.12: o log gira por TAMANHO também. Um laço de recusa do servidor enchia o
+ * arquivo em minutos ("log gigante"), e o dono acabou apagando para trabalhar. */
+function girarLogSeGrande() {
+  if (++escritasLog % 200 !== 0) return;
+  try {
+    const st = fs.statSync(LOG_PATH);
+    if (st.size < 2 * 1024 * 1024) return;
+    try { fs.unlinkSync(LOG_PATH + ".1"); } catch { /* não existe */ }
+    fs.renameSync(LOG_PATH, LOG_PATH + ".1");
+  } catch { /* sem arquivo ainda */ }
+}
+
 function log(msg) {
   const linha = new Date().toISOString().slice(0, 19).replace("T", " ") + "  " + msg;
   console.log(linha);
   try {
     fs.appendFileSync(LOG_PATH, linha + "\n");
+    girarLogSeGrande();
   } catch { /* sem disco de escrita? o console ainda salva a sessão */ }
   try { if (typeof ouvintes !== "undefined" && ouvintes.size) evocar({ tipo: "log", linha }); } catch { /* painel ainda nascendo */ }
 }
@@ -253,8 +275,28 @@ function iniciarPainel() {
     }
     res.writeHead(404); res.end("nao tem isso aqui");
   });
+  const jaRodando = (porta) => new Promise((ok) => {
+    // v3.12: se já existe um cliente nesta porta, abrir OUTRA instância só confunde
+    const t = http.get({ host: "127.0.0.1", port: porta, path: "/api/estado", timeout: 1500 }, (r) => {
+      let d = "";
+      r.on("data", (c) => { d += c; });
+      r.on("end", () => {
+        /* só é "a mesma instalação" se o painel de lá usa o MESMO arquivo de config —
+         * dois clientes apontando para configs diferentes são instâncias legítimas */
+        try { const j = JSON.parse(d); ok(Boolean(j && j.versao && "online" in j && j.conf === confPath)); } catch { ok(false); }
+      });
+    });
+    t.on("timeout", () => { t.destroy(); ok(false); });
+    t.on("error", () => ok(false));
+  });
   const tenta = (porta) => {
-    servidor.once("error", (e) => {
+    servidor.once("error", async (e) => {
+      if (e.code === "EADDRINUSE" && (await jaRodando(porta))) {
+        const url = "http://127.0.0.1:" + porta + "/";
+        log("já existe um cliente rodando nesta máquina — abro a janela dele (" + url + ") e saio");
+        if (!semJanela) { abrirJanela(url); setTimeout(() => process.exit(0), 1500); }
+        return;
+      }
       if (e.code === "EADDRINUSE" && porta < PAINEL_PORTA + 6) { log("painel: porta " + porta + " ocupada, tentando a próxima"); tenta(porta + 1); }
       else log("painel local: " + e.code);
     });
@@ -400,11 +442,29 @@ function conectar() {
           log("token de máquina adotado e guardado em " + confPath);
         }
       } else if (m.ack === "negado") {
-        log("NEGADO pelo servidor: " + (m.motivo || "?") + " — tentando de novo em 30s");
-        setOnline(false); estado.negado = m.motivo || "?";
+        const motivo = m.motivo || "?";
+        setOnline(false); estado.negado = motivo;
         evocar({ tipo: "status", online: false, conectou_em: null, negado: estado.negado });
         try { ws.close(); } catch { /* ignore */ }
-        nivelBackoff = 5; // 30s fixo: negado é problema de conta/máquina, não de rede
+        /* v3.12: o token guardado pode ter morrido (máquina apagada). Nesse caso o
+         * cliente esquece o token e tenta a chave embutida UMA vez — antes ficava
+         * repetindo "token desconhecido" a cada 15s para sempre. */
+        if (/desconhec/i.test(motivo) && tokenDoConf && !tentouChaveDepoisDoErro) {
+          tentouChaveDepoisDoErro = true;
+          chaveEmbutida = chaveEmbutida || lerChaveEmbutida();
+          if (chaveEmbutida) {
+            gravarConf({ ...lerConf(), token: "", host, url: base });
+            token = chaveEmbutida;
+            tokenDoConf = false;
+            nivelBackoff = 0;
+            log("o token guardado não existe mais no servidor — tentando de novo com a chave do arquivo");
+            setTimeout(conectar, 1500);
+            return;
+          }
+        }
+        negadoPermanente = /desconhec|removid|expirad/i.test(motivo);
+        log("NEGADO pelo servidor: " + motivo + (negadoPermanente ? " — paro de insistir; resolva no painel" : " — tentando de novo em 30s"));
+        nivelBackoff = 5; // 30s
       }
       return;
     }
@@ -425,7 +485,7 @@ function conectar() {
   ws.addEventListener("close", () => {
     setOnline(false);
     if (morrendo) return;
-    const atrasos = [400, 800, 1500, 3000, 8000, 15000, 30000];
+    const atrasos = negadoPermanente ? [300000] : [400, 800, 1500, 3000, 8000, 15000, 30000];
     const ms = atrasos[Math.min(nivelBackoff++, atrasos.length - 1)];
     log("desconectado — reconecto em " + ms + "ms");
     setTimeout(conectar, ms);
