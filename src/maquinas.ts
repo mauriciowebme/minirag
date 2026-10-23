@@ -383,6 +383,7 @@ async function receberOi(ws: WebSocket, oi: OiFrame, httpBase = ""): Promise<voi
   const token = String(oi.token ?? "").trim();
   if (!host || !token) {
     ws.send(JSON.stringify({ ack: "negado", motivo: "oi sem host/token" }));
+    log(`maquinas: RECUSA oi incompleto (host="${host}" token=${token ? "sim" : "nao"})`);
     ws.close();
     return;
   }
@@ -523,11 +524,15 @@ async function receberOi(ws: WebSocket, oi: OiFrame, httpBase = ""): Promise<voi
       lig.pendente({ exit: r.exit, stdout: String(r.stdout ?? ""), stderr: String(r.stderr ?? "") });
     }
   });
-  ws.on("close", () => {
+  ws.on("close", (codigo, motivoDaRede) => {
     if (ligacoes.get(chave) === lig) {
       ligacoes.delete(chave);
       if (lig.pendente) lig.pendente({ exit: -1, stdout: "", stderr: "máquina caiu no meio do comando" });
-      log(`maquinas: OFFLINE ${chave}`);
+      /* v3.13.1: o código do fechamento é o que faltava para distinguir "o cliente
+       * saiu por fora" (1006/sem código = processo morto) de recusa de protocolo
+       * (1002/1008) ou cano parado no meio (1001). Sem isto o log ficava mudo. */
+      const porque = String(motivoDaRede || "").slice(0, 80);
+      log(`maquinas: OFFLINE ${chave} (código ${codigo || "?"}${porque ? ` — ${porque}` : ""}, vivo ${Math.round((Date.now() - new Date(lig.desde).getTime()) / 1000)}s)`);
     }
   });
   ws.on("error", () => { /* close cuida da limpeza */ });
