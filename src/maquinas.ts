@@ -283,7 +283,7 @@ function fila(l: Ligacao, espera: number, cmd: string) {
    dono roda, reconecta enquanto aberto. */
 
 const MAGIC_CLIENTE = "MRQK";
-const CHAVE_CLIENTE_SEG = 24 * 3600;
+const CHAVE_CLIENTE_SEG = 365 * 24 * 3600; // v3.10.2: sem tela de chave, o arquivo baixado vale por um ano
 const BIN_CLI = process.env.MINIRAG_CLIENTE_DIR ?? path.join(process.cwd(), "agente", "bin");
 
 export async function gerarClienteBinario(alvo: string, plataforma: "win" | "linux", nomeBruto: string) {
