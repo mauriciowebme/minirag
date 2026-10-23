@@ -14,6 +14,14 @@ parecidos com a pergunta, com uma nota de 0 a 1.
 
 ---
 
+---
+
+## v3.10.2 (23/10) — a tela não fala mais de chave
+
+- **Saiu o cartão "clientes gerados"**: gerar o cliente agora é só clicar e receber o arquivo. A chave que vai dentro do exe é detalhe interno — máquina nova aparece sozinha na tabela.
+- **Bloquear ou cortar é por máquina**: o interruptor bloqueia sem apagar; "apagar" remove a máquina e o acesso dela, e voltar exige cliente novo.
+- O arquivo baixado vale por um ano (antes, 24 horas): com a tela sem renovação, o instalador guardado não vence no dia seguinte. A API de chaves continua existindo para CLI e suíte.
+
 ## v3.10.1 (23/10) — o download do cliente virou link de verdade
 
 - **Fim do "Precisa de autorização para transferir"**: a tela baixava por `fetch`+blob e o Edge/Chrome passou a bloquear os downloads seguintes da mesma página. Agora o botão pede um **bilhete** de uso único (2 min, preso ao usuário) e abre o download por navegação comum — sem blob, sem prompt de permissão.
