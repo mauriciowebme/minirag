@@ -16,6 +16,14 @@ parecidos com a pergunta, com uma nota de 0 a 1.
 
 ---
 
+---
+
+## v3.11 (23/10) — o cliente abre a própria janela
+
+- **Uma janela só**: o programa deixou de ser "janela preta + aba de navegador". O executável no Windows abre em modo aplicativo — janela própria, sem abas e sem barra de endereço — e é compilado **sem console**, então não aparece nenhuma janela preta.
+- Se o Edge não existir na máquina, ele tenta o Chrome e, por último, o navegador padrão; o programa funciona igual.
+- O painel local (status, máquina, atualização, comandos e log) continua o mesmo, agora dentro dessa janela.
+
 ## v3.10.2 (23/10) — a tela não fala mais de chave
 
 - **Saiu o cartão "clientes gerados"**: gerar o cliente agora é só clicar e receber o arquivo. A chave que vai dentro do exe é detalhe interno — máquina nova aparece sozinha na tabela.
