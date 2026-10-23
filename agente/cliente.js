@@ -336,6 +336,8 @@ let ws = null;
 let morrendo = false;
 let atualizando = false;
 let destinoVersao = null;
+let tmpArq = null; // arquivo .novo da tentativa em curso (apagado se falhar)
+let falhouPara = null; // versão cujo update já falhou neste processo (não rebaixa em loop)
 
 function conectar() {
   if (morrendo) return;
@@ -360,7 +362,7 @@ function conectar() {
         setOnline(true);
         if (m.token && m.token !== token) {
           token = m.token; // PAREAMENTO → token de máquina: adota e persiste (reconexão não pode usar o pareamento queimado)
-          gravarConf({ token, host, url: base, desde: new Date().toISOString() });
+          gravarConf({ ...lerConf(), token, host, url: base, desde: new Date().toISOString() });
           log("token de máquina adotado e guardado em " + confPath);
         }
       } else if (m.ack === "negado") {
@@ -440,6 +442,47 @@ function baixar(para, urlBaixa) {
   });
 }
 
+/* carência de update: versão que já falhou nesta máquina não é tentada de novo por
+ * 30 min — sem isso, cada reconexão rebaixava 83 MB (loop visto em campo 23/10). */
+const CARENCIA_MS = 30 * 60 * 1000;
+function podeTentar(versao) {
+  if (falhouPara === versao) return false;
+  const t = lerConf().tentou;
+  return !(t && t.para === versao && Date.now() - Number(t.ts || 0) < CARENCIA_MS);
+}
+function registrarFalha(versao) {
+  falhouPara = versao;
+  gravarConf({ ...lerConf(), tentou: { para: versao, ts: Date.now() } });
+}
+
+/* trocaExe: põe o exe novo no lugar devolvendo o caminho que deve ser reaberto.
+ * Windows não deixa SOBRESCREVER o exe em uso: o jeito limpo é renomear o vivo
+ * (para .old, com o fóssil da tentativa anterior removido antes) e mover o .novo
+ * para o nome canônico. Se o sistema travar mesmo a renomeada (antivírus/Explorer
+ * segurando o handle), NADA é sobrescrito: a versão nova roda com nome versionado
+ * ao lado — o cliente atualiza de qualquer jeito e o nome velho fica intacto. */
+function trocarExe(eu, tmp, para) {
+  const velho = eu + ".old";
+  try {
+    try { fs.unlinkSync(velho); } catch { /* não existia */ }
+    fs.renameSync(eu, velho);
+    try {
+      fs.renameSync(tmp, eu);
+      if (!EH_WIN) fs.chmodSync(eu, 0o755);
+      return eu;
+    } catch (e) {
+      try { fs.renameSync(velho, eu); } catch { /* devolveu o nome ao vivo */ }
+      throw e;
+    }
+  } catch (e) {
+    const alt = eu.replace(/\.exe$/i, "") + "-v" + para + (EH_WIN ? ".exe" : "");
+    fs.renameSync(tmp, alt);
+    if (!EH_WIN) fs.chmodSync(alt, 0o755);
+    log("troca no mesmo nome negada pelo sistema (" + (e.code || e.message) + ") — a versão nova roda como " + alt.split(/[\\/]/).pop());
+    return alt;
+  }
+}
+
 async function verificarAtualizacao() {
   if (VERSAO_CLIENTE === "dev" || atualizando) return; // dev não se auto-atualiza; sem reentrância
   atualizando = true;
@@ -456,29 +499,26 @@ async function verificarAtualizacao() {
       return false;
     };
     if (!maisNovo(j.versao, VERSAO_CLIENTE)) { if (estado.atualizacao && estado.atualizacao.fase !== "reiniciando") estado.atualizacao = null; return; }
+    if (!podeTentar(j.versao)) { log("atualização para " + j.versao + " já falhou há pouco — não repito o download por 30 min"); return; }
     destinoVersao = j.versao;
     setAtualizacao({ para: j.versao, fase: "baixando", pct: 0, mb: "0", total_mb: "?", velocidade: "0" });
     log("atualizando cliente: " + VERSAO_CLIENTE + " → " + j.versao);
     const eu = process.execPath;
     const tmp = eu + ".novo";
+    tmpArq = tmp;
     await baixar(tmp, new URL("/maquina/cliente/" + meuPlat, base).toString());
-    if (EH_WIN) {
-      try { fs.renameSync(eu, eu + ".old"); } catch { /* .old de antes */ }
-    } else {
-      fs.copyFileSync(eu, eu + ".old");
-      fs.chmodSync(tmp, 0o755);
-    }
-    fs.renameSync(tmp, eu);
-    if (!EH_WIN) fs.chmodSync(eu, 0o755);
     setAtualizacao({ fase: "trocando", pct: 100 });
-    log("exe novo no lugar — reabrindo em janela própria (minimizada, sem roubar tua tela)");
+    const novoExe = trocarExe(eu, tmp, j.versao);
+    log("exe novo no lugar (" + novoExe.split(/[\\/]/).pop() + ") — reabrindo em janela própria (minimizada, sem roubar tua tela)");
     const semToken = (() => { const i = argv.indexOf("--token"); return i < 0 ? argv : [...argv.slice(0, i), ...argv.slice(i + 2)]; })();
-    const err = await relancar(eu, semToken);
+    const err = await relancar(novoExe, semToken);
     if (err) log("update aplicado mas relancar falhou: " + err.message + " (reabra o exe; esta janela segue funcionando)");
     morrendo = true;
     process.exit(0);
   } catch (e) {
-    log("atualização: " + e.message + " (sigo com a versão atual)");
+    if (tmpArq) { try { fs.unlinkSync(tmpArq); } catch { /* já foi */ } }
+    if (destinoVersao) registrarFalha(destinoVersao);
+    log("atualização: " + e.message + (destinoVersao ? " — não repito por 30 min" : "") + " (sigo na versão atual)");
   } finally {
     atualizando = false;
   }
@@ -529,6 +569,6 @@ process.on("SIGINT", () => {
   log("log do cliente em " + LOG_PATH);
   iniciarPainel();
   await verificarAtualizacao();
-  gravarConf({ token, host, url: base, desde: lerConf().desde || new Date().toISOString() });
+  gravarConf({ ...lerConf(), token, host, url: base, desde: lerConf().desde || new Date().toISOString() });
   conectar();
 })();
