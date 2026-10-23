@@ -10,6 +10,15 @@ parecidos com a pergunta, com uma nota de 0 a 1.
 
 ---
 
+---
+
+## v3.10 (23/10) — um cliente para várias máquinas; bloquear é por máquina
+
+- **A chave do cliente deixou de queimar na primeira máquina**: o mesmo arquivo baixado ativa quantas máquinas você quiser. A validade da chave passou a ser a **janela de ativação** (o cliente antigo, de uso único, recusava a segunda cópia com "chave já usada").
+- **Cada máquina recebe token próprio** na primeira conexão: bloquear (interruptor) ou apagar uma não toca nas outras, e o nome da linha é o nome real do computador.
+- **"Cancelar novas ativações"** substitui o antigo "cortar chave": apaga a chave, some com a possibilidade de ativar máquinas novas e **mantém** as que já ativaram. Apagar a máquina em si continua sendo ação da tabela.
+- **Tela única**: a segunda tabela de chaves saiu; os clientes gerados viraram linhas compactas no cartão de binários, e a tabela de máquinas passou a mostrar o estado **bloqueada** (antes era um "desativada" solto embaixo do offline).
+
 ## v3.9 (23/10) — painel local do cliente + auto-update que não queima banda
 
 - **Painel local no cliente**: com o cliente rodando, `http://127.0.0.1:48123` mostra numa página (sem internet, sem login) conexão/servidor/máquina, versão, atualização com barra de progresso, comandos executados e log ao vivo por SSE — a janela preta deixa de ser a única cara do programa. `--sem-janela` mantém só o painel.
