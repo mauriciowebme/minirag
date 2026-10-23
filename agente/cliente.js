@@ -110,6 +110,7 @@ function log(msg) {
   try {
     fs.appendFileSync(LOG_PATH, linha + "\n");
   } catch { /* sem disco de escrita? o console ainda salva a sessão */ }
+  try { if (typeof ouvintes !== "undefined" && ouvintes.size) evocar({ tipo: "log", linha }); } catch { /* painel ainda nascendo */ }
 }
 function logTela(msg) {
   // só a tela: o log do arquivo é para o essencial (um arquivo só, cobrado 23/10)
@@ -186,10 +187,155 @@ function rodar(cmd, esperaSeg) {
   });
 }
 
+/* ---------------- painel local do dono (só 127.0.0.1) ----------------
+ * Interface amigável no navegador do próprio computador (pedido 23/10: "parece um
+ * terminal; queria ver status e logs"). Nada de segredo na tela: o token nunca aparece. */
+const PAINEL_PORTA = 48123;
+let painelPorta = 0;
+const estado = {
+  host,
+  usuario: (() => { try { return os.userInfo().username; } catch { return "?"; } })(),
+  so: process.platform + " " + os.release(),
+  servidor: base,
+  versao: VERSAO_CLIENTE,
+  online: false,
+  conectou_em: null,
+  negado: null,
+  atualizacao: null,
+  comandos: [],
+};
+const ouvintes = new Set();
+function evocar(ev) {
+  const t = "data: " + JSON.stringify(ev) + "\n\n";
+  for (const r of ouvintes) { try { r.write(t); } catch { ouvintes.delete(r); } }
+}
+function setOnline(v) {
+  estado.online = v;
+  estado.conectou_em = v ? new Date().toISOString() : null;
+  if (!v) estado.negado = null;
+  evocar({ tipo: "status", online: v, conectou_em: estado.conectou_em, negado: estado.negado });
+}
+function setAtualizacao(patch) {
+  estado.atualizacao = { de: VERSAO_CLIENTE, ...(estado.atualizacao || {}), ...patch };
+  evocar({ tipo: "atualizacao", atualizacao: estado.atualizacao });
+}
+function registrarComando(rotulo, exit, bytes) {
+  estado.comandos.unshift({ ts: new Date().toISOString(), rotulo, exit, bytes });
+  if (estado.comandos.length > 50) estado.comandos.length = 50;
+  evocar({ tipo: "comando", comando: estado.comandos[0] });
+}
+function tailLog(n) {
+  try {
+    return fs.readFileSync(LOG_PATH, "utf8").split("\n").filter(Boolean).slice(-n).join("\n");
+  } catch { return ""; }
+}
+function iniciarPainel() {
+  const semJanela = argv.includes("--sem-janela");
+  const servidor = http.createServer((req, res) => {
+    const u = new URL(req.url, "http://127.0.0.1");
+    if (u.pathname === "/api/estado") {
+      res.writeHead(200, { "content-type": "application/json; charset=utf-8", "access-control-allow-origin": "*" });
+      res.end(JSON.stringify({ ...estado, porta: painelPorta, conf: confPath, log: tailLog(80) }));
+      return;
+    }
+    if (u.pathname === "/evento") {
+      res.writeHead(200, { "content-type": "text/event-stream", "cache-control": "no-cache", connection: "keep-alive" });
+      res.write("data: " + JSON.stringify({ tipo: "oi", estado: { ...estado, log: undefined } }) + "\n\n");
+      ouvintes.add(res);
+      const ka = setInterval(() => { try { res.write(":ka\n\n"); } catch { /* fecha junto */ } }, 25000);
+      res.on("close", () => { clearInterval(ka); ouvintes.delete(res); });
+      return;
+    }
+    if (u.pathname === "/") {
+      res.writeHead(200, { "content-type": "text/html; charset=utf-8" });
+      res.end(PAINEL_HTML);
+      return;
+    }
+    res.writeHead(404); res.end("nao tem isso aqui");
+  });
+  const tenta = (porta) => {
+    servidor.once("error", (e) => {
+      if (e.code === "EADDRINUSE" && porta < PAINEL_PORTA + 6) { log("painel: porta " + porta + " ocupada, tentando a próxima"); tenta(porta + 1); }
+      else log("painel local: " + e.code);
+    });
+    servidor.listen(porta, "127.0.0.1", () => {
+      painelPorta = porta;
+      const url = "http://127.0.0.1:" + porta + "/";
+      log("painel local em " + url);
+      if (!semJanela) abrirNavegador(url);
+    });
+  };
+  tenta(PAINEL_PORTA);
+}
+function abrirNavegador(url) {
+  // melhor esforço: sem navegador à mão o painel continua esperando na porta
+  try {
+    const f = EH_WIN
+      ? spawn("cmd.exe", ["/d", "/c", "start", "", url], { windowsHide: true })
+      : spawn("xdg-open", [url], { detached: true, stdio: "ignore" });
+    f.on("error", () => log("não consegui abrir o navegador sozinho — abra " + url));
+    if (!EH_WIN) f.unref();
+  } catch { /* silencioso: o log já diz tudo */ }
+}
+/* A página é estática de propósito: os dados chegam por /api/estado e /evento.
+ * Sem segredo algum na tela — o token nunca é exibido. */
+const PAINEL_HTML = "<!doctype html><html lang=pt-br><head><meta charset=utf-8>" +
+"<meta name=viewport content='width=device-width,initial-scale=1'>" +
+"<title>minirag · cliente</title><style>" +
+":root{color-scheme:dark}*{box-sizing:border-box}body{margin:0;font:14px/1.45 system-ui,Segoe UI,Roboto,sans-serif;background:radial-gradient(1200px 600px at 70% -10%,#123 0,#0b1020 55%,#090d18 100%);color:#dbe4f3;min-height:100vh}" +
+"header{display:flex;align-items:center;gap:12px;padding:18px 22px;border-bottom:1px solid #1c2740}" +
+"header .logo{font-size:22px}h1{font-size:16px;margin:0;font-weight:600}header .dir{margin-left:auto;font-size:12px;color:#8fa1c0;text-align:right}" +
+"main{display:grid;grid-template-columns:repeat(auto-fit,minmax(320px,1fr));gap:14px;padding:18px 22px;max-width:1100px}" +
+"section{background:#10182bcc;border:1px solid #1e2a47;border-radius:14px;padding:14px 16px}" +
+"h2{font-size:12px;text-transform:uppercase;letter-spacing:.08em;color:#8fa1c0;margin:0 0 10px}" +
+".dot{display:inline-block;width:10px;height:10px;border-radius:50%;margin-right:8px;background:#666}" +
+".dot.on{background:#3ddc84;box-shadow:0 0 10px #3ddc8480}.dot.off{background:#ff5d5d;box-shadow:0 0 10px #ff5d5d80}.dot.meio{background:#f0b429}" +
+".linha{display:flex;align-items:center;gap:8px;font-size:15px}" +
+".sub{color:#8fa1c0;font-size:12px;margin-top:6px}" +
+".grade{display:grid;grid-template-columns:1fr 1fr;gap:6px 14px;font-size:13px}.k{color:#8fa1c0}.v{font-weight:600;word-break:break-all}" +
+".bar{height:10px;background:#1c2740;border-radius:6px;overflow:hidden;margin-top:10px}.bar i{display:block;height:100%;width:0%;background:linear-gradient(90deg,#4f8cff,#3ddc84);transition:width .3s}" +
+"table{width:100%;border-collapse:collapse;font-size:13px}td,th{padding:4px 6px;text-align:left;border-bottom:1px solid #1c2740}th{color:#8fa1c0;font-weight:500;font-size:12px}" +
+".ok{color:#3ddc84}.ruim{color:#ff5d5d}pre{margin:0;max-height:260px;overflow:auto;background:#0a0f1e;border-radius:8px;padding:10px;font-size:11.5px;color:#aebcd8;white-space:pre-wrap;word-break:break-word}" +
+"footer{padding:10px 22px 18px;font-size:11px;color:#5f6f90}" +
+"</style></head><body>" +
+"<header><span class=logo>🛰️</span><h1>minirag — cliente da máquina</h1><div class=dir id=dir></div></header>" +
+"<main>" +
+"<section><h2>Conexão</h2><div class=linha><i class='dot off' id=dot></i><b id=ctxt>carregando…</b></div><div class=sub id=quando></div><div class=sub id=negado style='color:#ff8d8d'></div></section>" +
+"<section><h2>Máquina</h2><div class=grade id=mach></div></section>" +
+"<section><h2>Atualização</h2><div id=up>—</div><div class=bar id=wrapbar style=display:none><i id=fill></i></div></section>" +
+"<section style=grid-column:1/-1><h2>Últimos comandos recebidos</h2><table><thead><tr><th>hora</th><th>rótulo</th><th>exit</th><th>bytes</th></tr></thead><tbody id=cms><tr><td colspan=4 style=color:#5f6f90>nada ainda</td></tr></tbody></table></section>" +
+"<section style=grid-column:1/-1><h2>Log — um arquivo, últimos 30 dias</h2><pre id=lg></pre></section>" +
+"</main><footer>Página local deste cliente (só este computador a enxerga). A janela de terminal continua funcionando por baixo.</footer>" +
+"<script>" +
+"function hora(s){return s? new Date(s).toLocaleTimeString('pt-BR'):''}" +
+"function apply(e){" +
+"var d=document.getElementById('dot');d.className='dot '+(e.online?'on':'off');" +
+"document.getElementById('ctxt').textContent=e.online?'ONLINE no minirag':'desconectado — reconecta sozinho'" +
+"document.getElementById('quando').textContent=e.online?'conectado desde '+new Date(e.conectou_em).toLocaleString('pt-BR'):'';" +
+"document.getElementById('negado').textContent=e.negado?'servidor negou: '+e.negado:'';" +
+"document.getElementById('dir').textContent='v'+e.versao+' · porta '+e.porta;" +
+"var m='';m+='<span class=k>nome da máquina</span><span class=v>'+e.host+'</span>';" +
+"m+='<span class=k>usuário</span><span class=v>'+e.usuario+'</span>';" +
+"m+='<span class=k>sistema</span><span class=v>'+e.so+'</span>';" +
+"m+='<span class=k>servidor</span><span class=v>'+e.servidor+'</span>';" +
+"document.getElementById('mach').innerHTML=m;" +
+"var a=e.atualizacao,u=document.getElementById('up'),w=document.getElementById('wrapbar'),f=document.getElementById('fill');" +
+"if(a&&a.fase==='baixando'){u.textContent=a.de+' → '+a.para+' · '+a.mb+' MB de '+a.total_mb+' MB ('+a.pct+'%) · '+a.velocidade+' MB/s';w.style.display='block';f.style.width=a.pct+'%';}" +
+"else if(a&&a.fase==='trocando'){u.textContent=a.de+' → '+a.para+' · download pronto, trocando o programa';w.style.display='block';f.style.width='100%';}" +
+"else if(a&&a.fase==='reiniciando'){u.textContent='reabrindo na versão '+a.para;}" +
+"else u.textContent='versão em uso: '+e.versao+' (o servidor manda novidade sozinha)';" +
+"var t=document.getElementById('cms'),L=(e.comandos||[]).slice(0,15);" +
+"if(L.length){t.innerHTML='';for(var i=0;i<L.length;i++){var c=L[i],tr=document.createElement('tr');" +
+"tr.innerHTML='<td>'+hora(c.ts)+'</td><td>'+c.rotulo+'</td><td class=\"'+(c.exit===0?'ok':'ruim')+'\">'+c.exit+'</td><td>'+c.bytes+'</td>';t.appendChild(tr);}}" +
+"function logAppend(l){var lg=document.getElementById('lg');var e=lg.textContent?lg.textContent.split(String.fromCharCode(10)):[];e.push(l);if(e.length>200)e.splice(0,e.length-200);lg.textContent=e.join(String.fromCharCode(10));lg.scrollTop=lg.scrollHeight;}" +
+"var es=new EventSource('/evento');es.onmessage=function(x){try{var o=JSON.parse(x.data);if(o.estado)apply(o.estado);if(o.tipo==='log')logAppend(o.linha);}catch{}};" +
+"var lg0=document.getElementById('lg');fetch('/api/estado').then(function(r){return r.json()}).then(function(j){apply(j);lg0.textContent=j.log||''});" +
+"</script></body></html>";
 /* ---------------- websocket (nativo do Node — SEA sem dependência) ---------------- */
 let ws = null;
 let morrendo = false;
 let atualizando = false;
+let destinoVersao = null;
 
 function conectar() {
   if (morrendo) return;
@@ -211,6 +357,7 @@ function conectar() {
     if (m.ack) {
       if (m.ack === "ok") {
         log("ONLINE no minirag");
+        setOnline(true);
         if (m.token && m.token !== token) {
           token = m.token; // PAREAMENTO → token de máquina: adota e persiste (reconexão não pode usar o pareamento queimado)
           gravarConf({ token, host, url: base, desde: new Date().toISOString() });
@@ -218,6 +365,8 @@ function conectar() {
         }
       } else if (m.ack === "negado") {
         log("NEGADO pelo servidor: " + (m.motivo || "?") + " — tentando de novo em 30s");
+        setOnline(false); estado.negado = m.motivo || "?";
+        evocar({ tipo: "status", online: false, conectou_em: null, negado: estado.negado });
         try { ws.close(); } catch { /* ignore */ }
         nivelBackoff = 5; // 30s fixo: negado é problema de conta/máquina, não de rede
       }
@@ -225,7 +374,9 @@ function conectar() {
     }
     if (typeof m.cmd === "string") {
       log("cmd (" + (m.rotulo || "?") + "): " + m.cmd.slice(0, 120));
+      estado.ultimo_rotulo = m.rotulo || "?";
       const r = await rodar(m.cmd, m.espera);
+      registrarComando(m.rotulo || "?", r.exit, r.stdout.length + r.stderr.length);
       log("resposta: exit " + r.exit + " (" + r.stdout.length + "+" + r.stderr.length + " bytes)");
       try {
         ws.send(JSON.stringify(r));
@@ -236,6 +387,7 @@ function conectar() {
   });
   ws.addEventListener("error", () => { /* o close vem em seguida e trata */ });
   ws.addEventListener("close", () => {
+    setOnline(false);
     if (morrendo) return;
     const atrasos = [400, 800, 1500, 3000, 8000, 15000, 30000];
     const ms = atrasos[Math.min(nivelBackoff++, atrasos.length - 1)];
@@ -273,6 +425,7 @@ function baixar(para, urlBaixa) {
           const mb = (feito / 1048576).toFixed(1);
           const de = total ? " de " + (total / 1048576).toFixed(1) + " MB (" + ultimo + "%)" : "";
           logTela("download: " + mb + " MB" + de + " · " + (feito / 1048576 / s).toFixed(1) + " MB/s");
+          setAtualizacao({ para: destinoVersao || "?", fase: "baixando", pct: ultimo, mb, total_mb: total ? (total / 1048576).toFixed(1) : "?", velocidade: (feito / 1048576 / s).toFixed(1) });
         });
         r.pipe(arq);
         arq.on("finish", () => {
@@ -302,7 +455,9 @@ async function verificarAtualizacao() {
       for (let i = 0; i < 3; i++) if ((pa[i] || 0) !== (pb[i] || 0)) return (pa[i] || 0) > (pb[i] || 0);
       return false;
     };
-    if (!maisNovo(j.versao, VERSAO_CLIENTE)) return;
+    if (!maisNovo(j.versao, VERSAO_CLIENTE)) { if (estado.atualizacao && estado.atualizacao.fase !== "reiniciando") estado.atualizacao = null; return; }
+    destinoVersao = j.versao;
+    setAtualizacao({ para: j.versao, fase: "baixando", pct: 0, mb: "0", total_mb: "?", velocidade: "0" });
     log("atualizando cliente: " + VERSAO_CLIENTE + " → " + j.versao);
     const eu = process.execPath;
     const tmp = eu + ".novo";
@@ -315,6 +470,7 @@ async function verificarAtualizacao() {
     }
     fs.renameSync(tmp, eu);
     if (!EH_WIN) fs.chmodSync(eu, 0o755);
+    setAtualizacao({ fase: "trocando", pct: 100 });
     log("exe novo no lugar — reabrindo em janela própria (minimizada, sem roubar tua tela)");
     const semToken = (() => { const i = argv.indexOf("--token"); return i < 0 ? argv : [...argv.slice(0, i), ...argv.slice(i + 2)]; })();
     const err = await relancar(eu, semToken);
@@ -371,6 +527,7 @@ process.on("SIGINT", () => {
     process.exit(2);
   }
   log("log do cliente em " + LOG_PATH);
+  iniciarPainel();
   await verificarAtualizacao();
   gravarConf({ token, host, url: base, desde: lerConf().desde || new Date().toISOString() });
   conectar();
