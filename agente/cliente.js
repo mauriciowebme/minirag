@@ -269,7 +269,13 @@ function iniciarPainel() {
       return;
     }
     if (u.pathname === "/") {
-      res.writeHead(200, { "content-type": "text/html; charset=utf-8" });
+      // v3.12.1: sem cache — o navegador abriu a página ANTIGA e ela ficava em "carregando…"
+      res.writeHead(200, {
+        "content-type": "text/html; charset=utf-8",
+        "cache-control": "no-store, no-cache, must-revalidate, max-age=0",
+        pragma: "no-cache",
+        expires: "0",
+      });
       res.end(PAINEL_HTML);
       return;
     }
@@ -292,8 +298,8 @@ function iniciarPainel() {
   const tenta = (porta) => {
     servidor.once("error", async (e) => {
       if (e.code === "EADDRINUSE" && (await jaRodando(porta))) {
-        const url = "http://127.0.0.1:" + porta + "/";
-        log("já existe um cliente rodando nesta máquina — abro a janela dele (" + url + ") e saio");
+        const url = "http://127.0.0.1:" + porta + "/?v=" + Date.now();
+        log("já existe um cliente rodando nesta máquina — abro a janela dele (http://127.0.0.1:" + porta + "/) e saio");
         if (!semJanela) { abrirJanela(url); setTimeout(() => process.exit(0), 1500); }
         return;
       }
@@ -302,8 +308,8 @@ function iniciarPainel() {
     });
     servidor.listen(porta, "127.0.0.1", () => {
       painelPorta = porta;
-      const url = "http://127.0.0.1:" + porta + "/";
-      log("painel local em " + url);
+      const url = "http://127.0.0.1:" + porta + "/?v=" + Date.now(); // endereço novo: o navegador não reaproveita a página velha
+      log("painel local em http://127.0.0.1:" + porta + "/");
       if (!semJanela) abrirJanela(url);
     });
   };
@@ -386,7 +392,7 @@ const PAINEL_HTML = "<!doctype html><html lang=pt-br><head><meta charset=utf-8>"
 "function hora(s){return s? new Date(s).toLocaleTimeString('pt-BR'):''}" +
 "function apply(e){" +
 "var d=document.getElementById('dot');d.className='dot '+(e.online?'on':'off');" +
-"document.getElementById('ctxt').textContent=e.online?'ONLINE no minirag':'desconectado — reconecta sozinho'" +
+"document.getElementById('ctxt').textContent=e.online?'ONLINE no minirag':'desconectado — reconecta sozinho';" +
 "document.getElementById('quando').textContent=e.online?'conectado desde '+new Date(e.conectou_em).toLocaleString('pt-BR'):'';" +
 "document.getElementById('negado').textContent=e.negado?'servidor negou: '+e.negado:'';" +
 "document.getElementById('dir').textContent='v'+e.versao+' · porta '+e.porta;" +
@@ -402,10 +408,11 @@ const PAINEL_HTML = "<!doctype html><html lang=pt-br><head><meta charset=utf-8>"
 "else u.textContent='versão em uso: '+e.versao+' (o servidor manda novidade sozinha)';" +
 "var t=document.getElementById('cms'),L=(e.comandos||[]).slice(0,15);" +
 "if(L.length){t.innerHTML='';for(var i=0;i<L.length;i++){var c=L[i],tr=document.createElement('tr');" +
-"tr.innerHTML='<td>'+hora(c.ts)+'</td><td>'+c.rotulo+'</td><td class=\"'+(c.exit===0?'ok':'ruim')+'\">'+c.exit+'</td><td>'+c.bytes+'</td>';t.appendChild(tr);}}" +
+"tr.innerHTML='<td>'+hora(c.ts)+'</td><td>'+c.rotulo+'</td><td class=\"'+(c.exit===0?'ok':'ruim')+'\">'+c.exit+'</td><td>'+c.bytes+'</td>';t.appendChild(tr);}}}" +
 "function logAppend(l){var lg=document.getElementById('lg');var e=lg.textContent?lg.textContent.split(String.fromCharCode(10)):[];e.push(l);if(e.length>200)e.splice(0,e.length-200);lg.textContent=e.join(String.fromCharCode(10));lg.scrollTop=lg.scrollHeight;}" +
-"var es=new EventSource('/evento');es.onmessage=function(x){try{var o=JSON.parse(x.data);if(o.estado)apply(o.estado);if(o.tipo==='log')logAppend(o.linha);}catch{}};" +
-"var lg0=document.getElementById('lg');fetch('/api/estado').then(function(r){return r.json()}).then(function(j){apply(j);lg0.textContent=j.log||''});" +
+"var es;function liga(){es=new EventSource('/evento');es.onmessage=function(x){try{var o=JSON.parse(x.data);if(o.estado)apply(o.estado);if(o.tipo==='log')logAppend(o.linha);}catch{}};es.onerror=function(){try{es.close();}catch(e2){};setTimeout(liga,3000);};}liga();" +
+"var lg0=document.getElementById('lg'),tent=0;" +
+"function puxar(){fetch('/api/estado',{cache:'no-store'}).then(function(r){return r.json()}).then(function(j){tent=0;apply(j);lg0.textContent=j.log||'';}).catch(function(){tent++;if(tent>2)document.getElementById('ctxt').textContent='sem resposta do programa local — tentando de novo…';setTimeout(puxar,2000);});}puxar();" +
 "</script></body></html>";
 /* ---------------- websocket (nativo do Node — SEA sem dependência) ---------------- */
 let ws = null;
