@@ -222,6 +222,7 @@ const estado = {
   versao: VERSAO_CLIENTE,
   online: false,
   conectou_em: null,
+  ultima_tentativa: null, // v3.13.1: quando o laço tentou por último (a tela mostra)
   negado: null,
   atualizacao: null,
   comandos: [],
@@ -260,6 +261,17 @@ function iniciarPainel() {
       res.end(JSON.stringify({ ...estado, porta: painelPorta, conf: confPath, log: tailLog(80) }));
       return;
     }
+    if (u.pathname === "/api/sair" && req.method === "POST") {
+      // v3.13.1: porta de assunto. Só a própria máquina reacha isto (o painel escuta
+      // em 127.0.0.1); é o cliente novo pedindo ao velho travado que desocupe a porta.
+      res.writeHead(200, { "content-type": "application/json; charset=utf-8" });
+      res.end(JSON.stringify({ saindo: true }));
+      log("outro cliente desta máquina pediu para eu sair — ele vai assumir; adeus");
+      morrendo = true;
+      try { if (ws) ws.close(); } catch { /* ignore */ }
+      setTimeout(() => process.exit(0), 300);
+      return;
+    }
     if (u.pathname === "/evento") {
       res.writeHead(200, { "content-type": "text/event-stream", "cache-control": "no-cache", connection: "keep-alive" });
       res.write("data: " + JSON.stringify({ tipo: "oi", estado: { ...estado, log: undefined } }) + "\n\n");
@@ -281,30 +293,55 @@ function iniciarPainel() {
     }
     res.writeHead(404); res.end("nao tem isso aqui");
   });
-  const jaRodando = (porta) => new Promise((ok) => {
-    // v3.12: se já existe um cliente nesta porta, abrir OUTRA instância só confunde
+  const estadoNaPorta = (porta) => new Promise((ok) => {
+    // v3.12: se já existe um cliente nesta porta, abrir OUTRA instância só confunde.
+    // v3.13.1: mas "existe" ≠ "está vivo" — o zumbi do bug segurava a porta e fazia
+    // o cliente novo se matar. Aqui eu PERGUNTO se aquele aí está conectado.
     const t = http.get({ host: "127.0.0.1", port: porta, path: "/api/estado", timeout: 1500 }, (r) => {
       let d = "";
       r.on("data", (c) => { d += c; });
       r.on("end", () => {
         /* só é "a mesma instalação" se o painel de lá usa o MESMO arquivo de config —
          * dois clientes apontando para configs diferentes são instâncias legítimas */
-        try { const j = JSON.parse(d); ok(Boolean(j && j.versao && "online" in j && j.conf === confPath)); } catch { ok(false); }
+        try {
+          const j = JSON.parse(d);
+          ok(Boolean(j && j.versao && "online" in j && j.conf === confPath) ? j : null);
+        } catch { ok(null); }
       });
     });
-    t.on("timeout", () => { t.destroy(); ok(false); });
-    t.on("error", () => ok(false));
+    t.on("timeout", () => { t.destroy(); ok(null); });
+    t.on("error", () => ok(null));
   });
-  const tenta = (porta) => {
+  // pede educadamente ao outro cliente (vivo, mas sem conexão) para ele sair e
+  // liberar a porta. Nada de taskkill: é o próprio programa se desligando.
+  const pedirParaSair = (porta) => new Promise((ok) => {
+    const req = http.request({ host: "127.0.0.1", port: porta, path: "/api/sair", method: "POST", timeout: 1500 }, (r) => {
+      r.resume(); r.on("end", () => ok(true));
+    });
+    req.on("timeout", () => { req.destroy(); ok(false); });
+    req.on("error", () => ok(false));
+    req.end();
+  });
+  const tenta = (porta, podeAssumir) => {
     servidor.once("error", async (e) => {
-      if (e.code === "EADDRINUSE" && (await jaRodando(porta))) {
+      if (e.code !== "EADDRINUSE") { log("painel local: " + e.code); return; }
+      const vizinho = await estadoNaPorta(porta);
+      if (vizinho && vizinho.online) {
         const url = "http://127.0.0.1:" + porta + "/?v=" + Date.now();
-        log("já existe um cliente rodando nesta máquina — abro a janela dele (http://127.0.0.1:" + porta + "/) e saio");
-        if (!semJanela) { abrirJanela(url); setTimeout(() => process.exit(0), 1500); }
+        log("já existe um cliente CONECTADO nesta máquina — abro a janela dele (http://127.0.0.1:" + porta + "/) e saio");
+        if (!semJanela) { abrirJanela(url); setTimeout(() => process.exit(0), 1500); } else { setTimeout(() => process.exit(0), 200); }
         return;
       }
-      if (e.code === "EADDRINUSE" && porta < PAINEL_PORTA + 6) { log("painel: porta " + porta + " ocupada, tentando a próxima"); tenta(porta + 1); }
-      else log("painel local: " + e.code);
+      if (vizinho && podeAssumir) {
+        log("o cliente desta porta está VIVO, mas sem conexão (v" + vizinho.versao + ") — peço que ele saia e eu assumo");
+        await pedirParaSair(porta);
+        await new Promise((r) => setTimeout(r, 1200));
+        servidor.removeAllListeners("error");
+        tenta(porta, false); // uma vez só: se não liberar, sigo na próxima porta
+        return;
+      }
+      if (porta < PAINEL_PORTA + 6) { log("painel: porta " + porta + " ocupada, tentando a próxima"); tenta(porta + 1, podeAssumir); }
+      else log("painel: sem porta livre (até " + porta + ") — sigo só com a conexão, sem janela local");
     });
     servidor.listen(porta, "127.0.0.1", () => {
       painelPorta = porta;
@@ -313,7 +350,7 @@ function iniciarPainel() {
       if (!semJanela) abrirJanela(url);
     });
   };
-  tenta(PAINEL_PORTA);
+  tenta(PAINEL_PORTA, true);
 }
 /* v3.11: UMA janela só. O programa deixou de ser "console + aba de navegador":
  * no Windows ele abre a página em MODO APLICATIVO (janela própria, sem abas, sem
@@ -390,10 +427,11 @@ const PAINEL_HTML = "<!doctype html><html lang=pt-br><head><meta charset=utf-8>"
 "</main><footer>Página local deste cliente (só este computador a enxerga). A janela de terminal continua funcionando por baixo.</footer>" +
 "<script>" +
 "function hora(s){return s? new Date(s).toLocaleTimeString('pt-BR'):''}" +
+"function tempoDaUltima(e){if(!ultimo.host||!e.ultima_tentativa)return'';var s=Math.max(0,Math.round((Date.now()-new Date(e.ultima_tentativa))/1000));return 'última tentativa há '+s+'s — o programa continua tentando sozinho'}" +
 "function apply(e){" +
 "var d=document.getElementById('dot');d.className='dot '+(e.online?'on':'off');" +
 "document.getElementById('ctxt').textContent=e.online?'ONLINE no minirag':'desconectado — reconecta sozinho';" +
-"document.getElementById('quando').textContent=e.online?'conectado desde '+new Date(e.conectou_em).toLocaleString('pt-BR'):'';" +
+"document.getElementById('quando').textContent=e.online?'conectado desde '+new Date(e.conectou_em).toLocaleString('pt-BR'):tempoDaUltima(e);" +
 "document.getElementById('negado').textContent=e.negado?'servidor negou: '+e.negado:'';" +
 "document.getElementById('dir').textContent='v'+e.versao+' · porta '+e.porta;" +
 "var m='';m+='<span class=k>nome da máquina</span><span class=v>'+e.host+'</span>';" +
@@ -411,9 +449,11 @@ const PAINEL_HTML = "<!doctype html><html lang=pt-br><head><meta charset=utf-8>"
 "tr.innerHTML='<td>'+hora(c.ts)+'</td><td>'+c.rotulo+'</td><td class=\"'+(c.exit===0?'ok':'ruim')+'\">'+c.exit+'</td><td>'+c.bytes+'</td>';t.appendChild(tr);}}}" +
 "function logAppend(l){var lg=document.getElementById('lg');var e=lg.textContent?lg.textContent.split(String.fromCharCode(10)):[];e.push(l);if(e.length>200)e.splice(0,e.length-200);lg.textContent=e.join(String.fromCharCode(10));lg.scrollTop=lg.scrollHeight;}" +
 "var es,ultimo={};" +
+"setInterval(function(){if(!ultimo.host||ultimo.online)return;document.getElementById('quando').textContent=tempoDaUltima(ultimo);},1000)" +
 "function liga(){es=new EventSource('/evento');es.onmessage=function(x){try{var o=JSON.parse(x.data);" +
 "if(o.estado){ultimo=o.estado;apply(ultimo);}" +
 "else if(o.tipo==='status'&&ultimo.host){ultimo.online=o.online;ultimo.conectou_em=o.conectou_em;ultimo.negado=o.negado;apply(ultimo);}" +
+"else if(o.tipo==='tentativa'&&ultimo.host){ultimo.ultima_tentativa=o.ultima_tentativa;if(!ultimo.online)document.getElementById('quando').textContent=tempoDaUltima(ultimo);}" +
 "else if(o.tipo==='atualizacao'&&ultimo.host){ultimo.atualizacao=o.atualizacao;apply(ultimo);}" +
 "else if(o.tipo==='comando'&&o.comando&&ultimo.host){ultimo.comandos=[o.comando].concat(ultimo.comandos||[]).slice(0,15);apply(ultimo);}" +
 "if(o.tipo==='log')logAppend(o.linha);}catch(e3){}};es.onerror=function(){try{es.close();}catch(e2){};setTimeout(liga,3000);};}liga();" +
@@ -427,28 +467,66 @@ let atualizando = false;
 let destinoVersao = null;
 let tmpArq = null; // arquivo .novo da tentativa em curso (apagado se falhar)
 let falhouPara = null; // versão cujo update já falhou neste processo (não rebaixa em loop)
+let ultimaTentativa = 0; // epoch do último "conectando" (medida do vigia)
+let proximaJanela = 0; // epoch em que o backoff marcou a próxima tentativa
+let vigiaSoquete = () => null; // devolve o soquete ABERTO atual, ou null
 
+/* v3.13.1 — O BURACO QUE PAROU A MÁQUINA DO DONO (23/10, medido no log dele).
+ * O laço de reconexão estava pendurado SÓ no evento 'close'. No Node 22 (o node
+ * assado dentro do .exe), fechar um soquete que ainda está em CONNECTING — o caso
+ * do deploy, quando o servidor reinicia no meio do handshake — dispara 'error' e
+ * NUNCA dispara 'close'. Prova medida aqui: node 22 fechando soquete em CONNECTING
+ * dá "ERROR EVENT" e o readyState fica 2 (CLOSING) para sempre; no node 26 o close
+ * chega, e por isso o ambiente de desenvolvimento nunca pegou o defeito.
+ * Consequência: o programa ficava vivo, de janela aberta, SEM jamais tentar de novo,
+ * e ainda segurava a porta do painel, bloqueando o cliente seguinte.
+ * De hoje NENHUMA saída do laço depende de evento: quem decide reconectar é o
+ * reagendar(), chamado por close, por error, pelo relogio dos 15 s e pelo vigia.
+ * A trava jaReagendou garante um unico agendamento por soquete. */
 function conectar() {
   if (morrendo) return;
+  ultimaTentativa = Date.now();
+  proximaJanela = 0; // até o soquete morrer de novo, não há janela marcada
+  estado.ultima_tentativa = new Date(ultimaTentativa).toISOString();
+  evocar({ tipo: "tentativa", ultima_tentativa: estado.ultima_tentativa });
   log("conectando em " + URL_WS + " como " + host + " (v" + VERSAO_CLIENTE + ")");
   ws = new WebSocket(URL_WS);
+  const meuWs = ws;
+  let jaReagendou = false;
+  // programar: ÚNICA porta de saída do laço. A trava é por soquete, então close,
+  // error, relógio e negado não podem gerar duas reconexões paralelas; e um soquete
+  // que já foi substituído por outro (vigia forçou tentativa nova) não marca mais.
+  const programar = (ms, deOnde) => {
+    if (jaReagendou || morrendo || atualizando || meuWs !== ws) return;
+    jaReagendou = true;
+    setOnline(false);
+    log("desconectado (" + deOnde + ") — reconecto em " + ms + "ms");
+    proximaJanela = Date.now() + ms; // o vigia respeita esta hora: só acorda se ela falhar
+    setTimeout(conectar, ms);
+  };
+  const reagendar = (deOnde) => {
+    const atrasos = negadoPermanente ? [300000] : [400, 800, 1500, 3000, 8000, 15000, 30000];
+    const ms = atrasos[Math.min(nivelBackoff++, atrasos.length - 1)];
+    programar(ms, deOnde);
+  };
   /* v3.12.2: no deploy o pedido de conexão pode ficar pendurado — antes o programa
-   * esperava para sempre e a janela ficava "desconectado" até reiniciar à mão */
+   * esperava para sempre e a janela ficava "desconectado" até reiniciar à mão.
+   * v3.13.1: o relógio não confia mais no close que ele mesmo provoca. */
   const relogioConexao = setTimeout(() => {
-    if (ws && ws.readyState === WebSocket.CONNECTING) {
-      log("conexão sem resposta em 15 s — tento de novo");
-      try { ws.close(); } catch { /* ignored */ }
-    }
+    if (meuWs.readyState === WebSocket.OPEN || jaReagendou || meuWs !== ws) return;
+    log("conexão sem resposta em 15 s — largo este soquete e tento de novo");
+    try { meuWs.close(); } catch { /* ignored */ }
+    reagendar("relógio dos 15 s");
   }, 15000);
-  ws.addEventListener("open", () => clearTimeout(relogioConexao));
-  ws.addEventListener("close", () => clearTimeout(relogioConexao));
-  ws.addEventListener("open", () => {
+  meuWs.addEventListener("open", () => {
+    clearTimeout(relogioConexao);
+    if (meuWs !== ws) return; // outro soquete já assumiu esta conexão
     nivelBackoff = 0;
-    ws.send(JSON.stringify({ token, host, os: process.platform + " " + os.release(), user: os.userInfo().username }));
+    meuWs.send(JSON.stringify({ token, host, os: process.platform + " " + os.release(), user: os.userInfo().username }));
     // herança do Go v1.11: a novidade é reconsultada em TODA conexão (primeira e reconexões)
     verificarAtualizacao().catch(() => {});
   });
-  ws.addEventListener("message", async (ev) => {
+  meuWs.addEventListener("message", async (ev) => {
     let m;
     try {
       m = JSON.parse(String(ev.data));
@@ -457,6 +535,7 @@ function conectar() {
     }
     if (m.ack) {
       if (m.ack === "ok") {
+        negadoPermanente = false;
         log("ONLINE no minirag");
         setOnline(true);
         if (m.token && m.token !== token) {
@@ -468,7 +547,6 @@ function conectar() {
         const motivo = m.motivo || "?";
         setOnline(false); estado.negado = motivo;
         evocar({ tipo: "status", online: false, conectou_em: null, negado: estado.negado });
-        try { ws.close(); } catch { /* ignore */ }
         /* v3.12: o token guardado pode ter morrido (máquina apagada). Nesse caso o
          * cliente esquece o token e tenta a chave embutida UMA vez — antes ficava
          * repetindo "token desconhecido" a cada 15s para sempre. */
@@ -481,13 +559,16 @@ function conectar() {
             tokenDoConf = false;
             nivelBackoff = 0;
             log("o token guardado não existe mais no servidor — tentando de novo com a chave do arquivo");
-            setTimeout(conectar, 1500);
+            programar(1500, "chave do arquivo"); // único agendamento deste soquete
+            try { meuWs.close(); } catch { /* ignore */ }
             return;
           }
         }
         negadoPermanente = /desconhec|removid|expirad/i.test(motivo);
-        log("NEGADO pelo servidor: " + motivo + (negadoPermanente ? " — paro de insistir; resolva no painel" : " — tentando de novo em 30s"));
         nivelBackoff = 5; // 30s
+        log("NEGADO pelo servidor: " + motivo + (negadoPermanente ? " — vou insistir a cada 5 min, sem te incomodar" : " — tentando de novo em 30s"));
+        try { meuWs.close(); } catch { /* ignore */ }
+        reagendar("recusa do servidor");
       }
       return;
     }
@@ -498,21 +579,19 @@ function conectar() {
       registrarComando(m.rotulo || "?", r.exit, r.stdout.length + r.stderr.length);
       log("resposta: exit " + r.exit + " (" + r.stdout.length + "+" + r.stderr.length + " bytes)");
       try {
-        ws.send(JSON.stringify(r));
+        meuWs.send(JSON.stringify(r));
       } catch {
         log("caiu antes de responder — o servidor vai marcar sem resposta");
       }
     }
   });
-  ws.addEventListener("error", () => { /* o close vem em seguida e trata */ });
-  ws.addEventListener("close", () => {
-    setOnline(false);
-    if (morrendo) return;
-    const atrasos = negadoPermanente ? [300000] : [400, 800, 1500, 3000, 8000, 15000, 30000];
-    const ms = atrasos[Math.min(nivelBackoff++, atrasos.length - 1)];
-    log("desconectado — reconecto em " + ms + "ms");
-    setTimeout(conectar, ms);
-  });
+  // v3.13.1: 'error' trata sozinho. Confiar no close que "vem em seguida" foi o
+  // defeito que deixou a máquina do dono muda depois do deploy de 23/10.
+  meuWs.addEventListener("error", () => { clearTimeout(relogioConexao); reagendar("erro de rede"); });
+  meuWs.addEventListener("close", () => { clearTimeout(relogioConexao); reagendar("fechou"); });
+
+  // Ajusta a mira do relógio: este soquete é o "atual" enquanto for o último criado.
+  vigiaSoquete = () => (meuWs.readyState === WebSocket.OPEN ? meuWs : null);
 }
 
 /* ---------------- auto-update ---------------- */
@@ -685,6 +764,19 @@ process.on("SIGINT", () => {
   }
   log("log do cliente em " + LOG_PATH);
   iniciarPainel();
+  /* v3.13.1 — VIGIA: a última linha de defesa, e a que faltava. Cada volta do laço
+   * marca a hora da próxima tentativa; se essa hora passou, não há soquete aberto e
+   * ninguém agendou nada, o laço morreu por um caminho que eu não previ — acorda e
+   * recomeça. É o fim da era "janela aberta, máquina muda" (23/10, produção). */
+  setInterval(() => {
+    if (morrendo || atualizando) return;
+    if (vigiaSoquete()) return; // há soquete ABERTO: nada a fazer
+    const deveTerAcordado = Math.max(ultimaTentativa, proximaJanela);
+    if (Date.now() - deveTerAcordado < 90_000) return; // a janela ainda não venceu
+    log("vigia: " + Math.round((Date.now() - deveTerAcordado) / 1000) + " s sem conexão e sem tentativa marcada — recomeçando o laço");
+    ws = null; // solta o soquete pendurado (os callbacks dele se reconhecem e não marcam mais)
+    conectar();
+  }, 30_000).unref?.();
   await verificarAtualizacao();
   gravarConf({ ...lerConf(), token, host, url: base, desde: lerConf().desde || new Date().toISOString() });
   conectar();
