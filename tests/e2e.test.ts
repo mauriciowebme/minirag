@@ -2419,6 +2419,19 @@ await bloco(t, "v3.6: máquinas por usuário — hub WS, pareamento, run, escopo
     const rBase = await fetch(BASE + "/maquina/cliente/linux", { method: "HEAD", signal: AbortSignal.timeout(20000) });
     const lenBase = Number(rBase.headers.get("content-length") ?? 0);
     f.check("gerar cliente: 200 com trailer assado (base + payload pequeno)", rGen.status === 200 && lenBase > 1_000_000 && bufGen.length > lenBase && bufGen.length - lenBase < 500, { status: rGen.status, lenBase, lenGen: bufGen.length });
+    /* v3.10.1: download por bilhete — link comum, sem header, uso único */
+    const rBil = await call("POST", "/maquinas/cliente/linux/bilhete", { key: TESTKEY });
+    const urlBil = String(rBil.json?.url ?? "");
+    const rLink = await fetch(BASE + urlBil, { signal: AbortSignal.timeout(30000) });
+    const bufLink = Buffer.from(await rLink.arrayBuffer());
+    f.check(
+      "download por bilhete funciona SEM header de chave (link de navegador)",
+      rBil.status === 200 && urlBil.includes("bilhete=") && rLink.status === 200 && bufLink.length > lenBase,
+      { status: rLink.status, bytes: bufLink.length },
+    );
+    const rReuso = await fetch(BASE + urlBil, { signal: AbortSignal.timeout(15000) });
+    f.check("bilhete é de uso único (segundo pedido recusado)", rReuso.status === 403, rReuso.status);
+
     const dispo = rGen.headers.get("content-disposition") ?? "";
     f.check("nome do arquivo carrega o usuário", dispo.includes("minirag-cliente-teste"), dispo.slice(0, 90));
     execFileSync("docker", ["exec", "-i", CONTAINER, "sh", "-c", "cat > /tmp/cli37 && chmod 755 /tmp/cli37"], { input: bufGen });
