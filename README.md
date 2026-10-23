@@ -10,6 +10,14 @@ parecidos com a pergunta, com uma nota de 0 a 1.
 
 ---
 
+## v3.9 (23/10) — painel local do cliente + auto-update que não queima banda
+
+- **Painel local no cliente**: com o cliente rodando, `http://127.0.0.1:48123` mostra numa página (sem internet, sem login) conexão/servidor/máquina, versão, atualização com barra de progresso, comandos executados e log ao vivo por SSE — a janela preta deixa de ser a única cara do programa. `--sem-janela` mantém só o painel.
+- **Update: nada de sobrescrever o exe em uso** — o jeito limpo renomeia o vivo e põe o novo no lugar; se o Windows/antivírus negar (`EPERM`), a versão nova roda com **nome versionado** ao lado e o arquivo velho fica intacto. Acompanha rollback se a troca falhar no meio.
+- **Sem loop de download**: versão que falhou fica em carência de 30 min (grava `tentou` na conf, que agora é mesclada, não sobrescrita) e o `.novo` é apagado na falha. Antes, cada reconexão rebaixava o exe inteiro.
+
+---
+
 ## v3.8.2 (23/10) — um log só, 30 dias; progresso de download só na tela
 
 - **Log único com memória de 30 dias**: no boot o cliente apaga linhas mais velhas que 30 dias, corta o topo se passar de 2 MB e **não cria mais o `.old` de log** (se o fósforo antigo existir, ele é removido). Um arquivo só para tomar conta de tudo.
