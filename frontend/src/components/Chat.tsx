@@ -77,10 +77,12 @@ export function Chat({
   escopo,
   operador,
   onIrConfig,
+  onAbrirMenu,
 }: {
   escopo: { tenant: string; memoria: string };
   operador: boolean;
   onIrConfig: () => void;
+  onAbrirMenu: () => void;
 }) {
   const { toast } = useToast();
   const [gavetas, setGavetas] = useState<string[]>([""]);
@@ -309,13 +311,24 @@ export function Chat({
   const rodando = snap.rodando;
 
   return (
-    <section className="chat-tela flex flex-col gap-3" id="telaChat">
+    <section className="chat-tela flex flex-col gap-3 max-[720px]:gap-0" id="telaChat">
       {/* v3.14 — modo celular: a barra velha botava título, subtítulo, gaveta e (embaixo)
           "nova conversa" + campo + "enviar" na MESMA linha; num celular de 390px sobravam
           ~120px para escrever. O cabeçalho agora só tem o que age: a pílula do modelo com a
           gaveta dentro dela e a nova conversa (virou ícone no celular). O subtítulo saiu —
           o topo do app já diz "Chat". */}
       <div className="chat-topo">
+        {/* v3.14.1 — tela inteira no celular: o cabecalho do app sai de cena, entao o
+            botao de abrir o menu mora aqui (sem ele nao se chegava mais em lugar nenhum) */}
+        <button
+          id="chatMenuCelular"
+          className="chat-acao hidden max-[720px]:inline-flex"
+          aria-label="abrir menu"
+          title="menu"
+          onClick={onAbrirMenu}
+        >
+          ☰
+        </button>
         <label className="chat-pilula" title="modelo em uso e gaveta de memoria desta conversa">
           <span className="chat-pilula-modelo mono">{provider?.modelo ?? "sem modelo"}</span>
           <select

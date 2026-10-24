@@ -56,6 +56,17 @@ export default function App() {
   const [sujo, setSujo] = useState(false);
   const [recarregarArquivos, setRecarregarArquivos] = useState(0);
   const [menuAberto, setMenuAberto] = useState(false);
+
+  /* v3.14.1 — no celular o chat ocupa a tela toda e o ☰ virou a única porta de saída da
+     conversa: Esc fecha a gaveta (antes só fechava clicando no fundo escuro). */
+  useEffect(() => {
+    if (!menuAberto) return;
+    const tecla = (e: KeyboardEvent) => {
+      if (e.key === "Escape") setMenuAberto(false);
+    };
+    window.addEventListener("keydown", tecla);
+    return () => window.removeEventListener("keydown", tecla);
+  }, [menuAberto]);
   /* v3.6.1: a aba Máquinas vive e morre com o interruptor de Controle das máquinas
      (Configurações → Ferramentas), igual à tela do túnel — desligado, some a aba. */
   const [controleMaq, setControleMaq] = useState(true);
@@ -158,6 +169,13 @@ export default function App() {
           <div className="min-w-0">
             <div className="truncate text-[13px] font-semibold">{nome}</div>
             <div className="text-[11px] text-txt3">{operador ? "vê tudo · admin" : "usuário"}</div>
+            {/* v3.14.1 — no celular o chat ocupa a tela toda e o chip de foco saiu do topo:
+                o usuário em foco passa a viver aqui dentro do menu */}
+            {operador && tenant && (
+              <div className="truncate text-[11px] text-txt3" title="usuário em foco">
+                foco: {tenant}
+              </div>
+            )}
           </div>
         </div>
         <button id="btnSair" className="btn btn-sutil mt-2 w-full justify-start" title="sair da sessão" onClick={() => sessao.sair()}>
@@ -181,7 +199,12 @@ export default function App() {
       {/* v3.14 — no Chat, o painel é a janela inteira: sem isso a conversa tinha altura
           chutada no css e o campo de escrita encostava (e às vezes passava) do fim da tela */}
       <div className={"flex min-w-0 flex-1 flex-col" + (vista === "chat" ? " chat-janela h-[100dvh]" : "")}>
-        <header className="sticky top-0 z-20 flex items-center gap-3 border-b border-borda bg-bg/95 px-4 py-2.5 backdrop-blur sm:px-6">
+        <header
+          className={
+            "sticky top-0 z-20 flex items-center gap-3 border-b border-borda bg-bg/95 px-4 py-2.5 backdrop-blur sm:px-6" +
+            (vista === "chat" ? " max-[720px]:hidden" : "")
+          }
+        >
           <button className="btn btn-sutil btn-mini lg:hidden" aria-label="abrir menu" onClick={() => setMenuAberto(true)}>
             ☰
           </button>
@@ -197,7 +220,14 @@ export default function App() {
           )}
         </header>
 
-        <main className={"mx-auto w-full max-w-[1180px] px-4 pt-5 sm:px-6 " + (vista === "chat" ? "flex min-h-0 flex-1 flex-col pb-2" : "pb-12")}>
+        <main
+          className={
+            "mx-auto w-full max-w-[1180px] px-4 pt-5 sm:px-6 " +
+            (vista === "chat"
+              ? "flex min-h-0 flex-1 flex-col pb-2 max-[720px]:px-0 max-[720px]:pt-0 max-[720px]:pb-0"
+              : "pb-12")
+          }
+        >
           {vista === "painel" && <Painel tenant={tenant} operador={operador} />}
 
           {vista === "gavetas" && (
@@ -253,7 +283,14 @@ export default function App() {
             />
           )}
 
-          {vista === "chat" && <Chat escopo={{ tenant, memoria }} operador={operador} onIrConfig={() => navegar("config")} />}
+          {vista === "chat" && (
+            <Chat
+              escopo={{ tenant, memoria }}
+              operador={operador}
+              onIrConfig={() => navegar("config")}
+              onAbrirMenu={() => setMenuAberto(true)}
+            />
+          )}
 
           {vista === "maquinas" && <Maquinas operador={operador} />}
           {vista === "buscar" && <Buscar escopo={{ tenant, memoria }} operador={operador} onAbrirEditor={(id) => abrirEditor(id)} />}
@@ -272,7 +309,13 @@ export default function App() {
           )}
         </main>
 
-        <footer id="rodape" className="mx-auto flex w-full max-w-[1180px] flex-wrap items-center gap-3 px-4 pb-8 text-[12px] text-txt3 sm:px-6">
+        <footer
+          id="rodape"
+          className={
+            "mx-auto flex w-full max-w-[1180px] flex-wrap items-center gap-3 px-4 pb-8 text-[12px] text-txt3 sm:px-6" +
+            (vista === "chat" ? " max-[720px]:hidden" : "")
+          }
+        >
           <span id="ver" className="chip">
             {versao ? `versão ${versao}` : ""}
           </span>

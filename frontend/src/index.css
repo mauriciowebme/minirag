@@ -691,8 +691,13 @@
   .chat-rodape-chave {
     @apply hidden;
   }
+  /* v3.14.1 — tela inteira: sem cartao (borda, fundo e raio fora), sem as margens do
+     palco (vem do App), e a linha do topo ganha o respiro que era do cabecalho do app */
   .chat-caixa {
-    @apply rounded-[14px];
+    @apply rounded-none border-0 bg-transparent;
+  }
+  .chat-topo {
+    @apply mb-0 border-b border-borda px-3 pb-2;
   }
   .chat-msgs {
     @apply px-3 pt-3 pb-1;
