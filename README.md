@@ -21,6 +21,15 @@ parecidos com a pergunta, com uma nota de 0 a 1.
 ---
 
 ---
+## v3.15.1 (24/10) — A caixa de digitação deixou de ser cápsula gorda
+
+- **O que doía**: o campo de escrita media **60 px de altura para uma linha de 14,5 px** (o texto ocupava 24% da caixa), com **raio 26 px** — metade exata da altura, então virava cápsula fechada nas duas pontas — e botão circular de **42 px** lá dentro, brigando com o texto por peso visual. Foi o Mauricio que apontou no print ("desproporcional, feio"); medi no ambiente de testes em vez de chutar.
+- **Como ficou**: **48 px de altura (medido 50 com o padding), raio 12 px, botão 34×34 com canto de 10 px e glifo de 16 px, texto 15 px**. A linha de texto passa de 24% para **44% da altura interna** — a mesma proporção do IA_GO, que é a referência da casa (campo com `minHeight: 48`, `text-sm` de 21 px = 44%, raio `rounded-xl` de 12 px — lido no `ChatInput.tsx` dele, não estimado).
+- **No celular**: caixa de 62→**54 px**, raio 22→12, botão 44→**40 px** (mantendo o alvo de toque acima de 40; a pílula inteira é clicável para focar o campo, então quem toca não depende só do botão).
+- **O que NÃO mudei de propósito**: a largura. A pílula faz **780 px, a mesma da coluna da conversa** (medido em 2560, 1920 e 1440) — encolher ela desalinharia do balão da resposta. O "vão" que sobra para uma frase curta é o campo crescendo junto com o rascunho, como sempre.
+- **Conferido por medida (não por print)**: centro do campo vs centro do botão = **1 px** com uma linha; com três linhas de rascunho a caixa cresce para 72 px e o botão **fica colado embaixo** (mesmo comportamento de antes). O modelo de visão, olhando o recorte, apontou "texto no topo, botão centralizado" — a medição diz que é 1 px, então deixei como está e registre aqui que discordei do olho com número.
+- **Testes**: mudança de tela e CSS; nenhum contrato toca geometria. Rodada a **suíte completa no ambiente de testes** (não filtrada) com os totais do log inteiro, e o portão `tsc` + `vite build` dos dois lados com zero erro.
+
 ## v3.15.0 (24/10) — O chat ganhou o Rastro do turno do jeito do IA_GO
 
 - **O que doía**: o pensamento, as falas de caminho e as ferramentas viviam em três lugares diferentes (o bloco "Pensou por Ns", balões soltos no meio da conversa e a linha dobrada "ferramentas chamadas"). Não dava para ver o turno como uma história: o que ele pensou, o que disse no caminho, o que consultou e quanto cada passo demorou — e, ao reabrir a conversa, a ordem entre as rodadas estava perdida (o banco guardava um `raciocinio` único, sem posição no tempo).
