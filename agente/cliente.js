@@ -379,7 +379,9 @@ function abrirJanela(url) {
     try {
       const perfil = path.join(path.dirname(confPath), ".minirag-janela");
       if (EH_WIN) fecharJanelasMiniragSync();
-      const f = spawn(navegador, ["--app=" + url, "--window-size=700,560", "--user-data-dir=" + perfil], { detached: true, stdio: "ignore", windowsHide: true });
+      // v3.16.5: --disable-gpu — medido 24/10 na Noot: janela nascida sem a flag =
+      // retângulo preto (compositor GPU morto herdado); com a flag, renderiza na hora.
+      const f = spawn(navegador, ["--app=" + url, "--window-size=700,560", "--disable-gpu", "--user-data-dir=" + perfil], { detached: true, stdio: "ignore", windowsHide: true });
       f.on("error", () => abrirNavegadorPadrao(url));
       if (f.unref) f.unref();
       return;
