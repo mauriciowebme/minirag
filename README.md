@@ -22,6 +22,10 @@ parecidos com a pergunta, com uma nota de 0 a 1.
 
 ---
 ---
+## v3.16.2 (24/10) — O servidor passa a registrar a versão do seu cliente
+- **O que você vê:** nada muda na sua tela; o cliente apenas informa a própria versão quando conecta.
+- **Por que este envio existe:** para provar, do lado do servidor, que a troca automática terminou — quando a máquina aparecer no log com `vers=3.16.2`, é prova de que ela se atualizou sozinha.
+
 ## v3.16.1 (24/10) — A janela do cliente parou de ficar em branco
 - **O que você vê agora:** ao abrir o cliente, a janela mostra a conexão, a máquina, as atualizações, os comandos recebidos e o log — tudo se mexendo ao vivo.
 - **O que acontecia:** a janela ficava parada em "carregando…" e o log vazio, mesmo com o programa funcionando e recebendo os comandos por trás.
