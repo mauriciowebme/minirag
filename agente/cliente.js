@@ -34,7 +34,7 @@ const path = require("node:path");
 const os = require("node:os");
 const http = require("node:http");
 const https = require("node:https");
-const { spawn } = require("node:child_process");
+const { spawn, spawnSync } = require("node:child_process");
 
 const EH_WIN = process.platform === "win32";
 const VERSAO_CLIENTE = process.env.MINIRAG_CLIENTE_VERSAO || "dev";
@@ -378,7 +378,8 @@ function abrirJanela(url) {
   if (navegador) {
     try {
       const perfil = path.join(path.dirname(confPath), ".minirag-janela");
-      const f = spawn(navegador, ["--app=" + url, "--window-size=1180,820", "--user-data-dir=" + perfil], { detached: true, stdio: "ignore", windowsHide: true });
+      if (EH_WIN) fecharJanelasMiniragSync();
+      const f = spawn(navegador, ["--app=" + url, "--window-size=700,560", "--user-data-dir=" + perfil], { detached: true, stdio: "ignore", windowsHide: true });
       f.on("error", () => abrirNavegadorPadrao(url));
       if (f.unref) f.unref();
       return;
@@ -403,6 +404,16 @@ function abrirNavegadorPadrao(url) {
  * processo morto + a nova) — medido 24/10 na Noot. Mato só os processos com o MEU perfil
  * (.minirag-janela) na linha de comando; janelas normais do dono não são tocadas.
  * Fire-and-forget detached: o powershell termina o serviço mesmo depois do meu exit. */
+function fecharJanelasMiniragSync() {
+  // v3.16.4: abrir janela SEMPRE em browser novo. Medido 24/10 na Noot: reabrir o exe
+  // entrava no browser órfão do perfil (mesmo user-data-dir = um browser só) e herdava
+  // o compositor quebrado dele — tela preta que reboot nenhum curava, porque a janela
+  // nova nascia dentro do doente. Mato os browsers do MEU perfil e só então abro.
+  try {
+    const ps = "Get-CimInstance Win32_Process -Filter \"Name='msedge.exe' OR Name='chrome.exe'\" | Where-Object { $_.CommandLine -match 'minirag-janela' } | ForEach-Object { Stop-Process -Id $_.ProcessId -Force -ErrorAction SilentlyContinue }";
+    spawnSync("powershell.exe", ["-NoProfile", "-Command", ps], { windowsHide: true, timeout: 5000, stdio: "ignore" });
+  } catch { /* mudo: abrir sem expurgo > nao abrir */ }
+}
 function fecharJanelasMinirag() {
   if (!EH_WIN) return;
   try {
