@@ -22,6 +22,11 @@ parecidos com a pergunta, com uma nota de 0 a 1.
 
 ---
 ---
+## v3.16.1 (24/10) — A janela do cliente parou de ficar em branco
+- **O que você vê agora:** ao abrir o cliente, a janela mostra a conexão, a máquina, as atualizações, os comandos recebidos e o log — tudo se mexendo ao vivo.
+- **O que acontecia:** a janela ficava parada em "carregando…" e o log vazio, mesmo com o programa funcionando e recebendo os comandos por trás.
+- Causa: um `;` esquecido no código da janela. Efeito: o navegador não conseguia executar o script da página e a tela congelava. Correção: ponto e vírgula de volta; janela validada (script compila, todos os elementos existem).
+
 ## v3.16.0 (24/10) — A tela do chat virou só conversa; o resto foi para a lateral
 
 - **O que doía**: para ler uma resposta, competiam na tela o cabeçalho ("Chat" + chip ◉ que repetia o "foco" da lateral), a pílula de topo (modelo + gaveta), o botão de reset no canto, a dica "Enter envia", a linha "› ver detalhes" do provider e o rodapé técnico (versão, atalhos de outro lugar, frase de marketing). O pedido do dono: "tira as coisas que estão na tela" — aprovado em preview (variante A + botão de conversa nova no pé, lado oposto ao enviar).
