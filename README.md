@@ -22,6 +22,10 @@ parecidos com a pergunta, com uma nota de 0 a 1.
 
 ---
 ---
+## v3.16.3 (24/10) — Uma janela só: o cliente velho fecha a própria tela ao se trocar
+- **O que você vê:** depois de uma atualização automática, continua existindo **uma** janela do cliente — antes ficava aberta também a tela velha, congelada, do processo que saiu.
+- **O que acontecia:** a janela é um processo separado do programa; quando o programa antigo saía para dar lugar ao novo, a tela antiga ficava viva na barra.
+
 ## v3.16.2 (24/10) — O servidor passa a registrar a versão do seu cliente
 - **O que você vê:** nada muda na sua tela; o cliente apenas informa a própria versão quando conecta.
 - **Por que este envio existe:** para provar, do lado do servidor, que a troca automática terminou — quando a máquina aparecer no log com `vers=3.16.2`, é prova de que ela se atualizou sozinha.
