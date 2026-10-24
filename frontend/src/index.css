@@ -406,6 +406,67 @@
   .racio-txt {
     @apply max-h-40 overflow-auto whitespace-pre-wrap px-2.5 py-1.5 text-[11.5px] leading-relaxed text-txt3;
   }
+  /* v3.15 — RASTRO DO TURNO (o jeito do IA_GO): uma trilha só por turno, na ordem, com o
+     tempo de cada passo. Narração apagada, pensamento em roxo, ferramenta em azul. */
+  .rastro {
+    @apply mb-1.5;
+  }
+  .rastro-cab {
+    @apply flex w-full cursor-pointer select-none items-center gap-1.5 rounded-full
+      border border-borda px-2.5 py-1 text-[11.5px] text-txt3;
+  }
+  .rastro-cab:hover {
+    @apply border-bordaforte text-txt2;
+  }
+  .rastro-cab b {
+    @apply font-medium text-txt2;
+  }
+  .rastro-corpo {
+    @apply mt-1 ml-1 space-y-1.5 border-l-2 border-borda py-1 pl-2.5;
+  }
+  .rastro-linha {
+    @apply flex items-start gap-1.5 text-[11.5px] leading-relaxed;
+  }
+  .rastro-ponto {
+    @apply mt-[5px] h-1.5 w-1.5 shrink-0 rounded-full bg-txt3/70;
+  }
+  .rastro-ponto-roxo {
+    @apply bg-roxo/80;
+  }
+  .rastro-ponto-azul {
+    @apply mt-[7px] bg-azul;
+  }
+  .rastro-narra {
+    @apply text-txt2;
+  }
+  .rastro-pensa-cab {
+    @apply text-txt3;
+  }
+  .rastro-pensa .racio-txt {
+    /* txt2 (não txt3): medido no print, o itálico apagado ficava difícil de ler no celular */
+    @apply ml-[17px] mt-1 border-l-2 border-borda px-0 text-[11.5px] italic text-txt2;
+  }
+  .rastro-tool {
+    @apply text-azul;
+  }
+  .rastro-tool-detalhe {
+    @apply cursor-pointer;
+  }
+  .rastro-tool-detalhe summary {
+    @apply list-none;
+  }
+  .rastro-tool-detalhe summary::-webkit-details-marker {
+    display: none;
+  }
+  .rastro-tool-info {
+    @apply ml-0 mt-1 text-[11px] text-txt3;
+  }
+  .txt-ok {
+    @apply text-verde;
+  }
+  .txt-erro {
+    @apply text-vermelho;
+  }
   .fonte {
     @apply border-l-2 border-borda pl-2 text-[12px] text-txt3;
   }

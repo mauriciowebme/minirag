@@ -134,6 +134,10 @@ export async function initProvider(): Promise<void> {
   await q(`ALTER TABLE chat_mensagens ADD COLUMN IF NOT EXISTS falas JSONB`);
   /* v3.13: raciocínio do modelo gravado junto da resposta (bloco "Pensou por Ns" ao reabrir) */
   await q(`ALTER TABLE chat_mensagens ADD COLUMN IF NOT EXISTS raciocinio TEXT`);
+  /* v3.15: o rastro do turno na ordem real (o jeito do IA_GO): pensamento com o tempo dele,
+     fala de caminho e ferramenta com o tempo dela. Gravado para a trilha sobreviver a
+     reabrir a conversa — a string única de `raciocinio` não guarda essa ordem. */
+  await q(`ALTER TABLE chat_mensagens ADD COLUMN IF NOT EXISTS rastro JSONB`);
   await q(`CREATE INDEX IF NOT EXISTS chat_tenant_idx ON chat_mensagens (tenant, memoria, id)`);
 }
 
@@ -583,6 +587,14 @@ export async function testarProvider(user: Usuario, body: Record<string, unknown
 
 /* ------------------------------------------------------------------- chat */
 
+/** v3.15 — segmento do RASTRO DO TURNO, na ordem em que aconteceu (o jeito do IA_GO):
+ *  pensamento com o tempo dele, fala de caminho, ferramenta com o tempo dela. A resposta
+ *  final NÃO entra aqui: ela é a própria bolha. */
+export type SegmentoRastro =
+  | { tipo: "pensamento"; texto: string; ms: number }
+  | { tipo: "narracao"; texto: string }
+  | { tipo: "ferramenta"; servidor: string; nome: string; ok: boolean; ms: number };
+
 /** Evento do chat com streaming (rota /chat/stream). */
 export type EventoChat =
   | { tipo: "delta"; texto: string }
@@ -684,6 +696,18 @@ export async function responderChat(
 
   const chamadas: ChamadaFerramenta[] = [];
   const falas: string[] = []; // v3.8: as falas de caminho da rodada ficam na tela (e na gaveta)
+  /* v3.15: a trilha do turno na ordem real. O bloco de pensamento da rodada em curso fecha
+     quando a rodada decide (fala, chama ferramenta ou responde) — assim o tempo dele NÃO
+     carrega o tempo da ferramenta, que é linha separada. */
+  const rastro: SegmentoRastro[] = [];
+  let bloco: { texto: string; inicio: number } | null = null;
+  const fecharBloco = (): void => {
+    if (!bloco) return;
+    const texto = bloco.texto.trim();
+    const ms = Math.max(0, Date.now() - bloco.inicio);
+    if (texto) rastro.push({ tipo: "pensamento", texto, ms });
+    bloco = null;
+  };
   /* v3.13: o raciocínio do modelo (reasoning_content/thinking) vai para a tela AO VIVO e
      fica gravado na mensagem — o Open WebUI faz assim ("Thinking…" → "Thought for Ns"). */
   let pensamento = "";
@@ -724,11 +748,20 @@ export async function responderChat(
       /* sempre coleta (para gravar); só emite quando há tela ouvindo */
       onRaciocinio: (t) => {
         pensamento += t;
+        if (!bloco) bloco = { texto: t, inicio: Date.now() };
+        else bloco.texto += t;
         emitir?.({ tipo: "raciocinio", texto: t });
       },
     });
     const pedidas = r.message.tool_calls ?? [];
-    if (!emitir && r.pensamento) pensamento += r.pensamento + "\n\n";
+    if (!emitir && r.pensamento) {
+      pensamento += r.pensamento + "\n\n";
+      /* sem streaming não dá para medir quanto tempo foi pensamento: grava sem tempo e a
+         tela escreve "Pensou" em vez de "Pensou por Ns" — não invento número que não medi */
+      const bruto = String(r.pensamento).trim();
+      if (bruto) rastro.push({ tipo: "pensamento", texto: bruto, ms: 0 });
+    }
+    fecharBloco();
     if (!pedidas.length) {
       texto = r.texto;
       break;
@@ -740,6 +773,7 @@ export async function responderChat(
     const falaRodada = String(r.texto ?? "").trim();
     if (falaRodada) {
       falas.push(falaRodada);
+      rastro.push({ tipo: "narracao", texto: falaRodada });
       emitir?.({ tipo: "fala", texto: falaRodada });
     } else if (emitir && saiuTexto) emitir({ tipo: "descartar" });
     if (rodadas > cfg.max_rodadas) {
@@ -764,14 +798,16 @@ export async function responderChat(
       }
       const antes = Date.now();
       const exec = await executarFerramenta(nome, args, user, pacote, { memoria });
+      const duracao = Date.now() - antes;
       chamadas.push({
         servidor: exec.servidor,
         nome: exec.nome,
         args: mascararArgs(exec.args ?? args),
         ok: exec.ok,
         resumo: resumirSaida(exec.saida, exec.ok),
-        ms: Date.now() - antes,
+        ms: duracao,
       });
+      rastro.push({ tipo: "ferramenta", servidor: exec.servidor, nome: exec.nome, ok: exec.ok, ms: duracao });
       emitir?.({ tipo: "ferramenta", servidor: exec.servidor, nome: exec.nome, ok: exec.ok, ms: exec.ms });
       /* o resultado entra já aparado: ferramenta gulosamente verbosa não pode estourar a janela */
       const brutoTool = paraTexto(exec.saida);
@@ -796,11 +832,12 @@ export async function responderChat(
         : "nenhuma ferramenta está ligada em Configurações → Ferramentas (MCP)");
   }
 
-  await gravarMensagens(tenant, memoria, pergunta, texto, chamadas, falas, pensamento.trim());
+  await gravarMensagens(tenant, memoria, pergunta, texto, chamadas, falas, pensamento.trim(), rastro);
   return {
     resposta: texto,
     ferramentas: chamadas,
     falas,
+    rastro,
     /** v3.13: raciocínio do modelo, para a tela recolher "Pensou por Ns" ao reabrir a conversa */
     raciocinio: pensamento.trim(),
     rodadas,
@@ -824,14 +861,15 @@ async function gravarMensagens(
   chamadas: ChamadaFerramenta[],
   falas: string[] = [],
   raciocinio = "",
+  rastro: SegmentoRastro[] = [],
 ): Promise<void> {
   await q(
     `INSERT INTO chat_mensagens (tenant, memoria, papel, texto, ferramentas) VALUES ($1, $2, 'user', $3, NULL)`,
     [tenant, memoria, pergunta],
   );
   await q(
-    `INSERT INTO chat_mensagens (tenant, memoria, papel, texto, ferramentas, falas, raciocinio) VALUES ($1, $2, 'assistant', $3, $4::jsonb, $5::jsonb, $6)`,
-    [tenant, memoria, resposta, JSON.stringify(chamadas), JSON.stringify(falas), raciocinio || null],
+    `INSERT INTO chat_mensagens (tenant, memoria, papel, texto, ferramentas, falas, raciocinio, rastro) VALUES ($1, $2, 'assistant', $3, $4::jsonb, $5::jsonb, $6, $7::jsonb)`,
+    [tenant, memoria, resposta, JSON.stringify(chamadas), JSON.stringify(falas), raciocinio || null, JSON.stringify(rastro)],
   );
 }
 
@@ -843,7 +881,7 @@ export async function historicoChat(
   const memoria = (opts.memoria ?? "").trim();
   const limite = Math.min(Math.max(opts.limit ?? 40, 1), 200);
   const r = await q(
-    `SELECT id, papel, texto, ferramentas, falas, raciocinio, criado_em FROM chat_mensagens
+    `SELECT id, papel, texto, ferramentas, falas, raciocinio, rastro, criado_em FROM chat_mensagens
      WHERE tenant = $1 AND memoria = $2 ORDER BY id DESC LIMIT $3`,
     [tenant, memoria, limite],
   );
@@ -857,6 +895,7 @@ export async function historicoChat(
       ferramentas: m.ferramentas ?? [],
       falas: m.falas ?? [],
       raciocinio: m.raciocinio ?? "",
+      rastro: m.rastro ?? [],
       quando: m.criado_em,
     })),
   };

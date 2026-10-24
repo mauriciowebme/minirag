@@ -13,6 +13,8 @@ import {
   semear,
   type Estado,
   type EventoTransporte,
+  type FerramentaLinha,
+  type SegmentoRastro,
   type Transportar,
 } from "../lib/conversa";
 import type { ChatHistorico, Compactacao, GavetasResp, ProviderResp } from "../types";
@@ -68,6 +70,172 @@ function textoCompacto(c?: Compactacao | null): string | undefined {
   return `histórico compactado: ${partes.join(" · ")} · ${c.tokens}/${c.disponivel} tokens (${c.origem_janela})`;
 }
 
+/* ------------------------------------------------------------------ rastro do turno (v3.15) */
+
+const RASTRO_CHAVE = "minirag:rastro-expandido";
+
+/* As ferramentas internas do minirag têm nome em inglês no MCP; a linha do rastro fala como a
+   tela (o jeito do IA_GO, que tem mapa de rótulos). Ferramenta de servidor externo mantém o
+   nome que o servidor deu — inventar rótulo alheio seria mentira. */
+const ROTULOS_FERRAMENTA: Record<string, string> = {
+  health: "a saúde do servidor",
+  search: "a busca semântica",
+  ingest: "a ingestão",
+  ingest_status: "o estado da ingestão",
+  list_docs: "os documentos",
+  delete_doc: "apagar documento",
+  upload_file: "subir arquivo",
+  get_file: "baixar arquivo",
+  edit_doc: "editar documento",
+  rename_doc: "renomear documento",
+  archive_doc: "arquivar documento",
+  list_gavetas: "as gavetas",
+  create_gaveta: "criar gaveta",
+  delete_gaveta: "apagar gaveta",
+  chat: "o chat",
+  listar_usuarios: "os usuários",
+  criar_usuario: "criar usuário",
+  apagar_usuario: "apagar usuário",
+  esquecimento: "o esquecimento",
+  config_provider: "a configuração do modelo",
+};
+
+function rotuloFerramenta(s: { servidor: string; nome: string }): string {
+  const interno = s.servidor === "minirag" || s.servidor === "?";
+  if (interno && ROTULOS_FERRAMENTA[s.nome]) return ROTULOS_FERRAMENTA[s.nome];
+  return interno ? s.nome : `${s.servidor} · ${s.nome}`;
+}
+
+/** O rastro do turno: a trilha do que aconteceu, na ordem, dentro da mesma bolha — o jeito
+ *  do assistente do IA_GO. Narração em cinza, pensamento em roxo com o tempo dele, ferramenta
+ *  em azul com o tempo dela. Aberto enquanto o turno vive, recolhido quando acaba; a escolha
+ *  do usuário vale para todas as mensagens. A resposta final não entra aqui: ela é a bolha. */
+function Rastro({
+  segmentos,
+  vivo,
+  detalhes,
+  aberto,
+  onToggle,
+}: {
+  segmentos: SegmentoRastro[];
+  vivo: boolean;
+  detalhes: FerramentaLinha[];
+  aberto: boolean;
+  onToggle: (atual: boolean) => void;
+}) {
+  const corpo = useRef<HTMLDivElement | null>(null);
+  const colado = useRef(true);
+  const ultimo = segmentos[segmentos.length - 1];
+  const pensando = vivo && ultimo?.tipo === "pensamento" && ultimo.vivo === true;
+  const [ticoque, setTicoque] = useState(0);
+
+  useEffect(() => {
+    if (!pensando) return;
+    const t = setInterval(() => setTicoque((v) => v + 1), 1000);
+    return () => clearInterval(t);
+  }, [pensando]);
+
+  /* o pensamento cresce POR DENTRO do bloco, que tem altura própria com rolagem: enquanto
+     escreve, o bloco fica colado na última linha que chegou. Se você subir lá dentro para
+     reler, ele para de puxar e te deixa em paz. (o defeito que o dono mostrou no celular) */
+  useEffect(() => {
+    const p = corpo.current;
+    if (!p) {
+      colado.current = true;
+      return;
+    }
+    if (colado.current && pensando) p.scrollTop = p.scrollHeight;
+  });
+
+  const segundosVivos =
+    pensando && ultimo?.tipo === "pensamento" && ultimo.inicio
+      ? Math.max(0, Math.round((Date.now() - ultimo.inicio) / 1000))
+      : 0;
+  void ticoque; // é o que faz o relógio do bloco ao vivo andar
+  const segsMs = segmentos.reduce((a, s) => a + ("ms" in s ? s.ms : 0), 0);
+  const total = Math.max(1, Math.round((segsMs + segundosVivos * 1000) / 1000));
+  const posTools = segmentos.map((s, i) => (s.tipo === "ferramenta" ? i : -1)).filter((i) => i >= 0);
+
+  return (
+    <div className="rastro" data-testid="rastroBloco">
+      <button
+        type="button"
+        className="rastro-cab"
+        onClick={() => onToggle(aberto)}
+        aria-expanded={aberto}
+        data-testid="rastroCab"
+        title={aberto ? "recolher o rastro do turno" : "ver o rastro do turno"}
+      >
+        <span>
+          <b>Rastro do turno</b>
+          {` · ${segmentos.length} etapa${segmentos.length === 1 ? "" : "s"} · ${total}s`}
+        </span>
+        <span className="ml-auto">{aberto ? "▴" : "▾"}</span>
+      </button>
+
+      {aberto ? (
+        <div className="rastro-corpo" data-testid="rastroCorpo">
+          {segmentos.map((s, i) => {
+            if (s.tipo === "narracao") {
+              return (
+                <div className="rastro-linha rastro-narra" key={`n${i}`} data-testid="rastroNarracao">
+                  <i className="rastro-ponto" />
+                  <span>{s.texto}</span>
+                </div>
+              );
+            }
+            if (s.tipo === "ferramenta") {
+              const d = detalhes[posTools.indexOf(i)] as FerramentaLinha | undefined;
+              return (
+                <div className="rastro-linha rastro-tool" key={`f${i}`} data-testid="rastroFerramenta">
+                  <i className="rastro-ponto rastro-ponto-azul" />
+                  <details className="rastro-tool-detalhe">
+                    <summary>
+                      {`Consultando ${rotuloFerramenta(s)} · ${Math.max(1, Math.round(s.ms / 1000))}s `}
+                      <span className={s.ok ? "txt-ok" : "txt-erro"}>{s.ok ? "✓" : "✕"}</span>
+                      {d && (d.resumo || (d.args && Object.keys(d.args as object).length)) ? " · detalhe" : ""}
+                    </summary>
+                    {d ? (
+                      <div className="rastro-tool-info">
+                        {d.args && Object.keys(d.args as object).length ? (
+                          <div className="mono break-all">{JSON.stringify(d.args)}</div>
+                        ) : null}
+                        {d.resumo ? <div className="sub2 break-all">{d.resumo}</div> : null}
+                      </div>
+                    ) : null}
+                  </details>
+                </div>
+              );
+            }
+            const seg = Math.max(0, Math.round((s.ms || 0) / 1000));
+            return (
+              <div className="rastro-pensa" key={`p${i}`} data-testid="rastroPensamento">
+                <div className="rastro-linha rastro-pensa-cab">
+                  <i className="rastro-ponto rastro-ponto-roxo" />
+                  <span>{s.vivo ? `Pensando… ${segundosVivos}s` : s.ms > 0 ? `Pensou por ${seg}s` : "Pensou"}</span>
+                </div>
+                {s.texto ? (
+                  <div
+                    className="racio-txt rastro-pensa-txt"
+                    data-testid="rastroPensaTxt"
+                    ref={s.vivo ? corpo : undefined}
+                    onScroll={(e) => {
+                      const el = e.currentTarget;
+                      colado.current = el.scrollHeight - el.scrollTop - el.clientHeight < 40;
+                    }}
+                  >
+                    {s.texto}
+                  </div>
+                ) : null}
+              </div>
+            );
+          })}
+        </div>
+      ) : null}
+    </div>
+  );
+}
+
 /** Chat: conversa com o provider; as ferramentas vêm do MCP ligado e ficam registradas na mensagem.
  *  Você pode emendar perguntas: entram na fila e saem uma por vez, na ordem.
  *  v3.0: a conversa mora em `lib/conversa` (fora do React). Você troca de página no painel, vai
@@ -97,6 +265,17 @@ export function Chat({
   const colado = useRef(true);
   const [noFundo, setNoFundo] = useState(true);
   const [novoAbaixo, setNovoAbaixo] = useState(false);
+  /* v3.15: abrir/recolher o rastro é preferência do usuário e vale para TODAS as mensagens
+     (o jeito do IA_GO). Sem escolha ainda: aberto enquanto o turno vive, recolhido no fim. */
+  const [rastroPref, setRastroPref] = useState<"1" | "0" | null>(
+    () => (localStorage.getItem(RASTRO_CHAVE) === "1" ? "1" : localStorage.getItem(RASTRO_CHAVE) === "0" ? "0" : null),
+  );
+  const rastroAberto = (vivo: boolean) => (rastroPref === null ? vivo : rastroPref === "1");
+  function alternarRastro(atual: boolean) {
+    const novo = atual ? "0" : "1";
+    localStorage.setItem(RASTRO_CHAVE, novo);
+    setRastroPref(novo);
+  }
 
   const tenantParam = operador && escopo.tenant ? escopo.tenant : undefined;
   const chave = chaveConversa(escopo.tenant, memoria);
@@ -134,16 +313,20 @@ export function Chat({
   const carregarHistorico = useCallback(async () => {
     try {
       const h = await get<ChatHistorico>("/chat?" + qs({ memoria, ...(tenantParam ? { tenant: tenantParam } : {}) }));
-      const linhas: { id: string; papel: "user" | "assistant"; texto: string; ferramentas: (typeof h.mensagens)[number]["ferramentas"]; fala?: boolean; raciocinio?: string }[] = [];
+      const linhas: { id: string; papel: "user" | "assistant"; texto: string; ferramentas: (typeof h.mensagens)[number]["ferramentas"]; fala?: boolean; raciocinio?: string; rastro?: SegmentoRastro[] }[] = [];
       for (const m of h.mensagens) {
-        /* v3.8: as falas de caminho voltam como balões próprios na ordem em que foram escritas —
-           a conversa fica corrida também depois de recarregar a página */
-        for (const [k, ft] of (m.falas ?? []).entries())
+        const trilha = (m.rastro ?? []) as SegmentoRastro[];
+        /* v.8: as falas de caminho voltam como balões próprios na ordem em que foram escritas —
+           a conversa fica corrida também depois de recarregar a página. Quando a mensagem já tem
+           rastro (v3.15), a fala vive DENTRO da trilha: soltar balão duplicaria o mesmo texto. */
+        if (!trilha.length) for (const [k, ft] of (m.falas ?? []).entries())
           linhas.push({ id: `h${m.id}f${k}`, papel: "assistant", texto: String(ft), ferramentas: [], fala: true });
         /* v3.13: o raciocínio gravado volta recolhido — "Pensou" clicável, como no Open WebUI */
         linhas.push({
           id: `h${m.id}`, papel: m.papel as "user" | "assistant", texto: m.texto,
-          ferramentas: m.ferramentas ?? [], ...(m.raciocinio ? { raciocinio: String(m.raciocinio) } : {}),
+          ferramentas: m.ferramentas ?? [],
+          ...(trilha.length ? { rastro: trilha } : {}),
+          ...(m.raciocinio ? { raciocinio: String(m.raciocinio) } : {}),
         });
       }
       semear(chave, linhas);
@@ -417,7 +600,15 @@ export function Chat({
                 <>
                   {/* v3.13 — bloco de raciocínio no estilo do Open WebUI: "Pensando… Ns"
                       aberto enquanto pensa, "Pensou por Ns" recolhido quando a resposta começa */}
-                  {m.raciocinio ? (
+                  {m.rastro && m.rastro.length > 0 ? (
+                    <Rastro
+                      segmentos={m.rastro}
+                      vivo={Boolean(m.escrevendo)}
+                      detalhes={m.ferramentas}
+                      aberto={rastroAberto(Boolean(m.escrevendo))}
+                      onToggle={alternarRastro}
+                    />
+                  ) : m.raciocinio ? (
                     <details className="racio" open={Boolean(m.escrevendo) && !m.texto}>
                       <summary className="racio-cab">
                         <svg className="racio-ico" width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round" aria-hidden="true">
@@ -461,7 +652,7 @@ export function Chat({
                   )}
                 </>
               )}
-              {m.ferramentas.length > 0 && (
+              {m.ferramentas.length > 0 && !(m.rastro && m.rastro.length > 0) && (
                 <details className="fontes" open={false}>
                   <summary className="fonte">
                     ferramentas chamadas · {m.ferramentas.length} (

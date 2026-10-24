@@ -33,6 +33,15 @@ export type Transportar = (
 /** o que a tela desenrola em "ferramentas chamadas" (mesmo formato que o servidor devolve) */
 export type FerramentaLinha = { servidor: string; nome: string; ok: boolean; ms: number; args?: unknown; resumo?: string };
 
+/** v3.15 — segmento do RASTRO DO TURNO, na ordem em que aconteceu (o jeito do IA_GO):
+ *  o pensamento com o tempo dele, a fala de caminho e a ferramenta com o tempo dela.
+ *  `vivo`/`inicio` só existem na tela enquanto o passo está acontecendo: o servidor devolve
+ *  a trilha pronta, com o tempo medido, e ela substitui a montagem ao vivo no `fim`. */
+export type SegmentoRastro =
+  | { tipo: "pensamento"; texto: string; ms: number; vivo?: boolean; inicio?: number }
+  | { tipo: "narracao"; texto: string }
+  | { tipo: "ferramenta"; servidor: string; nome: string; ok: boolean; ms: number };
+
 export type Linha = {
   id: string;
   papel: "user" | "assistant";
@@ -48,6 +57,8 @@ export type Linha = {
   fala?: boolean;
   /** v3.13: o que o modelo pensou (mostrado recolhido, estilo Open WebUI) */
   raciocinio?: string;
+  /** v3.15: a trilha do turno (pensamento / fala / ferramenta) na ordem real */
+  rastro?: SegmentoRastro[];
   /** ms desde o começo do turno até o 1º pedaço de pensamento */
   raciocinioInicio?: number;
   /** ms desde o começo do turno até a resposta começar (fecha o "Pensou por Ns") */
@@ -69,6 +80,39 @@ export type Estado = {
 type Conversa = Estado & { ouvintes: Set<() => void> };
 
 let seq = 0;
+/* v3.15 — o rastro do turno (o jeito do IA_GO). As três ajudas abaixo montam a trilha ao
+ *  vivo, na ordem dos eventos; no `fim` a trilha do servidor (com tempo medido) substitui. */
+function fecharPensamento(b: Linha): void {
+  const r = b.rastro ?? [];
+  const ultimo = r.length ? r[r.length - 1] : null;
+  if (ultimo && ultimo.tipo === "pensamento" && ultimo.vivo) {
+    ultimo.vivo = false;
+    ultimo.ms = Math.max(0, Date.now() - (ultimo.inicio ?? Date.now()));
+  }
+}
+
+/** emenda o pedaço de raciocínio no bloco aberto da rodada, ou abre um bloco novo */
+function acrescentarPensamento(b: Linha, pedaco: string): void {
+  const r = (b.rastro ??= []);
+  const ultimo = r.length ? r[r.length - 1] : null;
+  if (ultimo && ultimo.tipo === "pensamento" && ultimo.vivo) ultimo.texto += pedaco;
+  else r.push({ tipo: "pensamento", texto: pedaco, ms: 0, vivo: true, inicio: Date.now() });
+}
+
+/** acrescenta uma linha fechada à trilha (fala de caminho ou ferramenta) */
+function acrescentar(b: Linha, s: SegmentoRastro): void {
+  (b.rastro ??= []).push(s);
+}
+
+/** a trilha autoritativa do servidor tem o tempo medido de cada passo; sem ela (servidor
+ *  mais velho), fica a montagem ao vivo da tela */
+function adotarRastro(b: Linha, r: Record<string, unknown>): boolean {
+  const trilha = Array.isArray(r.rastro) ? (r.rastro as SegmentoRastro[]) : [];
+  if (!trilha.length) return false;
+  b.rastro = trilha.map((s) => ({ ...s }));
+  return true;
+}
+
 const proximoId = () => `c${Date.now().toString(36)}-${++seq}`;
 
 const conversas = new Map<string, Conversa>();
@@ -200,23 +244,27 @@ export async function reativar(
           bruto += pedaco;
           bolha.texto = bruto;
           if (bolha.raciocinio && bolha.raciocinioFim === undefined) bolha.raciocinioFim = Math.max(0, Date.now() - c.inicio);
+          fecharPensamento(bolha);
         } // abaixo da base: o delta já está contido na fotografia — descarta (R2)
       } else if (e.tipo === "raciocinio") {
         bolha.raciocinio = (bolha.raciocinio ?? "") + String(e.texto ?? "");
         if (bolha.raciocinioInicio === undefined) bolha.raciocinioInicio = Math.max(0, Date.now() - c.inicio);
+        acrescentarPensamento(bolha, String(e.texto ?? ""));
       } else if (e.tipo === "fala") {
         const txt = String(e.texto ?? "");
         if (txt) {
           falou = true;
           if (bolha.raciocinio && bolha.raciocinioFim === undefined) bolha.raciocinioFim = Math.max(0, Date.now() - c.inicio);
-          const idx = c.msgs.findIndex((m) => m.id === vivoId);
-          c.msgs.splice(idx < 0 ? c.msgs.length : idx, 0, {
-            id: proximoId(), papel: "assistant", texto: txt, ferramentas: [], fala: true,
-          });
+          /* v3.15: a fala de caminho virou LINHA DO RASTRO (o jeito do IA_GO) — a trilha do
+             turno conta a história no mesmo lugar, em vez de soltar balão no meio da tela */
+          fecharPensamento(bolha);
+          acrescentar(bolha, { tipo: "narracao", texto: txt });
           bruto = ""; base = 0; bolha.texto = "";
         }
       } else if (e.tipo === "ferramenta") {
         if (bolha.raciocinio && bolha.raciocinioFim === undefined) bolha.raciocinioFim = Math.max(0, Date.now() - c.inicio);
+        fecharPensamento(bolha);
+        acrescentar(bolha, { tipo: "ferramenta", servidor: String(e.servidor), nome: String(e.nome), ok: Boolean(e.ok), ms: Number(e.ms) });
         bolha.ferramentas.push({ servidor: String(e.servidor), nome: String(e.nome), ok: Boolean(e.ok), ms: Number(e.ms), args: {}, resumo: "" });
       } else if (e.tipo === "fim") {
         caixa.dados = e.dados;
@@ -230,9 +278,13 @@ export async function reativar(
       const r = caixa.dados ?? saida ?? { resposta: bruto };
       bolha.texto = erro ? "não consegui responder: " + erro : String(r.resposta ?? bruto);
       if (!bolha.raciocinio && r.raciocinio) bolha.raciocinio = String(r.raciocinio);
-      /* servidor sem stream (ou reanexar de tarefa): as falas vêm no remanescente do `fim` */
+      fecharPensamento(bolha);
+      /* v3.15: a trilha do servidor manda (tem o tempo medido de cada passo) */
+      const trilhou = adotarRastro(bolha, r);
+      /* servidor sem stream (ou reanexar de tarefa): as falas vêm no remanescente do `fim`
+         e ainda viram balão quando não existe trilha que as hospede */
       const fl = Array.isArray(r.falas) ? (r.falas as string[]) : [];
-      if (fl.length && !falou) {
+      if (fl.length && !falou && !trilhou) {
         const idx = c.msgs.findIndex((m) => m.id === vivoId);
         fl.forEach((txt, k) =>
           c.msgs.splice(idx < 0 ? c.msgs.length : idx + k, 0, {
@@ -292,9 +344,11 @@ async function bombeia(chave: string, memoria: string, tenant: string | undefine
         bruto += String(e.texto ?? "");
         bolha.texto = bruto;
         if (bolha.raciocinio && bolha.raciocinioFim === undefined) bolha.raciocinioFim = Math.max(0, Date.now() - c.inicio);
+        fecharPensamento(bolha);
       } else if (e.tipo === "raciocinio") {
         bolha.raciocinio = (bolha.raciocinio ?? "") + String(e.texto ?? "");
         if (bolha.raciocinioInicio === undefined) bolha.raciocinioInicio = Math.max(0, Date.now() - c.inicio);
+        acrescentarPensamento(bolha, String(e.texto ?? ""));
       } else if (e.tipo === "fala") {
         /* a rodada chamou ferramenta e falou no caminho: o texto deixa de ser rascunho
            e vira BALÃO PRÓPRIO, cravado antes da bolha viva (conversa corrida, v3.8) */
@@ -302,10 +356,9 @@ async function bombeia(chave: string, memoria: string, tenant: string | undefine
         if (txt) {
           falou = true;
           if (bolha.raciocinio && bolha.raciocinioFim === undefined) bolha.raciocinioFim = Math.max(0, Date.now() - c.inicio);
-          const idx = c.msgs.findIndex((m) => m.id === vivoId);
-          c.msgs.splice(idx < 0 ? c.msgs.length : idx, 0, {
-            id: proximoId(), papel: "assistant", texto: txt, ferramentas: [], fala: true,
-          });
+          /* v3.15: a fala de caminho virou LINHA DO RASTRO (o jeito do IA_GO) */
+          fecharPensamento(bolha);
+          acrescentar(bolha, { tipo: "narracao", texto: txt });
           bruto = "";
           bolha.texto = "";
         }
@@ -314,6 +367,8 @@ async function bombeia(chave: string, memoria: string, tenant: string | undefine
         bolha.texto = "";
       } else if (e.tipo === "ferramenta") {
         if (bolha.raciocinio && bolha.raciocinioFim === undefined) bolha.raciocinioFim = Math.max(0, Date.now() - c.inicio);
+        fecharPensamento(bolha);
+        acrescentar(bolha, { tipo: "ferramenta", servidor: String(e.servidor), nome: String(e.nome), ok: Boolean(e.ok), ms: Number(e.ms) });
         bolha.ferramentas.push({ servidor: String(e.servidor), nome: String(e.nome), ok: Boolean(e.ok), ms: Number(e.ms), args: {}, resumo: "" });
       } else if (e.tipo === "fim") {
         caixa.dados = e.dados;
@@ -327,9 +382,13 @@ async function bombeia(chave: string, memoria: string, tenant: string | undefine
       const r = caixa.dados ?? saida ?? { resposta: bruto, ferramentas: [] };
       bolha.texto = erro ? "não consegui responder: " + erro : String(r.resposta ?? bruto);
       if (!bolha.raciocinio && r.raciocinio) bolha.raciocinio = String(r.raciocinio);
-      /* servidor sem stream (ou reanexar de tarefa): as falas vêm no remanescente do `fim` */
+      fecharPensamento(bolha);
+      /* v3.15: a trilha do servidor manda (tem o tempo medido de cada passo) */
+      const trilhou = adotarRastro(bolha, r);
+      /* servidor sem stream (ou reanexar de tarefa): as falas vêm no remanescente do `fim`
+         e ainda viram balão quando não existe trilha que as hospede */
       const fl = Array.isArray(r.falas) ? (r.falas as string[]) : [];
-      if (fl.length && !falou) {
+      if (fl.length && !falou && !trilhou) {
         const idx = c.msgs.findIndex((m) => m.id === vivoId);
         fl.forEach((txt, k) =>
           c.msgs.splice(idx < 0 ? c.msgs.length : idx + k, 0, {

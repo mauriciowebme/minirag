@@ -16,6 +16,7 @@ export default {
         txt3: "#7d8899",
         verde: { DEFAULT: "#3fb950", claro: "#4ccd60" },
         azul: "#6cb6ff",
+        roxo: "#a371f7", // v3.15: o pensamento do rastro (mesma cor do IA_GO)
         amarelo: "#d29922",
         vermelho: { DEFAULT: "#f85149", escuro: "#06210c" },
       },

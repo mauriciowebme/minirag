@@ -222,6 +222,14 @@ export type ProviderResp = {
   atualizado_em: string | null;
 };
 
+/** v3.15 — o rastro do turno como chega do servidor: pensamento com o tempo dele, fala de
+ *  caminho, ferramenta com o tempo dela, na ordem em que aconteceu (o jeito do IA_GO).
+ *  A tela tem a mesma forma em `lib/conversa` (com a marca de "ao vivo"). */
+export type RastroServidor =
+  | { tipo: "pensamento"; texto: string; ms: number }
+  | { tipo: "narracao"; texto: string }
+  | { tipo: "ferramenta"; servidor: string; nome: string; ok: boolean; ms: number };
+
 /** O que o Chat chamou de ferramenta (registrado na tela e no histórico). */
 export type ChamadaFerramenta = {
   servidor: string;
@@ -271,6 +279,8 @@ export type ChatHistorico = {
     falas?: string[];
     /** v3.13: raciocínio do modelo (bloco "Pensou" ao reabrir a conversa) */
     raciocinio?: string;
+    /** v3.15: a trilha do turno, na ordem real */
+    rastro?: RastroServidor[];
     quando: string;
   }[];
 };
