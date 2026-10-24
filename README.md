@@ -22,6 +22,10 @@ parecidos com a pergunta, com uma nota de 0 a 1.
 
 ---
 ---
+## v3.16.4 (24/10) — A janela abre sempre nova, e no tamanho compacto
+- **O que você vê:** ao abrir o cliente, a janela do painel é menor (700×560, do jeito que ficou aprovado no teste) e **nunca mais abre preta**.
+- **O que acontecia:** reabrir o cliente entrava no MESMO processo de janela da vez anterior — se ele já estava com o desenho quebrado (tela preta), a janela nova nascia dentro do quebrado e herda o preto. Agora o cliente descarta o processo de janela antigo do seu próprio perfil antes de abrir a nova; janelas normais do seu navegador não são tocadas.
+
 ## v3.16.3 (24/10) — Uma janela só: o cliente velho fecha a própria tela ao se trocar
 - **O que você vê:** depois de uma atualização automática, continua existindo **uma** janela do cliente — antes ficava aberta também a tela velha, congelada, do processo que saiu.
 - **O que acontecia:** a janela é um processo separado do programa; quando o programa antigo saía para dar lugar ao novo, a tela antiga ficava viva na barra.
