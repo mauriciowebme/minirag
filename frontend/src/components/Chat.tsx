@@ -91,6 +91,7 @@ export function Chat({
   /* rolagem respeitando quem manda: a tela SÓ desce sozinha se você já estiver no fim.
      (antes descia a cada tique do cronômetro e não deixava ler a resposta nem digitar) */
   const area = useRef<HTMLDivElement>(null);
+  const campoRef = useRef<HTMLTextAreaElement>(null);
   const colado = useRef(true);
   const [noFundo, setNoFundo] = useState(true);
   const [novoAbaixo, setNovoAbaixo] = useState(false);
@@ -246,10 +247,43 @@ export function Chat({
     [],
   );
 
+  /* a pílula de escrita acompanha o texto digitado (até ~5 linhas) em vez de esconder o
+     restante atrás de um campo de altura fixa */
+  function ajustarAltura(el: HTMLTextAreaElement) {
+    el.style.height = "auto";
+    el.style.height = `${Math.min(el.scrollHeight, 150)}px`;
+  }
+
+  /* copiar a resposta: área de transferência do navegador com reserva para http sem
+     suporte (o painel local do cliente roda em http://127.0.0.1, onde o clipboard pode faltar) */
+  async function copiarResposta(texto: string) {
+    try {
+      if (navigator.clipboard?.writeText) {
+        await navigator.clipboard.writeText(texto);
+      } else {
+        const sujo = document.createElement("textarea");
+        sujo.value = texto;
+        sujo.setAttribute("readonly", "");
+        sujo.style.cssText = "position:fixed;top:-1000px;opacity:0";
+        document.body.appendChild(sujo);
+        sujo.select();
+        document.execCommand("copy");
+        sujo.remove();
+      }
+      toast("resposta copiada");
+    } catch {
+      toast("o navegador nao deixou copiar — selecione o texto e copie");
+    }
+  }
+
   function enviar() {
     const texto = pergunta.trim();
     if (!texto) return;
     setPergunta("");
+    if (campoRef.current) {
+      campoRef.current.style.height = "auto";
+      campoRef.current.focus();
+    }
     enviarNaConversa(chave, texto, memoria, tenantParam, transportar);
   }
 
@@ -275,27 +309,48 @@ export function Chat({
   const rodando = snap.rodando;
 
   return (
-    <section className="flex flex-col gap-3" id="telaChat">
-      <div className="barra">
-        <h2>
-          Chat <span className="sub2">— conversa com o modelo e as ferramentas do MCP</span>
-        </h2>
-        {rodando && (
-          <span className="sub2" id="chatSegundoPlano" title="a tarefa continua mesmo se você for ver outra página">
-            · trabalhando em segundo plano
-          </span>
-        )}
-        <span className="flex-1" />
-        <label className="sub2 flex items-center gap-2">
-          gaveta
-          <select className="campo !h-8 !w-auto" value={memoria} onChange={(e) => setMemoria(e.target.value)}>
+    <section className="chat-tela flex flex-col gap-3" id="telaChat">
+      {/* v3.14 — modo celular: a barra velha botava título, subtítulo, gaveta e (embaixo)
+          "nova conversa" + campo + "enviar" na MESMA linha; num celular de 390px sobravam
+          ~120px para escrever. O cabeçalho agora só tem o que age: a pílula do modelo com a
+          gaveta dentro dela e a nova conversa (virou ícone no celular). O subtítulo saiu —
+          o topo do app já diz "Chat". */}
+      <div className="chat-topo">
+        <label className="chat-pilula" title="modelo em uso e gaveta de memoria desta conversa">
+          <span className="chat-pilula-modelo mono">{provider?.modelo ?? "sem modelo"}</span>
+          <select
+            id="chatGaveta"
+            className="chat-pilula-gaveta"
+            value={memoria}
+            onChange={(e) => setMemoria(e.target.value)}
+            aria-label="gaveta"
+          >
             {gavetas.map((g) => (
               <option key={g} value={g}>
                 {g || "padrão"}
               </option>
             ))}
           </select>
+          <span className="chat-pilula-seta" aria-hidden="true">▾</span>
         </label>
+        {rodando && (
+          <span className="sub2" id="chatSegundoPlano" title="a tarefa continua mesmo se você for ver outra página">
+            · trabalhando em segundo plano
+          </span>
+        )}
+        <span className="flex-1" />
+        <button
+          id="chatNovaConversa"
+          className="chat-acao"
+          title="apagar esta conversa e recomeçar do zero"
+          onClick={() => void limpar()}
+        >
+          <svg className="chat-ico" width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round" aria-hidden="true">
+            <path d="M3 12a9 9 0 1 0 3-6.7L3 8" />
+            <path d="M3 3v5h5" />
+          </svg>
+          <span className="chat-acao-rotulo">nova conversa</span>
+        </button>
       </div>
 
       {semProvider && (
@@ -312,10 +367,11 @@ export function Chat({
         </div>
       )}
 
-      <div className="cartao relative flex h-[68dvh] min-h-[380px] flex-col gap-0 p-0">
+      <div className="chat-caixa relative flex flex-col gap-0 p-0">
         {/* min-h-0 e o que falta para a caixa rolar por dentro: sem isso ela crescia
             e quem andava era a pagina inteira */}
-        <div className="min-h-0 flex-1 overflow-auto p-4" id="chatMsgs" ref={area} onScroll={medirRolagem}>
+        <div className="chat-msgs min-h-0 flex-1 overflow-auto" id="chatMsgs" ref={area} onScroll={medirRolagem}>
+          <div className="chat-coluna">
           {msgs.length === 0 && !rodando && (
             <p className="dica">
               {semFerramenta
@@ -332,7 +388,9 @@ export function Chat({
                   {m.raciocinio ? (
                     <details className="racio" open={Boolean(m.escrevendo) && !m.texto}>
                       <summary className="racio-cab">
-                        <span className="racio-ico">🧠</span>
+                        <svg className="racio-ico" width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round" aria-hidden="true">
+                          <path d="M9 18h6M10 21h4M12 3a6 6 0 0 0-3.5 10.9V16h7v-2.1A6 6 0 0 0 12 3z" />
+                        </svg>
                         {m.escrevendo && !m.texto
                           ? `Pensando… ${espera}s`
                           : `Pensou${m.raciocinioInicio !== undefined && m.raciocinioFim !== undefined
@@ -381,6 +439,23 @@ export function Chat({
                   ))}
                 </details>
               )}
+              {/* v3.14 — ações sobre a resposta pronta: só o que age. "refazer" ficou de fora
+                  porque regenerar exige mexer no histórico no servidor (ainda não existe). */}
+              {m.papel === "assistant" && !m.escrevendo && m.texto ? (
+                <div className="chat-acoes">
+                  <button
+                    className="chat-acao-icone"
+                    title="copiar a resposta"
+                    aria-label="copiar a resposta"
+                    onClick={() => void copiarResposta(m.texto)}
+                  >
+                    <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round" aria-hidden="true">
+                      <rect x="9" y="9" width="11" height="11" rx="2" />
+                      <path d="M15 5H6a2 2 0 0 0-2 2v9" />
+                    </svg>
+                  </button>
+                </div>
+              ) : null}
               {m.aviso && <div className="sub2 mt-1">aviso: {m.aviso}</div>}
               {m.compacto && <div className="sub2 mt-1">{m.compacto}</div>}
             </div>
@@ -391,11 +466,12 @@ export function Chat({
               {naFila > 0 && <span className="sub2"> · {naFila} na fila</span>}
             </div>
           )}
+          </div>
           {/* botão para descer: aparece só quando você subiu para ler algo */}
           {!noFundo && (
             <button
               id="chatIrAoFim"
-              className="btn btn-mini absolute bottom-[76px] left-1/2 z-10 -translate-x-1/2 rounded-full px-3 shadow-md"
+              className="btn btn-mini absolute bottom-[116px] left-1/2 z-10 -translate-x-1/2 rounded-full px-3 shadow-md"
               title="rolar até o fim da conversa"
               onClick={irParaOFim}
             >
@@ -404,42 +480,76 @@ export function Chat({
             </button>
           )}
         </div>
-        <div className="flex gap-2 border-t border-borda p-3">
-          <button
-            id="chatNovaConversa"
-            className="btn btn-sutil shrink-0"
-            title="apagar esta conversa e recomeçar do zero"
-            onClick={() => void limpar()}
-          >
-            nova conversa
-          </button>
-          <input
-            id="chatPergunta"
-            className="campo flex-1"
-            placeholder={rodando ? "emenda a próxima pergunta… (vai para a fila)" : "pergunte qualquer coisa…"}
-            value={pergunta}
-            onChange={(e) => setPergunta(e.target.value)}
-            onKeyDown={(e) => {
-              if (e.key === "Enter" && !e.shiftKey) {
-                e.preventDefault();
-                enviar();
-              }
+        {/* v3.14 — pílula de escrita com altura própria (cresce até 5 linhas) e enviar
+            redondo lá dentro; no celular a pílula ocupa a largura toda, então o campo
+            não divide mais linha com dois botões de texto. Microfone e "+" ficaram fora:
+            no minirag nenhum dos dois teria o que fazer, e controle mudo não vai pra tela. */}
+        <div className="chat-piso">
+          <div
+            className="chat-composer"
+            onClick={(e) => {
+              /* no celular o alvo de toque e a pilula inteira (62px), nao a linha de 34px do campo */
+              if (e.target === e.currentTarget) campoRef.current?.focus();
             }}
-          />
-          <button id="chatEnviar" className="btn btn-primario" disabled={!pergunta.trim()} onClick={enviar}>
-            {rodando ? "para a fila" : "enviar"}
-          </button>
+          >
+            <textarea
+              id="chatPergunta"
+              ref={campoRef}
+              className="chat-campo"
+              rows={1}
+              placeholder={rodando ? "emenda a próxima pergunta… (vai para a fila)" : "pergunte qualquer coisa…"}
+              value={pergunta}
+              onChange={(e) => {
+                setPergunta(e.target.value);
+                ajustarAltura(e.currentTarget);
+              }}
+              onKeyDown={(e) => {
+                if (e.key === "Enter" && !e.shiftKey) {
+                  e.preventDefault();
+                  enviar();
+                }
+              }}
+            />
+            <button
+              id="chatEnviar"
+              className="chat-enviar"
+              disabled={!pergunta.trim()}
+              title={rodando ? "colocar na fila" : "enviar"}
+              onClick={enviar}
+            >
+              <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.2" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true">
+                <path d="M12 19V5" />
+                <path d="M5 12l7-7 7 7" />
+              </svg>
+            </button>
+          </div>
+          <p className="chat-dica">
+            Enter envia · Shift+Enter quebra linha{rodando ? " · a próxima vai para a fila" : ""}
+          </p>
         </div>
       </div>
 
       {provider && provider.configurado && (
-        <p className="dica m-0" id="chatRodape">
+        /* v3.14 — o parágrafo técnico (8 informações) cortava na borda do celular e não
+           cabia em parte alguma: vira uma linha com o essencial e abre ao toque. O texto
+           completo continua aqui dentro, só que dobrado. */
+        <details className="chat-rodape" id="chatRodape">
+        <summary className="chat-rodape-cab">
+          <span className="chat-rodape-modelo mono">{provider.modelo}</span>
+          <span className="chat-rodape-fixo">· {provider.origem === "global" ? "global" : "seu"}</span>
+          {provider.chave_mascarada ? (
+            <span className="chat-rodape-fixo chat-rodape-chave">· chave {provider.chave_mascarada}</span>
+          ) : null}
+          <span className="chat-rodape-fixo chat-rodape-abrir">› ver detalhes</span>
+        </summary>
+        <p className="dica m-0">
           modelo <span className="mono">{provider.modelo}</span> · provider {provider.origem === "global" ? "global" : "seu"}
           {provider.chave_mascarada ? ` · chave ${provider.chave_mascarada}` : ""} ·{" "}
           {provider.tem_system_prompt ? "com instruções do modelo" : "sem instruções (conversa pura)"} ·{" "}
           {provider.mcp_interno ? "MCP do minirag ligado" : "MCP do minirag desligado"} · até {provider.max_rodadas} rodada(s) · memória{" "}
           {provider.memoria_turnos} · janela {provider.janela_efetiva.toLocaleString("pt-BR")} tokens ({provider.origem_janela})
         </p>
+        </details>
       )}
     </section>
   );

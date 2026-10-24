@@ -362,13 +362,16 @@
 
   /* chat */
   .msg {
-    @apply mb-3 max-w-[80%] whitespace-pre-wrap rounded-[12px] px-3 py-2.5 text-[14px] leading-relaxed;
+    @apply mb-3 whitespace-pre-wrap text-[14.5px] leading-relaxed;
   }
   .msg-eu {
-    @apply ml-auto border border-bordaforte bg-sup3;
+    @apply ml-auto max-w-[min(560px,88%)] rounded-[18px] rounded-br-[7px] border border-bordaforte
+      bg-sup3 px-3.5 py-2.5;
   }
+  /* v3.14 — a resposta do assistente é texto solto na coluna (sem caixa): com resposta
+     comprida, a borda virava uma moldura de página inteira no celular */
   .msg-ia {
-    @apply border border-borda bg-sup2;
+    @apply max-w-none text-txt;
   }
   .fontes {
     @apply mt-2 flex flex-col gap-1;
@@ -376,10 +379,11 @@
   /* v3.13 — bloco de raciocínio (estilo Open WebUI): cabeçalho discreto, texto apagado,
      aberto enquanto pensa e recolhido assim que a resposta começa */
   .racio {
-    @apply mb-2 rounded-md border border-borda bg-sup3/40;
+    @apply mb-1.5;
   }
   .racio-cab {
-    @apply flex cursor-pointer select-none items-center gap-1.5 px-2 py-1 text-[11.5px] text-txt3;
+    @apply inline-flex cursor-pointer select-none items-center gap-1.5 rounded-full
+      border border-borda px-2.5 py-1 text-[11.5px] text-txt3;
   }
   .racio-cab::marker {
     content: "";
@@ -388,10 +392,13 @@
     display: none;
   }
   .racio-cab:hover {
-    @apply text-txt2;
+    @apply border-bordaforte text-txt2;
   }
   .racio[open] .racio-cab {
-    @apply border-b border-borda text-txt2;
+    @apply rounded-b-none rounded-t-[14px] border-b-0 bg-sup3/60 text-txt2;
+  }
+  .racio[open] .racio-txt {
+    @apply rounded-b-[14px] border border-borda bg-sup3/40;
   }
   .racio-ico {
     @apply text-[11px];
@@ -536,5 +543,164 @@
 @media (max-width: 560px) {
   .grade-kpi {
     grid-template-columns: repeat(2, minmax(0, 1fr));
+  }
+}
+
+/* ============================================================ v3.14 — chat em tela de celular
+   O que doia: campo de ~120px (dois botões de texto dividiam a linha), rodapé técnico
+   cortado na borda e subtítulo encostando no canto. Tudo abaixo é do chat; as classes
+   velhas (.cartao/.barra/.campo/.btn) seguem valendo para as outras telas. */
+@layer components {
+  .chat-topo {
+    @apply mb-1.5 flex flex-wrap items-center gap-2;
+  }
+  /* pílula do topo: o modelo em uso + a gaveta dentro dela (era um <select> solto rotulado
+     "gaveta", que no celular empurrava tudo para baixo) */
+  .chat-pilula {
+    @apply inline-flex h-9 max-w-full cursor-pointer items-center gap-1 rounded-full
+      border border-borda bg-sup2 pl-3 pr-2 hover:border-bordaforte;
+  }
+  .chat-pilula-modelo {
+    @apply max-w-[200px] truncate text-[12.5px] text-txt;
+  }
+  .chat-pilula-gaveta {
+    @apply h-full max-w-[104px] cursor-pointer appearance-none border-0 bg-transparent
+      text-right text-[12.5px] text-txt3 focus:outline-none;
+  }
+  .chat-pilula-seta {
+    @apply text-[10px] text-txt3;
+  }
+  .chat-acao {
+    @apply inline-flex h-9 cursor-pointer items-center gap-1.5 rounded-[11px] border
+      border-borda bg-transparent px-3 text-[13px] text-txt2 hover:bg-sup2 hover:text-txt;
+  }
+  /* a conversa não mora mais dentro de um .cartao de altura fixa */
+  .chat-tela {
+    @apply min-h-0 flex-1;
+  }
+  /* altura honesta: a caixa é o que sobra da janela depois do cabeçalho do app, da
+     pílula do topo, do pé e do rodapé — no celular o campo nunca passa do fim da tela */
+  .chat-caixa {
+    @apply flex min-h-0 flex-1 flex-col overflow-hidden rounded-[18px] border border-borda bg-sup;
+  }
+  .chat-msgs {
+    @apply px-4 pt-4 pb-2;
+  }
+  .chat-coluna {
+    @apply mx-auto;
+    max-width: 780px;
+  }
+  .chat-piso {
+    @apply border-t border-borda px-3.5 pt-2.5;
+    padding-bottom: calc(10px + env(safe-area-inset-bottom));
+  }
+  /* barra de gesto do navegador no celular: o pé do app não cola na borda da tela */
+  .chat-janela {
+    padding-bottom: env(safe-area-inset-bottom);
+  }
+  .chat-composer {
+    @apply mx-auto flex items-end gap-2 rounded-[26px] border border-bordaforte
+      bg-sup2 py-2 pl-4 pr-2;
+    max-width: 780px;
+  }
+  .chat-composer:focus-within {
+    border-color: rgba(108, 182, 255, 0.5);
+  }
+  .chat-campo {
+    @apply flex-1 resize-none border-0 bg-transparent text-[14.5px] leading-[1.5]
+      text-txt focus:outline-none;
+    min-width: 0;
+    max-height: 150px;
+    padding: 6px 0;
+  }
+  .chat-campo::placeholder {
+    @apply text-txt3;
+  }
+  .chat-enviar {
+    @apply grid h-[42px] w-[42px] flex-none cursor-pointer place-items-center rounded-full
+      border-0 bg-verde text-vermelho-escuro hover:bg-verde-claro;
+  }
+  .chat-enviar:disabled {
+    @apply cursor-default bg-sup3 text-txt3;
+  }
+  .chat-dica {
+    @apply mx-auto mt-1.5 max-w-[780px] pl-1 text-[11px] text-txt3;
+  }
+  .chat-acoes {
+    @apply mt-1 flex items-center gap-1;
+  }
+  .chat-acao-icone {
+    @apply grid h-8 w-8 cursor-pointer place-items-center rounded-lg border-0 bg-transparent
+      text-txt3 hover:bg-sup2 hover:text-txt;
+  }
+  /* rodapé técnico: uma linha com o essencial, o resto abre ao toque */
+  .chat-rodape {
+    @apply mx-auto w-full max-w-[780px] border-t border-borda pt-1.5;
+  }
+  .chat-rodape-cab {
+    @apply flex cursor-pointer items-center gap-1.5 overflow-hidden whitespace-nowrap
+      text-[11px] text-txt3;
+  }
+  /* no celular a linha é curta: o nome do modelo é quem cede espaço (com reticências),
+     nunca o "ver detalhes" — antes o sumário inteiro era nowrap e o último pedaço saía da tela */
+  .chat-rodape-modelo {
+    @apply min-w-0 flex-1 truncate;
+  }
+  .chat-rodape-fixo {
+    @apply flex-none;
+  }
+  .chat-rodape-cab::-webkit-details-marker {
+    display: none;
+  }
+  .chat-rodape-cab:hover {
+    @apply text-txt2;
+  }
+  .chat-rodape[open] .chat-rodape-abrir {
+    @apply hidden;
+  }
+}
+
+@media (max-width: 720px) {
+  /* dedo: 44px em tudo que se toca aqui dentro (a regra velha só alcançava .btn/.campo,
+     que o chat novo não usa mais) */
+  .chat-pilula,
+  .chat-acao {
+    min-height: 44px;
+  }
+  .chat-enviar {
+    width: 44px;
+    height: 44px;
+  }
+  .chat-acao-icone {
+    width: 44px;
+    height: 44px;
+  }
+  /* no celular o rótulo sai, o ícone fica — a linha do topo é só pílula + nova conversa */
+  .chat-acao-rotulo {
+    @apply hidden;
+  }
+  .chat-acao {
+    @apply px-0;
+    width: 44px;
+    justify-content: center;
+  }
+  .chat-dica {
+    @apply hidden;
+  }
+  /* máscara de chave é detalhe de tela larga: no celular cabe só o essencial */
+  .chat-rodape-chave {
+    @apply hidden;
+  }
+  .chat-caixa {
+    @apply rounded-[14px];
+  }
+  .chat-msgs {
+    @apply px-3 pt-3 pb-1;
+  }
+  .chat-piso {
+    @apply px-2 pt-2;
+  }
+  .chat-composer {
+    @apply rounded-[22px] pl-3;
   }
 }

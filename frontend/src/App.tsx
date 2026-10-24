@@ -119,7 +119,7 @@ export default function App() {
 
   if (!sessao.logado) {
     return (
-      <div className="min-h-screen">
+      <div className="min-h-[100dvh]">
         <Login sessao={sessao} />
         {sessao.restaurando && <p className="mt-4 text-center text-[13px] text-txt3">restaurando sessão…</p>}
       </div>
@@ -168,7 +168,7 @@ export default function App() {
   );
 
   return (
-    <div className="flex min-h-screen">
+    <div className="flex min-h-[100dvh]">
       <div className="sticky top-0 hidden h-screen lg:block">{lateral}</div>
 
       {menuAberto && (
@@ -178,7 +178,9 @@ export default function App() {
         </div>
       )}
 
-      <div className="flex min-w-0 flex-1 flex-col">
+      {/* v3.14 — no Chat, o painel é a janela inteira: sem isso a conversa tinha altura
+          chutada no css e o campo de escrita encostava (e às vezes passava) do fim da tela */}
+      <div className={"flex min-w-0 flex-1 flex-col" + (vista === "chat" ? " chat-janela h-[100dvh]" : "")}>
         <header className="sticky top-0 z-20 flex items-center gap-3 border-b border-borda bg-bg/95 px-4 py-2.5 backdrop-blur sm:px-6">
           <button className="btn btn-sutil btn-mini lg:hidden" aria-label="abrir menu" onClick={() => setMenuAberto(true)}>
             ☰
@@ -190,12 +192,12 @@ export default function App() {
           <span className="flex-1" />
           {operador && tenant && (
             <span className="chip" title="usuário em foco">
-              👤 {tenant}
+              <span aria-hidden="true">◉</span> {tenant}
             </span>
           )}
         </header>
 
-        <main className="mx-auto w-full max-w-[1180px] px-4 pb-12 pt-5 sm:px-6">
+        <main className={"mx-auto w-full max-w-[1180px] px-4 pt-5 sm:px-6 " + (vista === "chat" ? "flex min-h-0 flex-1 flex-col pb-2" : "pb-12")}>
           {vista === "painel" && <Painel tenant={tenant} operador={operador} />}
 
           {vista === "gavetas" && (
