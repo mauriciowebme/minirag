@@ -21,6 +21,15 @@ parecidos com a pergunta, com uma nota de 0 a 1.
 ---
 
 ---
+---
+## v3.16.0 (24/10) — A tela do chat virou só conversa; o resto foi para a lateral
+
+- **O que doía**: para ler uma resposta, competiam na tela o cabeçalho ("Chat" + chip ◉ que repetia o "foco" da lateral), a pílula de topo (modelo + gaveta), o botão de reset no canto, a dica "Enter envia", a linha "› ver detalhes" do provider e o rodapé técnico (versão, atalhos de outro lugar, frase de marketing). O pedido do dono: "tira as coisas que estão na tela" — aprovado em preview (variante A + botão de conversa nova no pé, lado oposto ao enviar).
+- **Como ficou**: a **lateral** ganhou o bloco *conversa* (gaveta seletora + modelo em uso + "› ver detalhes" com provider/chave/MCP — a única fonte dessas info para o usuário comum) e passou a ser a **casa única da versão**. A **tela do chat**: sem cabeçalho, sem pílula, sem rodapé; a conversa começa no topo. No **pé**, uma linha: `[nova conversa] [campo…………] [↑]` — a ação de recomeçar mudou de lado e desceu para perto do dedo (checklist G1T03, de 21/10, já pedia "nova conversa no pé, nada de ação no topo"). A dica de teclado vive no título (hover) do campo; "trabalhando em segundo plano" desceu para o piso.
+- **No celular**: a linha do topo só existe como porta ☰; "nova conversa" vira ícone de **44×44** ao lado do campo; gaveta/modelo moram dentro da gaveta ☰. Sem overflow horizontal (medido a 390).
+- **Portão**: `tsc` dos dois lados + `vite build` sem erro; suíte completa no ambiente de testes (exit 0); telas medidas em 1440 e 390 antes da publicação.
+
+---
 ## v3.15.1 (24/10) — A caixa de digitação deixou de ser cápsula gorda
 
 - **O que doía**: o campo de escrita media **60 px de altura para uma linha de 14,5 px** (o texto ocupava 24% da caixa), com **raio 26 px** — metade exata da altura, então virava cápsula fechada nas duas pontas — e botão circular de **42 px** lá dentro, brigando com o texto por peso visual. Foi o Mauricio que apontou no print ("desproporcional, feio"); medi no ambiente de testes em vez de chutar.
