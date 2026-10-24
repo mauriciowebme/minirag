@@ -17,7 +17,7 @@ import {
   type SegmentoRastro,
   type Transportar,
 } from "../lib/conversa";
-import type { ChatHistorico, Compactacao, GavetasResp, ProviderResp } from "../types";
+import type { ChatHistorico, Compactacao, ProviderResp } from "../types";
 
 /** linha de status da tarefa viva (GET /chat/tarefas e GET /chat/tarefa/:id) */
 type TarefaStatus = { id: string; pergunta?: string; status: string; parcial: string; ferramentas?: unknown[]; aviso?: string | null };
@@ -244,19 +244,25 @@ function Rastro({
 export function Chat({
   escopo,
   operador,
+  provider,
+  onProviderConfirmado,
   onIrConfig,
   onAbrirMenu,
 }: {
   escopo: { tenant: string; memoria: string };
   operador: boolean;
+  /** v3.16: o provider (e o modelo em uso) agora é buscado pelo App e mostrado na
+   * lateral; o Chat recebe por props — a pílula do topo saiu de cena. */
+  provider: ProviderResp | null;
+  /** uma resposta que chegou é prova de que o provider está vivo mesmo se o fetch
+   * pegou "não configurado" (o dono ligou o provider depois do login). */
+  onProviderConfirmado: () => void;
   onIrConfig: () => void;
   onAbrirMenu: () => void;
 }) {
   const { toast } = useToast();
-  const [gavetas, setGavetas] = useState<string[]>([""]);
   const [memoria, setMemoria] = useState(escopo.memoria);
   const [pergunta, setPergunta] = useState("");
-  const [provider, setProvider] = useState<ProviderResp | null>(null);
   const [espera, setEspera] = useState(0);
   /* rolagem respeitando quem manda: a tela SÓ desce sozinha se você já estiver no fim.
      (antes descia a cada tique do cronômetro e não deixava ler a resposta nem digitar) */
@@ -292,23 +298,8 @@ export function Chat({
     return assinar(chave, gritar);
   }, [chave]);
 
-  useEffect(() => {
-    void (async () => {
-      try {
-        const g = await get<GavetasResp>("/gavetas" + (escopo.tenant ? "?" + qs({ tenant: escopo.tenant }) : ""));
-        const nomes = [...new Set(g.gavetas.map((x) => x.memoria))];
-        setGavetas(nomes.length ? nomes : [""]);
-      } catch {
-        /* segue com a gaveta padrão */
-      }
-      try {
-        setProvider(await get<ProviderResp>("/config/provider" + (escopo.tenant && operador ? "?" + qs({ tenant: escopo.tenant }) : "")));
-      } catch {
-        setProvider(null);
-      }
-    })();
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [escopo.tenant]);
+  /* v3.16: a busca de gavetas e provider saiu daqui — vive no App (dono da lateral,
+     onde o contexto da conversa passou a ser mostrado). O Chat recebe provider por props. */
 
   const carregarHistorico = useCallback(async () => {
     try {
@@ -422,6 +413,11 @@ export function Chat({
     return () => clearInterval(t);
   }, [snap.rodando, snap.inicio]);
 
+  /* v3.16: transporte roda com deps vazias; o canal de "provider vivo" passa por ref
+     para sempre chamar a função atual do App. */
+  const vivoRef = useRef(onProviderConfirmado);
+  vivoRef.current = onProviderConfirmado;
+
   /** o transporte sabe falar com o servidor; a conversa não precisa de tela aberta para existir */
   const transportar = useCallback<Transportar>(
     async (pedido, onEvent) => {
@@ -445,7 +441,7 @@ export function Chat({
       const d = (dados ?? {}) as Record<string, unknown>;
       const aviso = textoCompacto(d.compactacao as Compactacao | undefined);
       if (aviso) d.compacto = aviso;
-      if (d.resposta) setProvider((p) => (p ? { ...p, configurado: true } : p));
+      if (d.resposta) vivoRef.current();
       return d;
     },
     [],
@@ -514,58 +510,19 @@ export function Chat({
 
   return (
     <section className="chat-tela flex flex-col gap-3 max-[720px]:gap-0" id="telaChat">
-      {/* v3.14 — modo celular: a barra velha botava título, subtítulo, gaveta e (embaixo)
-          "nova conversa" + campo + "enviar" na MESMA linha; num celular de 390px sobravam
-          ~120px para escrever. O cabeçalho agora só tem o que age: a pílula do modelo com a
-          gaveta dentro dela e a nova conversa (virou ícone no celular). O subtítulo saiu —
-          o topo do app já diz "Chat". */}
+      {/* v3.16: a pílula (modelo+gaveta) subiu para a lateral e o reset desceu para o pé,
+           ao lado da caixa de escrita. Esta linha só existe no celular, como porta ☰. */}
       <div className="chat-topo">
-        {/* v3.14.1 — tela inteira no celular: o cabecalho do app sai de cena, entao o
-            botao de abrir o menu mora aqui (sem ele nao se chegava mais em lugar nenhum) */}
         <button
           id="chatMenuCelular"
-          className="chat-acao hidden max-[720px]:inline-flex"
+          className="chat-acao"
           aria-label="abrir menu"
           title="menu"
           onClick={onAbrirMenu}
         >
           ☰
         </button>
-        <label className="chat-pilula" title="modelo em uso e gaveta de memoria desta conversa">
-          <span className="chat-pilula-modelo mono">{provider?.modelo ?? "sem modelo"}</span>
-          <select
-            id="chatGaveta"
-            className="chat-pilula-gaveta"
-            value={memoria}
-            onChange={(e) => setMemoria(e.target.value)}
-            aria-label="gaveta"
-          >
-            {gavetas.map((g) => (
-              <option key={g} value={g}>
-                {g || "padrão"}
-              </option>
-            ))}
-          </select>
-          <span className="chat-pilula-seta" aria-hidden="true">▾</span>
-        </label>
-        {rodando && (
-          <span className="sub2" id="chatSegundoPlano" title="a tarefa continua mesmo se você for ver outra página">
-            · trabalhando em segundo plano
-          </span>
-        )}
         <span className="flex-1" />
-        <button
-          id="chatNovaConversa"
-          className="chat-acao"
-          title="apagar esta conversa e recomeçar do zero"
-          onClick={() => void limpar()}
-        >
-          <svg className="chat-ico" width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round" aria-hidden="true">
-            <path d="M3 12a9 9 0 1 0 3-6.7L3 8" />
-            <path d="M3 3v5h5" />
-          </svg>
-          <span className="chat-acao-rotulo">nova conversa</span>
-        </button>
       </div>
 
       {semProvider && (
@@ -711,25 +668,43 @@ export function Chat({
             </button>
           )}
         </div>
-        {/* v3.14 — pílula de escrita com altura própria (cresce até 5 linhas) e enviar
-            redondo lá dentro; no celular a pílula ocupa a largura toda, então o campo
-            não divide mais linha com dois botões de texto. Microfone e "+" ficaram fora:
-            no minirag nenhum dos dois teria o que fazer, e controle mudo não vai pra tela. */}
+        {/* v3.16 — pé da conversa: "nova conversa" mudou de lado e desceu para a linha do
+            campo, oposto ao enviar (ação perto do dedo, nada de reset no topo). A dica de
+            teclado saiu da tela — vive no título (hover) do campo. */}
         <div className="chat-piso">
-          <div
-            className="chat-composer"
-            onClick={(e) => {
-              /* no celular o alvo de toque e a pilula inteira (62px), nao a linha de 34px do campo */
-              if (e.target === e.currentTarget) campoRef.current?.focus();
-            }}
-          >
-            <textarea
-              id="chatPergunta"
-              ref={campoRef}
-              className="chat-campo"
-              rows={1}
-              placeholder={rodando ? "emenda a próxima pergunta… (vai para a fila)" : "pergunte qualquer coisa…"}
-              value={pergunta}
+          {rodando && (
+            <p className="chat-segundo-plano" id="chatSegundoPlano" title="a tarefa continua mesmo se você for ver outra página">
+              · trabalhando em segundo plano{naFila > 0 ? ` · ${naFila} na fila` : ""}
+            </p>
+          )}
+          <div className="chat-piso-linha">
+            <button
+              id="chatNovaConversa"
+              className="chat-nova"
+              title="apagar esta conversa e recomeçar do zero"
+              onClick={() => void limpar()}
+            >
+              <svg className="chat-ico" width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true">
+                <path d="M4 5h16v11h-9l-4 3.5V16H4z" transform="scale(.75) translate(3 2)" />
+                <path d="M17 3v6M14 6h6" />
+              </svg>
+              <span className="chat-nova-rotulo">nova conversa</span>
+            </button>
+            <div
+              className="chat-composer"
+              onClick={(e) => {
+                /* no celular o alvo de toque e a pilula inteira (62px), nao a linha de 34px do campo */
+                if (e.target === e.currentTarget) campoRef.current?.focus();
+              }}
+            >
+              <textarea
+                id="chatPergunta"
+                ref={campoRef}
+                className="chat-campo"
+                rows={1}
+                placeholder={rodando ? "emenda a próxima pergunta… (vai para a fila)" : "pergunte qualquer coisa…"}
+                title="Enter envia · Shift+Enter quebra linha"
+                value={pergunta}
               onChange={(e) => {
                 setPergunta(e.target.value);
                 ajustarAltura(e.currentTarget);
@@ -752,36 +727,11 @@ export function Chat({
                 <path d="M12 19V5" />
                 <path d="M5 12l7-7 7 7" />
               </svg>
-            </button>
+              </button>
+            </div>
           </div>
-          <p className="chat-dica">
-            Enter envia · Shift+Enter quebra linha{rodando ? " · a próxima vai para a fila" : ""}
-          </p>
         </div>
       </div>
-
-      {provider && provider.configurado && (
-        /* v3.14 — o parágrafo técnico (8 informações) cortava na borda do celular e não
-           cabia em parte alguma: vira uma linha com o essencial e abre ao toque. O texto
-           completo continua aqui dentro, só que dobrado. */
-        <details className="chat-rodape" id="chatRodape">
-        <summary className="chat-rodape-cab">
-          <span className="chat-rodape-modelo mono">{provider.modelo}</span>
-          <span className="chat-rodape-fixo">· {provider.origem === "global" ? "global" : "seu"}</span>
-          {provider.chave_mascarada ? (
-            <span className="chat-rodape-fixo chat-rodape-chave">· chave {provider.chave_mascarada}</span>
-          ) : null}
-          <span className="chat-rodape-fixo chat-rodape-abrir">› ver detalhes</span>
-        </summary>
-        <p className="dica m-0">
-          modelo <span className="mono">{provider.modelo}</span> · provider {provider.origem === "global" ? "global" : "seu"}
-          {provider.chave_mascarada ? ` · chave ${provider.chave_mascarada}` : ""} ·{" "}
-          {provider.tem_system_prompt ? "com instruções do modelo" : "sem instruções (conversa pura)"} ·{" "}
-          {provider.mcp_interno ? "MCP do minirag ligado" : "MCP do minirag desligado"} · até {provider.max_rodadas} rodada(s) · memória{" "}
-          {provider.memoria_turnos} · janela {provider.janela_efetiva.toLocaleString("pt-BR")} tokens ({provider.origem_janela})
-        </p>
-        </details>
-      )}
     </section>
   );
 }

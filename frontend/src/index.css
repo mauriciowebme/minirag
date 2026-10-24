@@ -613,24 +613,12 @@
    velhas (.cartao/.barra/.campo/.btn) seguem valendo para as outras telas. */
 @layer components {
   .chat-topo {
-    @apply mb-1.5 flex flex-wrap items-center gap-2;
+    /* v3.16: no desktop esta linha sumiu — sem pílula, sem reset, nada que mostrar.
+       No celular ela é a porta ☰ única da conversa. */
+    @apply mb-1.5 hidden flex-wrap items-center gap-2 max-[720px]:flex;
   }
-  /* pílula do topo: o modelo em uso + a gaveta dentro dela (era um <select> solto rotulado
-     "gaveta", que no celular empurrava tudo para baixo) */
-  .chat-pilula {
-    @apply inline-flex h-9 max-w-full cursor-pointer items-center gap-1 rounded-full
-      border border-borda bg-sup2 pl-3 pr-2 hover:border-bordaforte;
-  }
-  .chat-pilula-modelo {
-    @apply max-w-[200px] truncate text-[12.5px] text-txt;
-  }
-  .chat-pilula-gaveta {
-    @apply h-full max-w-[104px] cursor-pointer appearance-none border-0 bg-transparent
-      text-right text-[12.5px] text-txt3 focus:outline-none;
-  }
-  .chat-pilula-seta {
-    @apply text-[10px] text-txt3;
-  }
+  /* v3.16: a pílula do topo (modelo+gaveta) não existe mais — o contexto vive na
+     lateral (.conv-bloco) e a ação desceu para a linha do campo (.chat-nova). */
   .chat-acao {
     @apply inline-flex h-9 cursor-pointer items-center gap-1.5 rounded-[11px] border
       border-borda bg-transparent px-3 text-[13px] text-txt2 hover:bg-sup2 hover:text-txt;
@@ -689,8 +677,53 @@
   .chat-enviar:disabled {
     @apply cursor-default bg-sup3 text-txt3;
   }
-  .chat-dica {
-    @apply mx-auto mt-1.5 max-w-[780px] pl-1 text-[11px] text-txt3;
+  /* v3.16 — pé em uma linha: [nova conversa] [campo…………………] [↑]. A dica de teclado
+     saiu da tela (vai no título do campo); "trabalhando em segundo plano" desceu do topo. */
+  .chat-piso-linha {
+    @apply mx-auto flex items-end gap-2;
+    max-width: 780px;
+  }
+  .chat-piso-linha .chat-composer {
+    @apply mx-0 flex-1;
+    max-width: none;
+    min-width: 0;
+  }
+  .chat-nova {
+    @apply inline-flex h-[48px] flex-none cursor-pointer items-center gap-2 rounded-xl border
+      border-borda bg-sup2 px-3 text-[12.5px] text-txt2 hover:border-bordaforte hover:bg-sup3 hover:text-txt;
+  }
+  .chat-segundo-plano {
+    @apply mx-auto mb-1.5 max-w-[780px] pl-1 text-[11.5px] text-txt3;
+  }
+  /* v3.16 — contexto da conversa na lateral: era a pílula do topo do chat.
+     (gaveta seletora + modelo em uso + "ver detalhes" dobrado) */
+  .conv-bloco {
+    @apply mt-2.5 flex flex-col gap-1.5 rounded-[10px] border border-borda bg-sup2 px-2.5 py-2;
+  }
+  .conv-linha {
+    @apply flex items-center justify-between gap-2;
+  }
+  .conv-legenda {
+    @apply text-[10.5px] tracking-[0.4px] text-txt3;
+  }
+  .conv-gav {
+    @apply max-w-[130px] cursor-pointer truncate rounded-full border border-[rgba(108,182,255,.35)]
+      bg-[color:var(--azul-suave)] px-2 py-0.5 text-[11.5px] text-azul focus:outline-none;
+  }
+  .conv-modelo {
+    @apply max-w-[130px] truncate text-txt2;
+  }
+  .conv-detalhe {
+    @apply text-[10.5px] text-txt3;
+  }
+  .conv-detalhe summary {
+    @apply cursor-pointer list-none hover:text-txt2;
+  }
+  .conv-detalhe summary::-webkit-details-marker {
+    display: none;
+  }
+  .conv-detalhe p {
+    @apply mt-1 whitespace-normal leading-[1.5] text-txt3;
   }
   .chat-acoes {
     @apply mt-1 flex items-center gap-1;
@@ -729,7 +762,6 @@
 @media (max-width: 720px) {
   /* dedo: 44px em tudo que se toca aqui dentro (a regra velha só alcançava .btn/.campo,
      que o chat novo não usa mais) */
-  .chat-pilula,
   .chat-acao {
     min-height: 44px;
   }
@@ -753,7 +785,14 @@
     width: 44px;
     justify-content: center;
   }
-  .chat-dica {
+  /* v3.16: no celular "nova conversa" é só o ícone — 44px de dedo, embaixo, do lado do campo */
+  .chat-nova {
+    @apply px-0;
+    width: 44px;
+    height: 44px;
+    justify-content: center;
+  }
+  .chat-nova-rotulo {
     @apply hidden;
   }
   /* máscara de chave é detalhe de tela larga: no celular cabe só o essencial */

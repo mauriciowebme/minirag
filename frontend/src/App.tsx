@@ -10,8 +10,8 @@ import { Painel } from "./components/Painel";
 import { Chat } from "./components/Chat";
 import { Config } from "./components/Config";
 import { Maquinas } from "./components/Maquinas";
-import { get } from "./services/api";
-import type { HealthResp, Vista } from "./types";
+import { get, qs } from "./services/api";
+import type { GavetasResp, HealthResp, ProviderResp, Vista } from "./types";
 
 /* A ordem é do dono (21/10, v3.2.2): Chat logo depois de Painel; Usuários/Gavetas
    em cima de Configurações. Arquivos e Editor são passos internos (usuário → gaveta
@@ -70,6 +70,32 @@ export default function App() {
   /* v3.6.1: a aba Máquinas vive e morre com o interruptor de Controle das máquinas
      (Configurações → Ferramentas), igual à tela do túnel — desligado, some a aba. */
   const [controleMaq, setControleMaq] = useState(true);
+
+  /* v3.16: o contexto da conversa (gaveta em uso + modelo) passou a morar na lateral.
+     As buscas viviam dentro do Chat, na pílula do topo; com o bloco compartilhado,
+     quem é dono da lateral (App) busca e o Chat recebe por props. */
+  const [gavetas, setGavetas] = useState<string[]>([""]);
+  const [provider, setProvider] = useState<ProviderResp | null>(null);
+  useEffect(() => {
+    if (!sessao.logado) return;
+    const t = sessao.sessao.tenant;
+    const op = sessao.sessao.operador;
+    void (async () => {
+      try {
+        const g = await get<GavetasResp>("/gavetas" + (t ? "?" + qs({ tenant: t }) : ""));
+        const nomes = [...new Set(g.gavetas.map((x) => x.memoria))];
+        setGavetas(nomes.length ? nomes : [""]);
+      } catch {
+        /* segue com a gaveta padrão */
+      }
+      try {
+        setProvider(await get<ProviderResp>("/config/provider" + (t && op ? "?" + qs({ tenant: t }) : "")));
+      } catch {
+        setProvider(null);
+      }
+    })();
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [sessao.logado, sessao.sessao.tenant, vista]);
 
   useEffect(() => {
     void sessao.restaurar();
@@ -161,6 +187,50 @@ export default function App() {
         );
       })}
 
+      {/* v3.16: contexto da conversa — a gaveta que o Chat escreve e o modelo em uso.
+          Isso vivia numa pílula no topo da conversa; a tela do chat agora é só conversa
+          e caixa de escrita. No celular o bloco acompanha a lateral para dentro da gaveta ☰. */}
+      <div className="conv-bloco">
+        <div className="conv-linha">
+          <span className="conv-legenda">gaveta</span>
+          <select
+            id="chatGaveta"
+            className="conv-gav"
+            value={memoria}
+            onChange={(e) => sessao.escopo(tenant, e.target.value)}
+            aria-label="gaveta"
+            title={memoria || "padrão"}
+          >
+            {gavetas.map((g) => (
+              <option key={g} value={g}>
+                {g || "padrão"}
+              </option>
+            ))}
+          </select>
+        </div>
+        <div className="conv-linha">
+          <span className="conv-legenda">modelo</span>
+          <span className="mono conv-modelo" title={provider?.modelo ?? "sem modelo"}>
+            {provider?.modelo ?? "sem modelo"}
+          </span>
+        </div>
+        {/* v3.16: a linha "› ver detalhes" morava embaixo da caixa de escrita e era o ÚNICO
+           lugar onde o usuário comum via provider, chave mascarada e MCP do turno.
+           Veio para a lateral junto com o modelo — a tela do chat fica só com a conversa. */}
+        {provider && provider.configurado && (
+          <details className="conv-detalhe" id="chatRodape">
+            <summary>› ver detalhes</summary>
+            <p>
+              provider {provider.origem === "global" ? "global" : "seu"}
+              {provider.chave_mascarada ? ` · chave ${provider.chave_mascarada}` : ""} ·{" "}
+              {provider.tem_system_prompt ? "com instruções do modelo" : "sem instruções (conversa pura)"} ·{" "}
+              {provider.mcp_interno ? "MCP do minirag ligado" : "MCP do minirag desligado"} · até {provider.max_rodadas} rodada(s) · memória{" "}
+              {provider.memoria_turnos} · janela {provider.janela_efetiva.toLocaleString("pt-BR")} tokens ({provider.origem_janela})
+            </p>
+          </details>
+        )}
+      </div>
+
       <div className="mt-auto border-t border-borda pt-3">
         <div className="flex items-center gap-2 px-1">
           <div className="grid h-8 w-8 place-items-center rounded-[10px] border border-bordaforte bg-sup3 text-[12px] text-verde">
@@ -181,6 +251,9 @@ export default function App() {
         <button id="btnSair" className="btn btn-sutil mt-2 w-full justify-start" title="sair da sessão" onClick={() => sessao.sair()}>
           sair
         </button>
+        {/* v3.16: a versão era chip no rodapé da tela; a lateral é a casa única dela
+            (o rodapé saiu da tela do chat e repetia o que já estava aqui) */}
+        {versao && <div id="ver" className="px-1 pt-1 text-[10.5px] text-txt3">versão {versao}</div>}
       </div>
     </aside>
   );
@@ -202,7 +275,7 @@ export default function App() {
         <header
           className={
             "sticky top-0 z-20 flex items-center gap-3 border-b border-borda bg-bg/95 px-4 py-2.5 backdrop-blur sm:px-6" +
-            (vista === "chat" ? " max-[720px]:hidden" : "")
+            (vista === "chat" ? " hidden" : "")
           }
         >
           <button className="btn btn-sutil btn-mini lg:hidden" aria-label="abrir menu" onClick={() => setMenuAberto(true)}>
@@ -287,6 +360,8 @@ export default function App() {
             <Chat
               escopo={{ tenant, memoria }}
               operador={operador}
+              provider={provider}
+              onProviderConfirmado={() => setProvider((p) => (p ? { ...p, configurado: true } : p))}
               onIrConfig={() => navegar("config")}
               onAbrirMenu={() => setMenuAberto(true)}
             />
@@ -313,12 +388,10 @@ export default function App() {
           id="rodape"
           className={
             "mx-auto flex w-full max-w-[1180px] flex-wrap items-center gap-3 px-4 pb-8 text-[12px] text-txt3 sm:px-6" +
-            (vista === "chat" ? " max-[720px]:hidden" : "")
+            (vista === "chat" ? " hidden" : "")
           }
         >
-          <span id="ver" className="chip">
-            {versao ? `versão ${versao}` : ""}
-          </span>
+          {/* v3.16: o chip de versão saiu do rodapé — a lateral é a casa única dela */}
           <span>
             <kbd className="rounded border border-borda px-1">Ctrl</kbd>+<kbd className="rounded border border-borda px-1">S</kbd> salva ·{" "}
             <kbd className="rounded border border-borda px-1">Esc</kbd> fecha o editor
