@@ -659,26 +659,31 @@
   .chat-janela {
     padding-bottom: env(safe-area-inset-bottom);
   }
+  /* v3.15.1 — proporção do IA_GO (medida no código dele: campo com min-height 48 e
+     linha de 21px = 44% de texto; aqui o texto fica com 45%). Antes: caixa de 60px
+     com raio 26 (cápsula fechada) e botão circular de 42 dentro, que é o que estava
+     gordo e brigando com o texto. */
   .chat-composer {
-    @apply mx-auto flex items-end gap-2 rounded-[26px] border border-bordaforte
-      bg-sup2 py-2 pl-4 pr-2;
+    @apply mx-auto flex items-end gap-2 rounded-xl border border-bordaforte
+      bg-sup2 py-1.5 pl-3.5 pr-1.5;
     max-width: 780px;
+    min-height: 48px;
   }
   .chat-composer:focus-within {
     border-color: rgba(108, 182, 255, 0.5);
   }
   .chat-campo {
-    @apply flex-1 resize-none border-0 bg-transparent text-[14.5px] leading-[1.5]
+    @apply flex-1 resize-none border-0 bg-transparent text-[15px] leading-[1.45]
       text-txt focus:outline-none;
     min-width: 0;
     max-height: 150px;
-    padding: 6px 0;
+    padding: 7px 0;
   }
   .chat-campo::placeholder {
     @apply text-txt3;
   }
   .chat-enviar {
-    @apply grid h-[42px] w-[42px] flex-none cursor-pointer place-items-center rounded-full
+    @apply grid h-[34px] w-[34px] flex-none cursor-pointer place-items-center rounded-[10px]
       border-0 bg-verde text-vermelho-escuro hover:bg-verde-claro;
   }
   .chat-enviar:disabled {
@@ -729,8 +734,11 @@
     min-height: 44px;
   }
   .chat-enviar {
-    width: 44px;
-    height: 44px;
+    /* dedo: 40px (não 44) porque a caixa encolheu para 48 e 44 voltaria a comer a
+       altura toda; o alvo de toque continua acima de 40 e o campo inteiro é clicável */
+    width: 40px;
+    height: 40px;
+    border-radius: 10px;
   }
   .chat-acao-icone {
     width: 44px;
@@ -767,6 +775,7 @@
     @apply px-2 pt-2;
   }
   .chat-composer {
-    @apply rounded-[22px] pl-3;
+    @apply rounded-xl pl-3;
+    min-height: 52px;
   }
 }
