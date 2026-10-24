@@ -22,6 +22,15 @@ parecidos com a pergunta, com uma nota de 0 a 1.
 
 ---
 
+## v3.14.1 (24/10) — no celular, o chat é a tela inteira
+
+- **O que doía**: a conversa ainda morava dentro do casaco do app — o cabeçalho do app em cima, um cartão com borda e canto arredondado por volta, e embaixo a faixa com "versão", os atalhos do editor e a assinatura. Num celular de 390 isso comia ~85 px de altura e 32 px de largura, com duas linhas de topo disputando espaço.
+- **Uma linha de topo só**: no celular o cabeçalho do app sai e o menu ☰ passa a viver na própria linha do chat (medido 44×44, abre a gaveta de navegação com o usuário em foco dentro; Esc fecha a gaveta — antes só fechava clicando no escuro). Medido em 390×844: topo do chat em y=0, 53 px de altura.
+- **A conversa deixa de ser cartão**: borda 0px, fundo transparente, raio 0px — de ponta a ponta, com 12 px de respiro, mesma coluna de antes.
+- **Sobrou largura para escrever**: o campo foi de **266 px a 300 px** no celular de 390 (saíram as margens do palco) e continua dentro da pílula de 62 px que cresce até 5 linhas. `scrollWidth == 390` (nada estoura para o lado) e o campo termina a 799 px de uma tela de 844 (nada passa do fim).
+- **A faixa de baixo do app some no chat**: versão, "Ctrl+S salva · Esc fecha o editor" e assinatura ficam só nas outras telas — no celular. O desktop não mudou (medido: cartão com borda 1px, raio 18px, campo de 704 px, cabeçalho e rodapé no lugar).
+- **Ficou de fora de propósito**: o chip de usuário do topo não foi apagado — mudou de lugar (vira a linha "foco: ..." dentro do menu ☰), porque no celular o topo agora é uma linha só.
+
 ## v3.14.0 (23/10) — o chat cabe no celular
 
 - **O que doía**: na tela do celular a barra de escrita dividia a MESMA linha com os botões "nova conversa" e "enviar" — sobravam uns 120 px para digitar (o placeholder aparecia cortado em "pergunte qualq") e o rodapé técnico, com 8 informações numa linha só, saía da borda direita.
