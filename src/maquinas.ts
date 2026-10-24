@@ -376,7 +376,7 @@ export async function revogarChaveCliente(u: Usuario, id: string) {
 
 /* ------------------------------------------------------------------ HUB ----- */
 
-type OiFrame = { token?: string; host?: string; os?: string; user?: string };
+type OiFrame = { token?: string; host?: string; os?: string; user?: string; v?: string };
 
 async function receberOi(ws: WebSocket, oi: OiFrame, httpBase = ""): Promise<void> {
   const host = String(oi.host ?? "").trim().slice(0, 128);
@@ -511,7 +511,7 @@ async function receberOi(ws: WebSocket, oi: OiFrame, httpBase = ""): Promise<voi
   };
   ligacoes.set(chave, lig);
   ws.send(JSON.stringify(tokenNovo ? { ack: "ok", token: tokenNovo } : { ack: "ok" }));
-  log(`maquinas: ONLINE ${chave} (so=${lig.so || "?"} user=${lig.user || "?"})`);
+  log(`maquinas: ONLINE ${chave} (so=${lig.so || "?"} user=${lig.user || "?"} vers=${String(oi.v ?? "?")})`);
 
   ws.on("message", (bytes) => {
     let r: any;

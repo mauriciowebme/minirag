@@ -522,7 +522,7 @@ function conectar() {
     clearTimeout(relogioConexao);
     if (meuWs !== ws) return; // outro soquete já assumiu esta conexão
     nivelBackoff = 0;
-    meuWs.send(JSON.stringify({ token, host, os: process.platform + " " + os.release(), user: os.userInfo().username }));
+    meuWs.send(JSON.stringify({ token, host, os: process.platform + " " + os.release(), user: os.userInfo().username, v: VERSAO_CLIENTE }));
     // herança do Go v1.11: a novidade é reconsultada em TODA conexão (primeira e reconexões)
     verificarAtualizacao().catch(() => {});
   });
