@@ -22,6 +22,17 @@ parecidos com a pergunta, com uma nota de 0 a 1.
 
 ---
 
+## v3.14.0 (23/10) — o chat cabe no celular
+
+- **O que doía**: na tela do celular a barra de escrita dividia a MESMA linha com os botões "nova conversa" e "enviar" — sobravam uns 120 px para digitar (o placeholder aparecia cortado em "pergunte qualq") e o rodapé técnico, com 8 informações numa linha só, saía da borda direita.
+- **O campo agora é a linha inteira**: pílula de escrita de ponta a ponta — medido no painel rodando, **266 px de campo** num celular de 390 (antes ~120) — e ela cresce sozinha até 5 linhas em vez de esconder o que você digitou. No celular o clique em qualquer ponto da pílula coloca o cursor dentro (o alvo de toque é a pílula de 62 px, não a linha de 34 px).
+- **Altura honesta, não chutada**: a conversa vivia num cartão de altura fixa (`68vh`), que no navegador do celular ficava maior que a tela e empurrava o campo para fora. Agora a caixa pega exatamente o que sobra da janela (`100dvh`, com folga para a barra de gestos). Medido em 390×844: nada passa do fim da tela e `scrollWidth == 390` (nada estoura para o lado).
+- **Resposta sem moldura**: o texto do assistente é texto solto na coluna (balão só na sua fala), o raciocínio virou a pílula "Pensou por 2s ›" que abre ao toque, e cada resposta pronta ganhou um botão **copiar** (com reserva para o painel servido em http, onde a área de transferência do navegador pode não existir).
+- **Cabeçalho enxuto**: o seletor de gaveta virou uma pílula com o modelo em uso dentro dela; "nova conversa" subiu para o cabeçalho e no celular é só ícone; o subtítulo "— conversa com o modelo e as ferramentas do MCP" saiu (o topo do app já diz "Chat").
+- **Rodapé técnico dobrado**: uma linha com o essencial ("modelo · global · › ver detalhes"); o resto abre ao toque. No celular a máscara de chave sai da linha — continua dentro do detalhe.
+- **Ficou de fora de propósito**: microfone e botão "+" (no minirag nenhum dos dois teria o que fazer, e controle mudo não vai para a tela) e "refazer a resposta" (regenerar exige mexer no histórico lá no servidor, o que ainda não existe).
+
+
 ## v3.13.1 (23/10) — o cliente para de ficar mudo quando o servidor reinicia
 
 - **O defeito, do jeito que tu viste**: publiquei uma versão nova, o servidor reiniciou no meio do pedido de conexão e o programa ficou com a janela aberta, escrito "desconectado", **sem nunca mais tentar**. Baixar o cliente novo também não adiantava: o arquivo novo via o programa travado na porta, abria a janela *daquele* e se fechava.
