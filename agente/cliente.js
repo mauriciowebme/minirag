@@ -449,7 +449,7 @@ const PAINEL_HTML = "<!doctype html><html lang=pt-br><head><meta charset=utf-8>"
 "tr.innerHTML='<td>'+hora(c.ts)+'</td><td>'+c.rotulo+'</td><td class=\"'+(c.exit===0?'ok':'ruim')+'\">'+c.exit+'</td><td>'+c.bytes+'</td>';t.appendChild(tr);}}}" +
 "function logAppend(l){var lg=document.getElementById('lg');var e=lg.textContent?lg.textContent.split(String.fromCharCode(10)):[];e.push(l);if(e.length>200)e.splice(0,e.length-200);lg.textContent=e.join(String.fromCharCode(10));lg.scrollTop=lg.scrollHeight;}" +
 "var es,ultimo={};" +
-"setInterval(function(){if(!ultimo.host||ultimo.online)return;document.getElementById('quando').textContent=tempoDaUltima(ultimo);},1000)" +
+"setInterval(function(){if(!ultimo.host||ultimo.online)return;document.getElementById('quando').textContent=tempoDaUltima(ultimo);},1000);" +
 "function liga(){es=new EventSource('/evento');es.onmessage=function(x){try{var o=JSON.parse(x.data);" +
 "if(o.estado){ultimo=o.estado;apply(ultimo);}" +
 "else if(o.tipo==='status'&&ultimo.host){ultimo.online=o.online;ultimo.conectou_em=o.conectou_em;ultimo.negado=o.negado;apply(ultimo);}" +
