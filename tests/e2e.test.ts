@@ -2683,6 +2683,117 @@ await bloco(t, "v3.6: máquinas por usuário — hub WS, pareamento, run, escopo
     f.fechar("v3.13.1 cliente atravessa o deploy");
   });
 
+  /* ------------------------------------------------------------------ v3.15 */
+
+  await bloco(t, "v3.15: o rastro do turno na ordem, com o tempo de cada passo", async () => {
+    const f = fiscal();
+    const CONTAINER = process.env.CONTAINER ?? "";
+    const GAV = "suite-v315";
+    if (!CONTAINER || !OPKEY) {
+      f.check("v3.15 precisa do container (provedor falso dentro dele)", true, "sem CONTAINER: bloco não executável");
+      f.fechar("v3.15 rastro do turno");
+      return;
+    }
+
+    /* Provedor falso de DUAS RODADAS, em streaming: a 1ª pensa, fala no caminho e chama uma
+       ferramenta interna; a 2ª pensa de novo e fecha. É o retrato do que o dono vê no IA_GO. */
+    const codigo = [
+      "const http=require('http');",
+      "http.createServer((req,res)=>{let b='';req.on('data',c=>b+=c);req.on('end',()=>{",
+      "let j={};try{j=JSON.parse(b||'{}');}catch(e){}",
+      "const m=j.messages||[];const ja=m.filter(x=>x.role==='tool').length>0;",
+      "if(!j.stream){res.setHeader('content-type','application/json');res.end(JSON.stringify({choices:[{message:{role:'assistant',content:'SEM-STREAM-V315'}}]}));return;}",
+      "res.setHeader('content-type','text/event-stream');",
+      "const pec=(o)=>'data: '+JSON.stringify({choices:[{delta:o}]})+'\\n\\n';",
+      "const passos=[];",
+      "if(!ja){for(let i=1;i<=4;i++)passos.push(pec({reasoning_content:'pen'+i+' '}));",
+      "passos.push(pec({content:'vou ver as gavetas. '}));",
+      "passos.push(pec({tool_calls:[{index:0,id:'c1',type:'function',function:{name:'list_gavetas',arguments:'{}'}}]}));}",
+      "else{for(let i=1;i<=3;i++)passos.push(pec({reasoning_content:'som'+i+' '}));passos.push(pec({content:'PRONTO-V315'}));}",
+      "passos.push('data: [DONE]\\n\\n');",
+      "let k=0;const t=setInterval(()=>{if(k<passos.length){res.write(passos[k]);k++;return;}clearInterval(t);res.end();},120);",
+      "});})",
+      ".listen(9919,'127.0.0.1');setTimeout(()=>process.exit(0),150000);",
+    ].join("");
+    execFileSync("docker", ["exec", "-d", CONTAINER, "node", "-e", codigo]);
+    await dormir(1200);
+
+    const baseV315 = {
+      tipo: "litellm",
+      base_url: "http://127.0.0.1:9919/v1",
+      chave: "***",
+      modelo: "modelo-v315",
+      temperatura: 0.2,
+      system_prompt: "",
+      mcp_interno: true,
+      max_rodadas: 3,
+      ativo: true,
+      global: true,
+    };
+    let r = await call("PUT", "/config/provider", { key: OPKEY, corpo: baseV315 });
+    f.check("provedor de duas rodadas armado com MCP interno", r.status === 200 && r.json?.mcp_interno === true, r.texto.slice(0, 140));
+
+    const correr = async (corpo: Record<string, unknown>) => {
+      const resp = await fetch(`${BASE}/chat/stream`, {
+        method: "POST",
+        headers: { authorization: `Bearer ${OPKEY}`, "content-type": "application/json" },
+        body: JSON.stringify(corpo),
+        signal: AbortSignal.timeout(120_000),
+      });
+      const bruto = await resp.text();
+      const eventos = bruto
+        .split("\n\n")
+        .map((blocoTxt) => blocoTxt.split("\n").find((l) => l.startsWith("data:")))
+        .filter((l): l is string => !!l)
+        .map((l) => {
+          try {
+            return JSON.parse(l.slice(5).trim());
+          } catch {
+            return {};
+          }
+        });
+      return { eventos, bruto };
+    };
+
+    const rod = await correr({ pergunta: "me mostre o rastro do turno", memoria: GAV });
+    const fim = rod.eventos.find((e: any) => e.tipo === "fim") ?? {};
+    const trilha: any[] = (fim.dados?.rastro ?? []) as any[];
+    const tipos = trilha.map((s) => s.tipo).join(">");
+    f.check(
+      "o `fim` traz o RASTRO na ordem: pensamento > fala de caminho > ferramenta > pensamento",
+      tipos === "pensamento>narracao>ferramenta>pensamento",
+      tipos || rod.bruto.slice(0, 120),
+    );
+    const pens = trilha.filter((s) => s.tipo === "pensamento");
+    f.check("cada bloco de pensamento saiu com o tempo MEDIDO dele (>0)", pens.length === 2 && pens.every((s) => Number(s.ms) > 0), JSON.stringify(pens.map((s) => s.ms)));
+    const tool = trilha.find((s) => s.tipo === "ferramenta") ?? {};
+    f.check("a linha da ferramenta diz qual foi, se deu certo e quanto demorou", tool.nome === "list_gavetas" && tool.servidor === "minirag" && tool.ok === true && Number(tool.ms) >= 0, JSON.stringify(tool).slice(0, 140));
+    f.check("a fala de caminho está na trilha (não foi engolida pela resposta)", trilha.some((s) => s.tipo === "narracao" && /vou ver as gavetas/.test(String(s.texto))), String(trilha.find((s) => s.tipo === "narracao")?.texto ?? "").slice(0, 60));
+    f.check("a resposta final NÃO é uma etapa do rastro", !trilha.some((s) => /PRONTO-V315/.test(String(s.texto ?? ""))) && String(fim.dados?.resposta ?? "").includes("PRONTO-V315"), String(fim.dados?.resposta ?? "").slice(0, 60));
+
+    r = await call("GET", `/chat?memoria=${GAV}&limit=10`, { key: OPKEY });
+    const assist = (r.json?.mensagens ?? []).filter((m: any) => m.papel === "assistant").pop() ?? {};
+    const gravado: any[] = assist.rastro ?? [];
+    f.check("reabrir a conversa devolve a MESMA trilha, com o tempo de cada passo", gravado.map((s) => s.tipo).join(">") === tipos && gravado.every((s) => "ms" in s || s.tipo === "narracao"), JSON.stringify(gravado.map((s) => s.tipo)));
+    f.check("os campos de antes continuam lá (nenhum consumidor quebrado)", (assist.ferramentas ?? []).length === 1 && (assist.falas ?? []).length === 1 && typeof assist.raciocinio === "string" && assist.raciocinio.length > 0, JSON.stringify({ fx: (assist.ferramentas ?? []).length, fl: (assist.falas ?? []).length, ra: (assist.raciocinio ?? "").length }));
+
+    /* degradação honesta: o chat chamado SEM streaming (superfície MCP) não tem como medir
+       tempo nem ordem fina -> a trilha fica vazia em vez de inventar passo; a resposta intacta */
+    const viaMcp = await call("POST", "/mcp", {
+      key: TESTKEY,
+      corpo: { jsonrpc: "2.0", id: 91, method: "tools/call", params: { name: "chat", arguments: { pergunta: "agora sem ferramenta nem pensamento", memoria: GAV } } },
+    });
+    f.check("o chat sem streaming pelo MCP respondeu", viaMcp.status === 200 && String(viaMcp.texto).includes("SEM-STREAM-V315"), String(viaMcp.texto).slice(0, 120));
+    /* a pergunta pelo MCP pertence a QUEM chamou (outra gaveta de outro usuário): ler o
+       histórico com a chave do chamador, senão a checagem procura no tenant errado */
+    r = await call("GET", `/chat?memoria=${GAV}&limit=4`, { key: TESTKEY });
+    const ult = (r.json?.mensagens ?? []).filter((m: any) => m.papel === "assistant").pop() ?? {};
+    f.check("turno sem streaming tem trilha VAZIA (nada inventado) e resposta intacta", Array.isArray(ult.rastro) && ult.rastro.length === 0 && String(ult.texto).includes("SEM-STREAM-V315"), JSON.stringify({ rastro: ult.rastro ?? null, texto: String(ult.texto ?? "").slice(0, 40) }));
+
+    await call("PUT", "/config/provider", { key: OPKEY, corpo: { ...baseV315, ativo: false } });
+    f.fechar("v3.15 rastro do turno");
+  });
+
   await bloco(t, "v3.8: vocabulário do túnel no MCP + falas que ficam na tela", async () => {
     const f = fiscal();
     const CONTAINER = process.env.CONTAINER ?? "";
