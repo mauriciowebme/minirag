@@ -268,6 +268,7 @@ function iniciarPainel() {
       res.end(JSON.stringify({ saindo: true }));
       log("outro cliente desta máquina pediu para eu sair — ele vai assumir; adeus");
       morrendo = true;
+      fecharJanelasMinirag();
       try { if (ws) ws.close(); } catch { /* ignore */ }
       setTimeout(() => process.exit(0), 300);
       return;
@@ -395,6 +396,21 @@ function abrirNavegadorPadrao(url) {
     f.on("error", () => log("não consegui abrir a janela sozinho — abra " + url));
     if (!EH_WIN) f.unref();
   } catch { /* silencioso: o log já diz tudo */ }
+}
+/* v3.16.3: quando EU (cliente velho) saio — troca de update ou assumir de um novo —
+ * fecho as janelas do painel que abre. A janela do Edge/Chrome --app é processo SEPARADO
+ * de mim: se ficar viva, o dono vê DUAS telas depois da troca (a página congelada do
+ * processo morto + a nova) — medido 24/10 na Noot. Mato só os processos com o MEU perfil
+ * (.minirag-janela) na linha de comando; janelas normais do dono não são tocadas.
+ * Fire-and-forget detached: o powershell termina o serviço mesmo depois do meu exit. */
+function fecharJanelasMinirag() {
+  if (!EH_WIN) return;
+  try {
+    const ps = "Get-CimInstance Win32_Process -Filter \"Name='msedge.exe' OR Name='chrome.exe'\" | Where-Object { $_.CommandLine -match 'minirag-janela' } | ForEach-Object { Stop-Process -Id $_.ProcessId -Force -ErrorAction SilentlyContinue }";
+    const p = spawn("powershell.exe", ["-NoProfile", "-Command", ps], { detached: true, stdio: "ignore", windowsHide: true });
+    p.on("error", () => {});
+    p.unref();
+  } catch { /* mudo: melhor janela sobrando do que cliente travado */ }
 }
 /* A página é estática de propósito: os dados chegam por /api/estado e /evento.
  * Sem segredo algum na tela — o token nunca é exibido. */
@@ -706,6 +722,7 @@ async function verificarAtualizacao() {
     setAtualizacao({ fase: "trocando", pct: 100 });
     const novoExe = trocarExe(eu, tmp, j.versao);
     log("exe novo no lugar (" + novoExe.split(/[\\/]/).pop() + ") — reabrindo em janela própria (minimizada, sem roubar tua tela)");
+    fecharJanelasMinirag(); // v3.16.3: não deixo minha janela velha viva atrás de mim (duas telas na Noot, 24/10)
     const semToken = (() => { const i = argv.indexOf("--token"); return i < 0 ? argv : [...argv.slice(0, i), ...argv.slice(i + 2)]; })();
     const err = await relancar(novoExe, semToken);
     if (err) log("update aplicado mas relancar falhou: " + err.message + " (reabra o exe; esta janela segue funcionando)");
