@@ -21,8 +21,14 @@ parecidos com a pergunta, com uma nota de 0 a 1.
 ---
 
 ---
+## v3.14.2 (24/10) — O pensamento acompanha a escrita no celular
 
-## v3.14.1 (24/10) — no celular, o chat é a tela inteira
+- **O que doía**: o painel de raciocínio tem altura própria (160px com rolagem). Enquanto o modelo pensava, o texto novo entrava por baixo e ficava fora de vista: o painel parava no começo do pensamento em vez de mostrar a linha que estava nascendo — em celular, onde só dá para ver o painel, isso virava "travou".
+- **O que muda**: enquanto escreve, o painel fica colado na última linha que chegou. Se você subir lá dentro para reler, ele para de puxar e te deixa em paz; volta a colar quando começa uma resposta nova. E a conversa agora desce junto durante o pensamento (antes ela só acompanhava o texto da resposta, ignorando o raciocínio que cresce por dentro do painel).
+- **Como conferir**: no celular, pergunte algo que faça o modelo pensar longo e deixe o painel aberto — a última linha visível é sempre a que acabou de chegar. Suba com o dedo dentro do painel: ele para de seguir.
+- **Testes**: 1 arquivo tocado; **`provedor_longo` (novo)**: raciocínio em 35 pedaços num painel de 158px — amostras a cada 300ms: enquanto colado, a folga do painel fica em 0 (162→535px de conteúdo, `scrollTop` 4→377 acompanhando); aos 4s, um scroll para o topo dentro do painel → folga 415→508 e ele **para** de puxar; no fim, painel fecha. Amostra do meio do pensamento: `folga_painel=0`, última linha visível "linha 22 do raciocinio…", base do painel em 721px duma tela de 844 e campo de escrita a 766 (tudo dentro da tela), `folga_area=0`. Portão: `tsc` dos dois lados zero erro, `/health` 3.14.2, blocos v3.1 (3 OK) e v3.13.1 (9 OK). Suíte completa não refeita (mudança de tela; o contrato não cobre CSS) — **declarado de propósito**.
+
+## v3.14.1 (24/10) — O chat do celular vira a tela inteira
 
 - **O que doía**: a conversa ainda morava dentro do casaco do app — o cabeçalho do app em cima, um cartão com borda e canto arredondado por volta, e embaixo a faixa com "versão", os atalhos do editor e a assinatura. Num celular de 390 isso comia ~85 px de altura e 32 px de largura, com duas linhas de topo disputando espaço.
 - **Uma linha de topo só**: no celular o cabeçalho do app sai e o menu ☰ passa a viver na própria linha do chat (medido 44×44, abre a gaveta de navegação com o usuário em foco dentro; Esc fecha a gaveta — antes só fechava clicando no escuro). Medido em 390×844: topo do chat em y=0, 53 px de altura.
