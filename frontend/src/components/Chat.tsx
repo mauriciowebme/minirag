@@ -202,11 +202,30 @@ export function Chat({
 
   /* o texto chega em pedaços: desce junto se (e somente se) o usuário estiver no fim.
      NAO depende do cronômetro — era ele que puxava a tela a cada 500 ms. */
-  const rastro = snap.msgs.length + ":" + (snap.msgs[snap.msgs.length - 1]?.texto.length ?? 0);
+  const rastro =
+    snap.msgs.length +
+    ":" +
+    (snap.msgs[snap.msgs.length - 1]?.texto.length ?? 0) +
+    ":" +
+    (snap.msgs[snap.msgs.length - 1]?.raciocinio?.length ?? 0);
   useEffect(() => {
     if (colado.current) irParaOFim();
     else setNovoAbaixo(true);
   }, [rastro, snap.rodando]);
+
+  /* o pensamento cresce POR DENTRO do painel (ele tem altura própria com rolagem): enquanto
+     escreve, o painel tem de acompanhar a escrita em vez de deixar o texto novo subir e
+     sair de cima. Para de acompanhar se você subir lá dentro para reler; volta a colar
+     quando começa uma resposta nova. */
+  const racioColado = useRef(true);
+  useEffect(() => {
+    const painel = document.querySelector<HTMLElement>(".racio[open] .racio-txt");
+    if (!painel) {
+      racioColado.current = true;
+      return;
+    }
+    if (racioColado.current) painel.scrollTop = painel.scrollHeight;
+  }, [rastro]);
 
   /* cronômetro honesto: conta desde QUANDO a tarefa começou (voltar para a tela não zera o tempo) */
   useEffect(() => {
@@ -410,7 +429,15 @@ export function Chat({
                               ? ` por ${Math.max(1, Math.round((m.raciocinioFim - m.raciocinioInicio) / 1000))}s`
                               : ""}`}
                       </summary>
-                      <div className="racio-txt">{m.raciocinio}</div>
+                      <div
+                        className="racio-txt"
+                        onScroll={(e) => {
+                          const el = e.currentTarget;
+                          racioColado.current = el.scrollHeight - el.scrollTop - el.clientHeight < 40;
+                        }}
+                      >
+                        {m.raciocinio}
+                      </div>
                     </details>
                   ) : null}
                   {m.escrevendo && !m.texto ? (
