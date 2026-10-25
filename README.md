@@ -22,6 +22,9 @@ parecidos com a pergunta, com uma nota de 0 a 1.
 
 ---
 ---
+## v3.16.8 (24/10) — Testa o ciclo completo de atualização automática
+- **O que você vê:** nada muda na tela; esta versão existe para provar o ciclo inteiro — o servidor anuncia, a máquina baixa, se troca, relança e **abre a janela nova sozinha**, com os tempos cronometrados pelo log dela.
+
 ## v3.16.7 (24/10) — Cabeçalho da janela não mostra mais "porta undefined"
 - **O que você vê:** o canto superior direito da janela mostra `v3.16.7` e, junto, a porta local — sem o texto "undefined" quando o aviso chega sem esse dado.
 
