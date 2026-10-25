@@ -22,9 +22,10 @@ parecidos com a pergunta, com uma nota de 0 a 1.
 
 ---
 ---
-## v3.16.5 (24/10) — Fim da tela preta: a janela desenha sem placa de vídeo
-- **O que você vê:** a janela do painel abre sempre com conteúdo, mesmo depois de reiniciar o computador. Prova na Noot: a mesma janela, nascida preta com o desenho pela placa de vídeo e viva e legível com o desenho por software.
-- **O que acontecia:** a placa de vídeo recém-acordada entregava ao navegador um compositor morto — a janela existia, o programa estava online, mas nenhum pixel era desenhado. A tela do painel é texto e botões; o desenho por software não custa nada aqui e elimina o preto de vez.
+## v3.16.6 (24/10) — A causa final da tela preta: a janela não nasce mais escondida
+- **O que você vê:** a janela do painel abre viva, sempre. Teste lado a lado na Noot: a MESMA janela com os mesmos ajustes — aberta por um processo visível, renderiza; aberta por processo que a esconde no nascimento, fica preta.
+- **O que acontecia:** o cliente escondia a janela no momento de criar (herança de época em que havia console). Janela que nasce escondida é "mostrada" pelo navegador sem nunca ter pintado o primeiro quadro — e aí fica o retângulo preto para sempre. Removido o esconder: sem console, sem motivo para esconder.
+- **v3.16.5 (mesma noite)** adicionou desenho por software (`--disable-gpu`), que fica como seguro extra; a leitura do A/B apontou que o preto vinha do esconder, não da placa de vídeo.
 
 ## v3.16.4 (24/10) — A janela abre sempre nova, e no tamanho compacto
 - **O que você vê:** ao abrir o cliente, a janela do painel é menor (700×560, do jeito que ficou aprovado no teste) e **nunca mais abre preta**.
