@@ -702,7 +702,7 @@ export function Chat({
                 ref={campoRef}
                 className="chat-campo"
                 rows={1}
-                placeholder={rodando ? "emenda a próxima pergunta… (vai para a fila)" : "pergunte qualquer coisa…"}
+                placeholder={rodando ? "próxima pergunta… (fila)" : "pergunte qualquer coisa…"}
                 title="Enter envia · Shift+Enter quebra linha"
                 value={pergunta}
               onChange={(e) => {

@@ -669,6 +669,11 @@
   }
   .chat-campo::placeholder {
     @apply text-txt3;
+    /* v3.17: placeholder em UMA linha — em telas estreitas ele quebrava e a caixa
+       de 1 linha (rows=1) comia a segunda metade do texto pela borda de baixo */
+    white-space: nowrap;
+    overflow: hidden;
+    text-overflow: ellipsis;
   }
   .chat-enviar {
     @apply grid h-[34px] w-[34px] flex-none cursor-pointer place-items-center rounded-[10px]
@@ -814,7 +819,13 @@
     @apply px-2 pt-2;
   }
   .chat-composer {
-    @apply rounded-xl pl-3;
-    min-height: 52px;
+    @apply rounded-xl items-center pl-3;
+    min-height: 48px;
+  }
+  /* v3.17 — alinhamento do pé no celular: antes cada elemento tinha sua altura
+     (campo 35, enviar 40, nova 44) e a linha alinhava tudo por BAIXO — dava o degrau
+     que o dono viu. Agora barra e botões vivem no mesmo centro de 48px. */
+  .chat-piso-linha {
+    @apply items-center;
   }
 }

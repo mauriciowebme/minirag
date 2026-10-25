@@ -22,6 +22,10 @@ parecidos com a pergunta, com uma nota de 0 a 1.
 
 ---
 ---
+## v3.17.0 (25/10) — O pé do chat no celular vira uma régua só
+- **O que você vê:** no celular, a linha de digitar fica alinhada: campo, botão de enviar e "nova conversa" vivem no mesmo centro de 48px — sem o degrau entre as alturas, e o texto do campo não nasce mais meio comido pela borda de baixo.
+- **O que acontecia:** cada peça tinha sua altura (campo 35, enviar 40, nova 44) e a barra alinhava tudo por BAIXO; o placeholder do estado "trabalhando" era longo demais para a tela estreita, quebrava em duas linhas dentro de uma caixa de uma linha só, e a segunda linha era cortada no meio dos caracteres. Agora: barra e botões centrados; placeholder em linha única com reticências quando não cabe, e a frase da fila encurtada ("próxima pergunta… (fila)").
+
 ## v3.16.9 (24/10) — A raiz FINAL da tela preta: ninguém sai com matador solto
 - **O que você vê:** a janela abre viva em toda troca e em todo dois-cliques — o preto intermitente que sobreviveu a todas as correções anteriores tinha uma briga de tempo como causa.
 - **O que acontecia (provado por print na Noot):** ao sair para dar lugar ao cliente novo, o velho mandava matar as janelas do perfil **sem esperar**. A varredura lenta chegava atrasada e matava os processos de desenho do navegador **recém-nascido do sucessor**: quadro de janela vivo, corpo preto. Agora a limpeza é synchronous e só toca em processos com mais de 5 segundos de vida — o browser novo é intocável por construção.
