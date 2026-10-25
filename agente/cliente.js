@@ -464,7 +464,7 @@ const PAINEL_HTML = "<!doctype html><html lang=pt-br><head><meta charset=utf-8>"
 "document.getElementById('ctxt').textContent=e.online?'ONLINE no minirag':'desconectado — reconecta sozinho';" +
 "document.getElementById('quando').textContent=e.online?'conectado desde '+new Date(e.conectou_em).toLocaleString('pt-BR'):tempoDaUltima(e);" +
 "document.getElementById('negado').textContent=e.negado?'servidor negou: '+e.negado:'';" +
-"document.getElementById('dir').textContent='v'+e.versao+' · porta '+e.porta;" +
+"document.getElementById('dir').textContent='v'+e.versao+(e.porta?' · porta '+e.porta:'');" +
 "var m='';m+='<span class=k>nome da máquina</span><span class=v>'+e.host+'</span>';" +
 "m+='<span class=k>usuário</span><span class=v>'+e.usuario+'</span>';" +
 "m+='<span class=k>sistema</span><span class=v>'+e.so+'</span>';" +

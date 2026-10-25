@@ -22,6 +22,9 @@ parecidos com a pergunta, com uma nota de 0 a 1.
 
 ---
 ---
+## v3.16.7 (24/10) — Cabeçalho da janela não mostra mais "porta undefined"
+- **O que você vê:** o canto superior direito da janela mostra `v3.16.7` e, junto, a porta local — sem o texto "undefined" quando o aviso chega sem esse dado.
+
 ## v3.16.6 (24/10) — A causa final da tela preta: a janela não nasce mais escondida
 - **O que você vê:** a janela do painel abre viva, sempre. Teste lado a lado na Noot: a MESMA janela com os mesmos ajustes — aberta por um processo visível, renderiza; aberta por processo que a esconde no nascimento, fica preta.
 - **O que acontecia:** o cliente escondia a janela no momento de criar (herança de época em que havia console). Janela que nasce escondida é "mostrada" pelo navegador sem nunca ter pintado o primeiro quadro — e aí fica o retângulo preto para sempre. Removido o esconder: sem console, sem motivo para esconder.
