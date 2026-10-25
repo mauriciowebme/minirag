@@ -413,18 +413,23 @@ function fecharJanelasMiniragSync() {
   // entrava no browser órfão do perfil (mesmo user-data-dir = um browser só) e herdava
   // o compositor quebrado dele — tela preta que reboot nenhum curava, porque a janela
   // nova nascia dentro do doente. Mato os browsers do MEU perfil e só então abro.
+  // v3.16.9: guarda de idade — só mato processos com mais de 5 s de vida. O expurgo
+  // atrasado do cliente VELHO (kill assíncrono na saída) alcançava o browser RECÉM-nascido
+  // do cliente novo e matava só os render dele: quadro de janela vivo, corpo preto
+  // (print np13 da Noot, 24/10). Browser recém-nascido é intocável; fantasma velho morre.
   try {
-    const ps = "Get-CimInstance Win32_Process -Filter \"Name='msedge.exe' OR Name='chrome.exe'\" | Where-Object { $_.CommandLine -match 'minirag-janela' } | ForEach-Object { Stop-Process -Id $_.ProcessId -Force -ErrorAction SilentlyContinue }";
+    const ps = "Get-CimInstance Win32_Process -Filter \"Name='msedge.exe' OR Name='chrome.exe'\" | Where-Object { $_.CommandLine -match 'minirag-janela' -and $_.CreationDate -lt (Get-Date).AddSeconds(-5) } | ForEach-Object { Stop-Process -Id $_.ProcessId -Force -ErrorAction SilentlyContinue }";
     spawnSync("powershell.exe", ["-NoProfile", "-Command", ps], { windowsHide: true, timeout: 5000, stdio: "ignore" });
   } catch { /* mudo: abrir sem expurgo > nao abrir */ }
 }
 function fecharJanelasMinirag() {
   if (!EH_WIN) return;
+  // v3.16.9: era fire-and-forget — o powershell continuava vivo DEPOIS do meu exit e o
+  // CIM lento mordia o browser novo do sucessor (tela preta intermitente na troca e no
+  // dois-cliques). Agora é SYNC: ninguém sai daqui com matador solto na praça.
   try {
-    const ps = "Get-CimInstance Win32_Process -Filter \"Name='msedge.exe' OR Name='chrome.exe'\" | Where-Object { $_.CommandLine -match 'minirag-janela' } | ForEach-Object { Stop-Process -Id $_.ProcessId -Force -ErrorAction SilentlyContinue }";
-    const p = spawn("powershell.exe", ["-NoProfile", "-Command", ps], { detached: true, stdio: "ignore", windowsHide: true });
-    p.on("error", () => {});
-    p.unref();
+    const ps = "Get-CimInstance Win32_Process -Filter \"Name='msedge.exe' OR Name='chrome.exe'\" | Where-Object { $_.CommandLine -match 'minirag-janela' -and $_.CreationDate -lt (Get-Date).AddSeconds(-5) } | ForEach-Object { Stop-Process -Id $_.ProcessId -Force -ErrorAction SilentlyContinue }";
+    spawnSync("powershell.exe", ["-NoProfile", "-Command", ps], { windowsHide: true, timeout: 5000, stdio: "ignore" });
   } catch { /* mudo: melhor janela sobrando do que cliente travado */ }
 }
 /* A página é estática de propósito: os dados chegam por /api/estado e /evento.

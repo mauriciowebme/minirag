@@ -22,6 +22,10 @@ parecidos com a pergunta, com uma nota de 0 a 1.
 
 ---
 ---
+## v3.16.9 (24/10) — A raiz FINAL da tela preta: ninguém sai com matador solto
+- **O que você vê:** a janela abre viva em toda troca e em todo dois-cliques — o preto intermitente que sobreviveu a todas as correções anteriores tinha uma briga de tempo como causa.
+- **O que acontecia (provado por print na Noot):** ao sair para dar lugar ao cliente novo, o velho mandava matar as janelas do perfil **sem esperar**. A varredura lenta chegava atrasada e matava os processos de desenho do navegador **recém-nascido do sucessor**: quadro de janela vivo, corpo preto. Agora a limpeza é synchronous e só toca em processos com mais de 5 segundos de vida — o browser novo é intocável por construção.
+
 ## v3.16.8 (24/10) — Testa o ciclo completo de atualização automática
 - **O que você vê:** nada muda na tela; esta versão existe para provar o ciclo inteiro — o servidor anuncia, a máquina baixa, se troca, relança e **abre a janela nova sozinha**, com os tempos cronometrados pelo log dela.
 
