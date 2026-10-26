@@ -200,7 +200,12 @@ export default function App() {
         const ativo = m.id === "gavetas" ? DENTRO_DO_CAMINHO.has(vista) : vista === m.id;
         const rotulo = m.id === "gavetas" ? (operador ? "Usuários" : "Gavetas") : m.rotulo;
         const botao = (
-          <button key={m.id} data-menu={m.id} className={"nav-item" + (ativo ? " nav-item-on" : "")} onClick={() => (m.id === "config" ? cliqueConfig() : navegar(m.id))}>
+          <button
+            key={m.id}
+            data-menu={m.id}
+            className={"nav-item" + (ativo ? (m.id === "config" && cfgAberto ? " nav-item-suave" : " nav-item-on") : "")}
+            onClick={() => (m.id === "config" ? cliqueConfig() : navegar(m.id))}
+          >
             <span className="w-4 text-center opacity-90" aria-hidden="true">
               {m.icone}
             </span>
@@ -221,20 +226,23 @@ export default function App() {
         return (
           <div key="config-grupo" className="flex flex-col gap-0.5">
             {botao}
-            {cfgAberto &&
-              SECOES_CFG.map(([id, secRotulo]) => (
-                <button
-                  key={"cfg-filho-" + id}
-                  data-menu-filho={id}
-                  className={"nav-filho" + (vista === "config" && abaConfig === id ? " nav-filho-on" : "")}
-                  onClick={() => {
-                    navegar("config");
-                    setAbaConfig(id);
-                  }}
-                >
-                  {secRotulo}
-                </button>
-              ))}
+            {cfgAberto && (
+              <div className="nav-rail">
+                {SECOES_CFG.map(([id, secRotulo]) => (
+                  <button
+                    key={"cfg-filho-" + id}
+                    data-menu-filho={id}
+                    className={"nav-filho" + (vista === "config" && abaConfig === id ? " nav-filho-on" : "")}
+                    onClick={() => {
+                      navegar("config");
+                      setAbaConfig(id);
+                    }}
+                  >
+                    {secRotulo}
+                  </button>
+                ))}
+              </div>
+            )}
           </div>
         );
       })}

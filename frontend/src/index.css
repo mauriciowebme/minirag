@@ -280,10 +280,24 @@
     @apply bg-sup3 font-[550] text-txt;
     box-shadow: inset 2px 0 0 #3fb950;
   }
+  /* v3.20: pai expandido usa o filho como marca — um verde por vez, sem
+     duas barras empilhadas (o dono mostrou o choque no print) */
+  .nav-item-suave {
+    @apply bg-sup3 font-[550] text-txt;
+  }
+  .nav-rail {
+    /* linha-guia da árvore: o filho continua alinhado no x do texto do pai */
+    margin-left: 18px;
+    border-left: 1px solid var(--borda, #232c3a);
+    padding-left: 0;
+    display: flex;
+    flex-direction: column;
+    gap: 2px;
+  }
   /* v3.19.2: filho de submenu — texto alinhado com o texto do pai (46px da borda
      do aside), mesmo ritmo de 44px, mesma cor de item inativo do topo. */
   .nav-filho {
-    @apply flex w-full items-center rounded-[9px] py-[9px] pl-[36px] pr-2.5 text-left text-[13px] text-txt2 transition-colors hover:bg-sup2 hover:text-txt;
+    @apply flex w-full items-center rounded-[9px] py-[9px] pl-[17px] pr-2.5 text-left text-[13px] text-txt2 transition-colors hover:bg-sup2 hover:text-txt;
     min-height: 44px;
   }
   .nav-filho-on {
@@ -332,8 +346,13 @@
     @apply mt-0.5 text-[11px] text-txt3;
   }
   .grade-2 {
+    /* v3.20: colunas IGUAIS — 1.35fr/1fr fazia pares de campos parecerem acidente */
     @apply grid gap-3.5;
-    grid-template-columns: 1.35fr 1fr;
+    grid-template-columns: 1fr 1fr;
+  }
+  .grade-3 {
+    @apply grid gap-3.5;
+    grid-template-columns: 1fr 1fr 1fr;
   }
   .linha-barra {
     @apply mb-2 flex items-center gap-2.5 text-[13px];
@@ -649,7 +668,9 @@
     gap: 8px;
   }
   .cfg-item {
-    @apply flex items-center gap-2 rounded-lg px-2.5 py-2 text-left text-[13px] text-txt2 hover:bg-sup2 hover:text-txt;
+    /* v3.20: fundo próprio — na coluna esquerda do desktop os rótulos
+       pararam de flutuar "órfãos" no vazio; viraram lista visível */
+    @apply flex items-center gap-2 rounded-lg border border-transparent bg-sup px-2.5 py-2 text-left text-[13px] text-txt2 hover:border-borda hover:bg-sup2 hover:text-txt;
     min-height: 44px; /* alvo de toque: regra do projeto (44px), antes tinha 36 */
   }
   .cfg-item-on {
@@ -710,6 +731,7 @@
     grid-template-columns: repeat(3, minmax(0, 1fr));
   }
   .grade-2,
+  .grade-3,
   .grade-cfg {
     grid-template-columns: 1fr;
   }

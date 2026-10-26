@@ -280,7 +280,7 @@ function Provider({ operador, tenant, onIrPainel }: { operador: boolean; tenant:
             <span className="dica mt-1 block">o resto vira uma linha curta (regra, sem custo; nada é resumido por IA)</span>
           </label>
         </div>
-        <div className="grade-2 !gap-3">
+        <div className="grade-3 !gap-3">
           <label className="rotulo m-0">
             janela de contexto (tokens)
             <input id="provContexto" className="campo mt-1" value={contexto} onChange={(e) => setContexto(e.target.value)} />
