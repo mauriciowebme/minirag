@@ -22,6 +22,11 @@ parecidos com a pergunta, com uma nota de 0 a 1.
 
 ---
 ---
+## v3.20.0 (26/10) — A página inteira olhada com olhos de 1920
+- **O que você vê:** no desktop largo, Configurações parou de ter "títulos órfãos" — a coluna de seções é uma lista com superfície própria; os campos do formulário ficaram em grade honesta (pares com a mesma largura, linha tripla de tokens com três colunas iguais, campo solo ocupa a largura toda); o menu lateral mostra **um verde por vez** (ou o pai, ou o filho marcado) e os filhos ganharam a linha-guia da árvore sem sair do alinhamento.
+- **O que acontecia:** o dono mandou um print em 1920×1080 e viu o que minhas medições não viam — eu media o componente isolado em janela padrão; composição de página inteira, no estado rolado, não estava no meu ciclo.
+- **Como é provado:** medição agora nas três larguras (1920, 1440, 390) com a seção rolada: lista de larguras de campo uniforme, uma barra ativa por nível, zero estouro. A etapa virou regra permanente da skill do arquiteto (referência nova `composicao-pagina.md`).
+
 ## v3.19.2 (26/10) — Lateral calibrada no pixel
 - **O que você vê:** o menu ficou uma coisa só — o texto dos itens do submenu começa exatamente na mesma linha do texto dos itens de cima (antes: 6px de desvio), pais e filhos têm a mesma altura de toque (44px; antes: o filho era mais alto que o pai), o submenu deixou de ser cinza "fantasma" e usou a mesma cor dos itens do topo, e a seta de expandir virou um chevron que gira ao abrir. As legendas do cartão de gaveta/modelo subiram de tamanho (eram quase ilegíveis no escuro).
 - **Por que:** o dono olhou o print e chamou de "menu horroroso" — nenhum teste numérico antigo capturia desalinhamento óptico; a medição agora é x por x, altura por altura, antes de publicar.
