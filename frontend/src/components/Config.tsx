@@ -35,7 +35,6 @@ export function Config({
   onIrPainel,
   onControleMaquinas,
   aba,
-  onAba,
 }: {
   nome: string;
   operador: boolean;
@@ -44,7 +43,6 @@ export function Config({
   onIrPainel: () => void;
   onControleMaquinas?: (v: boolean) => void;
   aba: Aba;
-  onAba: (v: Aba) => void;
 }) {
   const SECOES = SECOES_CFG;
   const CORPO: Record<Aba, import("react").ReactNode> = {
@@ -61,34 +59,13 @@ export function Config({
     <section className="flex flex-col gap-3" id="telaConfig">
       <div className="barra">
         <h2>
-          Configurações <span className="sub2">— provider, ferramentas e conta</span>
+          Configurações{" "}
+          <span className="sub2">— {SECOES.find(([id]) => id === aba)?.[1] ?? ""}</span>
         </h2>
       </div>
-      {/* v3.18.1: submenu de configurações em acordeon — no celular o corpo abre
-          embaixo da própria categoria; na tela larga ele cai na coluna 2 da mesma
-          linha (subgrid), então a marcação é uma só para os dois layouts. */}
-      <div className="grade-cfg" id="cfgNav">
-        {SECOES.map(([id, rotulo], i) => (
-          <section
-            key={id}
-            className={"cfg-secao" + (aba === id ? " cfg-secao-on" : "")}
-            style={{ ["--cfg-row" as string]: String(i + 1) } as import("react").CSSProperties}
-          >
-            <button
-              className={"cfg-item" + (aba === id ? " cfg-item-on" : "")}
-              data-cfg={id}
-              aria-expanded={aba === id}
-              onClick={() => onAba(id)}
-            >
-              <span>{rotulo}</span>
-              <svg className="cfg-seta" width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true">
-                <path d="M9 6l6 6-6 6" />
-              </svg>
-            </button>
-            {aba === id && <div className="cfg-corpo min-w-0">{CORPO[id]}</div>}
-          </section>
-        ))}
-      </div>
+      {/* v3.21: sem accordion interno — a seção vem da lateral (data-menu-filho).
+          A tela só exibe o conteúdo da seção ativa. */}
+      <div className="min-w-0">{CORPO[aba]}</div>
     </section>
   );
 }

@@ -295,10 +295,23 @@
     gap: 2px;
   }
   /* v3.19.2: filho de submenu — texto alinhado com o texto do pai (46px da borda
-     do aside), mesmo ritmo de 44px, mesma cor de item inativo do topo. */
+     do aside), mesmo ritmo de 44px, mesma cor de item inativo do topo.
+     v3.21: ponto de subnível (4px, atenuado; verde no ativo) — o recuo + o ponto
+     formam o sinal visual de "é subnível", sem competir com o destaque do ativo. */
   .nav-filho {
-    @apply flex w-full items-center rounded-[9px] py-[9px] pl-[17px] pr-2.5 text-left text-[13px] text-txt2 transition-colors hover:bg-sup2 hover:text-txt;
+    @apply flex w-full items-center gap-[6px] rounded-[9px] py-[9px] pl-[11px] pr-2.5 text-left text-[13px] text-txt2 transition-colors hover:bg-sup2 hover:text-txt;
     min-height: 44px;
+  }
+  .nav-filho::before {
+    content: "";
+    width: 4px;
+    height: 4px;
+    border-radius: 999px;
+    background: #4a5a70;
+    flex: none;
+  }
+  .nav-filho-on::before {
+    background: #3fb950;
   }
   .nav-filho-on {
     @apply bg-sup3 font-[550] text-txt;
@@ -655,52 +668,9 @@
   }
 
 
-  /* configurações — v3.18.1: acordeon. Celular: corpo embaixo da categoria.
-     Tela larga (≥901px): seção ocupa a linha inteira com subgrid — cabeçalho na
-     coluna 1, corpo na coluna 2 da MESMA linha. Marca única para os dois layouts. */
-  .grade-cfg {
-    display: grid;
-    gap: 12px;
-  }
-  .cfg-secao {
-    display: flex;
-    flex-direction: column;
-    gap: 8px;
-  }
-  .cfg-item {
-    /* v3.20: fundo próprio — na coluna esquerda do desktop os rótulos
-       pararam de flutuar "órfãos" no vazio; viraram lista visível */
-    @apply flex items-center gap-2 rounded-lg border border-transparent bg-sup px-2.5 py-2 text-left text-[13px] text-txt2 hover:border-borda hover:bg-sup2 hover:text-txt;
-    min-height: 44px; /* alvo de toque: regra do projeto (44px), antes tinha 36 */
-  }
-  .cfg-item-on {
-    @apply bg-sup3 text-txt;
-  }
-  .cfg-seta {
-    @apply ml-auto shrink-0 text-txt3 transition-transform duration-150;
-  }
-  .cfg-secao-on > .cfg-item .cfg-seta {
-    transform: rotate(90deg);
-  }
-  @media (min-width: 901px) {
-    .grade-cfg {
-      grid-template-columns: 190px minmax(0, 1fr);
-      grid-auto-rows: min-content;
-      align-items: start;
-      column-gap: 14px;
-    }
-    .cfg-secao {
-      display: grid;
-      grid-column: 1 / -1;
-      grid-row: var(--cfg-row);
-      grid-template-columns: subgrid;
-      gap: 14px;
-      align-items: start;
-    }
-    .cfg-seta {
-      display: none; /* a lista fica sempre visível na tela larga */
-    }
-  }
+  /* v3.21: a seção é escolhida SÓ na lateral (submenu de Configurações) —
+     a tela mostra apenas o conteúdo da seção ativa. O accordion interno
+     (cfg-item) duplicava a navegação e saiu. */
   /* v3.18.1 — no celular a fileira de ações (testar/salvar) cola no pé da tela:
      antes o botão ficar a 2 telas de rolagem dos campos que ele grava */
   @media (max-width: 560px) {
@@ -731,8 +701,7 @@
     grid-template-columns: repeat(3, minmax(0, 1fr));
   }
   .grade-2,
-  .grade-3,
-  .grade-cfg {
+  .grade-3 {
     grid-template-columns: 1fr;
   }
 }

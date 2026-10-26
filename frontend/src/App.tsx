@@ -203,6 +203,8 @@ export default function App() {
           <button
             key={m.id}
             data-menu={m.id}
+            aria-current={ativo ? "page" : undefined}
+            aria-expanded={m.id === "config" ? cfgAberto : undefined}
             className={"nav-item" + (ativo ? (m.id === "config" && cfgAberto ? " nav-item-suave" : " nav-item-on") : "")}
             onClick={() => (m.id === "config" ? cliqueConfig() : navegar(m.id))}
           >
@@ -221,7 +223,8 @@ export default function App() {
         );
         /* v3.19.1 (política do dono, 26/10): Configurações é item pai — as seções
            aparecem como FILHOS indentados no menu principal, cada um navegando
-           direto para a seção. Dentro da tela, o acordeon continua como âncora. */
+           direto para a seção. v3.21: o accordion interno saiu; a lateral é a
+           navegação única das seções. */
         if (m.id !== "config") return botao;
         return (
           <div key="config-grupo" className="flex flex-col gap-0.5">
@@ -232,6 +235,7 @@ export default function App() {
                   <button
                     key={"cfg-filho-" + id}
                     data-menu-filho={id}
+                    aria-current={vista === "config" && abaConfig === id ? "page" : undefined}
                     className={"nav-filho" + (vista === "config" && abaConfig === id ? " nav-filho-on" : "")}
                     onClick={() => {
                       navegar("config");
@@ -442,7 +446,6 @@ export default function App() {
               onIrPainel={() => navegar("painel")}
               onControleMaquinas={setControleMaq}
               aba={abaConfig}
-              onAba={setAbaConfig}
             />
           )}
         </main>
