@@ -11,7 +11,20 @@ import type {
   TesteMcpResp,
 } from "../types";
 
-type Aba = "provider" | "provedores" | "ferramentas" | "conta" | "limites" | "esquecimento" | "sistema";
+export type Aba = "provider" | "provedores" | "ferramentas" | "conta" | "limites" | "esquecimento" | "sistema";
+
+/* v3.19.1: as seções vivem aqui, mas o MENU PRINCIPAL também as conhece —
+   o item "Configurações" abre submenu com estas mesmas entradas (política do
+   dono, 26/10: seção nova entra como FILHO no menu, nunca só como aba interna). */
+export const SECOES_CFG: [Aba, string][] = [
+  ["provider", "Provider do chat"],
+  ["provedores", "Provedores nomeados"],
+  ["ferramentas", "Ferramentas (MCP)"],
+  ["conta", "Conta e chave"],
+  ["limites", "Limites"],
+  ["esquecimento", "Esquecimento"],
+  ["sistema", "Sistema"],
+];
 
 /** Configurações: provider do chat, ferramentas (MCP), conta, limites, esquecimento e sistema. */
 export function Config({
@@ -21,6 +34,8 @@ export function Config({
   onChaveNova,
   onIrPainel,
   onControleMaquinas,
+  aba,
+  onAba,
 }: {
   nome: string;
   operador: boolean;
@@ -28,18 +43,10 @@ export function Config({
   onChaveNova: (chave: string) => void;
   onIrPainel: () => void;
   onControleMaquinas?: (v: boolean) => void;
+  aba: Aba;
+  onAba: (v: Aba) => void;
 }) {
-  const [aba, setAba] = useState<Aba>("provider");
-
-  const SECOES: [Aba, string][] = [
-    ["provider", "Provider do chat"],
-    ["provedores", "Provedores nomeados"],
-    ["ferramentas", "Ferramentas (MCP)"],
-    ["conta", "Conta e chave"],
-    ["limites", "Limites"],
-    ["esquecimento", "Esquecimento"],
-    ["sistema", "Sistema"],
-  ];
+  const SECOES = SECOES_CFG;
   const CORPO: Record<Aba, import("react").ReactNode> = {
     provider: <Provider operador={operador} tenant={tenant} onIrPainel={onIrPainel} />,
     provedores: <Provedores operador={operador} />,
@@ -71,7 +78,7 @@ export function Config({
               className={"cfg-item" + (aba === id ? " cfg-item-on" : "")}
               data-cfg={id}
               aria-expanded={aba === id}
-              onClick={() => setAba(id)}
+              onClick={() => onAba(id)}
             >
               <span>{rotulo}</span>
               <svg className="cfg-seta" width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true">

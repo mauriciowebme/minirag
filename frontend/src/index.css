@@ -279,6 +279,16 @@
     @apply bg-sup3 font-[550] text-txt;
     box-shadow: inset 2px 0 0 #3fb950;
   }
+  /* v3.19.1: filho de submenu do menu principal — indentado, levemente menor,
+     mas com os mesmos 44px de alvo de toque (padrão celular medido). */
+  .nav-filho {
+    @apply flex w-full items-center rounded-[9px] py-[9px] pl-[30px] pr-2.5 text-left text-[12.5px] text-txt3 transition-colors hover:bg-sup2 hover:text-txt;
+    min-height: 44px;
+  }
+  .nav-filho-on {
+    @apply bg-sup3 font-[550] text-txt;
+    box-shadow: inset 2px 0 0 #3fb950;
+  }
   .mono {
     @apply font-mono text-[12px] text-txt2;
   }

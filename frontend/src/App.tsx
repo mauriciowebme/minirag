@@ -8,7 +8,7 @@ import { Buscar } from "./components/Buscar";
 import { Jobs } from "./components/Jobs";
 import { Painel } from "./components/Painel";
 import { Chat } from "./components/Chat";
-import { Config } from "./components/Config";
+import { Config, SECOES_CFG, type Aba } from "./components/Config";
 import { Maquinas } from "./components/Maquinas";
 import { get, qs } from "./services/api";
 import type { GavetasResp, HealthResp, ProviderResp, Vista } from "./types";
@@ -56,6 +56,11 @@ export default function App() {
   const [sujo, setSujo] = useState(false);
   const [recarregarArquivos, setRecarregarArquivos] = useState(0);
   const [menuAberto, setMenuAberto] = useState(false);
+  /* v3.19.1 (dono, 26/10): Configurações no menu principal é PAI com submenu —
+     a aba interna do Config passou a viver aqui em cima para o filho marcado
+     refletir a seção aberta, e navegar para o filho cair direto nela. */
+  const [cfgAberto, setCfgAberto] = useState(false);
+  const [abaConfig, setAbaConfig] = useState<Aba>("provider");
 
   /* v3.14.1 — no celular o chat ocupa a tela toda e o ☰ virou a única porta de saída da
      conversa: Esc fecha a gaveta (antes só fechava clicando no fundo escuro). */
@@ -163,6 +168,14 @@ export default function App() {
     [sujo, sessao.logado, sessao.sessao.operador, controleMaq],
   );
 
+  const cliqueConfig = useCallback(() => {
+    if (vista === "config") setCfgAberto((v) => !v);
+    else {
+      navegar("config");
+      setCfgAberto(true);
+    }
+  }, [vista, navegar]);
+
   if (!sessao.logado) {
     return (
       <div className="min-h-[100dvh]">
@@ -186,13 +199,41 @@ export default function App() {
       {MENU.filter((m) => (operador || VISTAS_DO_COMUM.includes(m.id)) && (m.id !== "maquinas" || controleMaq)).map((m) => {
         const ativo = m.id === "gavetas" ? DENTRO_DO_CAMINHO.has(vista) : vista === m.id;
         const rotulo = m.id === "gavetas" ? (operador ? "Usuários" : "Gavetas") : m.rotulo;
-        return (
-          <button key={m.id} data-menu={m.id} className={"nav-item" + (ativo ? " nav-item-on" : "")} onClick={() => navegar(m.id)}>
+        const botao = (
+          <button key={m.id} data-menu={m.id} className={"nav-item" + (ativo ? " nav-item-on" : "")} onClick={() => (m.id === "config" ? cliqueConfig() : navegar(m.id))}>
             <span className="w-4 text-center opacity-90" aria-hidden="true">
               {m.icone}
             </span>
             {rotulo}
+            {m.id === "config" && (
+              <span className="ml-auto text-txt3" aria-hidden="true">
+                {cfgAberto ? "▾" : "▸"}
+              </span>
+            )}
           </button>
+        );
+        /* v3.19.1 (política do dono, 26/10): Configurações é item pai — as seções
+           aparecem como FILHOS indentados no menu principal, cada um navegando
+           direto para a seção. Dentro da tela, o acordeon continua como âncora. */
+        if (m.id !== "config") return botao;
+        return (
+          <div key="config-grupo" className="flex flex-col gap-0.5">
+            {botao}
+            {cfgAberto &&
+              SECOES_CFG.map(([id, secRotulo]) => (
+                <button
+                  key={"cfg-filho-" + id}
+                  data-menu-filho={id}
+                  className={"nav-filho" + (vista === "config" && abaConfig === id ? " nav-filho-on" : "")}
+                  onClick={() => {
+                    navegar("config");
+                    setAbaConfig(id);
+                  }}
+                >
+                  {secRotulo}
+                </button>
+              ))}
+          </div>
         );
       })}
 
@@ -390,6 +431,8 @@ export default function App() {
               onChaveNova={(c) => sessao.trocarChave(c)}
               onIrPainel={() => navegar("painel")}
               onControleMaquinas={setControleMaq}
+              aba={abaConfig}
+              onAba={setAbaConfig}
             />
           )}
         </main>
