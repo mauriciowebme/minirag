@@ -302,7 +302,7 @@
 | **Prioridade** | 🟡 Média |
 | **Status** | ✅ v3.19 (pedido pelo dono em 26/10) |
 | **Descrição** | Cadastro de N provedores nomeados (tabela `provedores`, escopo próprio/global) com chave mascarada; a lista de modelos vem do próprio serviço (`GET /models`, fallback `/v1/models` e `/api/tags` do Ollama — padrão medido no Open WebUI e no Hermes), cacheada na linha com data. No chat, régua acima do composer escolhe provedor+modelo POR CONVERSA (memória do transporte); a resposta carrega selo "via X" gravado em `chat_mensagens`. Guarda: com cache descoberto, modelo fora da lista é 422. |
-| **Escopo** | Feito: serviço (`src/provedores.ts`), resolução no `resolverProvider`, colunas em `chat_tarefas`/`chat_mensagens`, rotas `/provedores`, tela em Configurações, régua no chat, bloco v3.19 na suíte (17 checagens). |
+| **Escopo** | Feito: serviço (`src/provedores.ts`), resolução no `resolverProvider`, colunas em `chat_tarefas`/`chat_mensagens`, rotas `/provedores`, tela em Configurações, régua no chat, bloco v3.19 na suíte (17 checagens). v3.19.1: seções de Configurações viraram **submenu do item pai no menu principal** (cobrado pelo dono 26/10; régua gravada em `arquiteto-sistema/references/navegacao-menu.md`). |
 | **Riscos** | Costeamento por provedor ainda não existe (o "tok" medido é do que saiu); lista de modelos de gateway com paginação pode cortar em 500. |
 
 ---

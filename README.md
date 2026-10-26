@@ -22,6 +22,10 @@ parecidos com a pergunta, com uma nota de 0 a 1.
 
 ---
 ---
+## v3.19.1 (26/10) — Configurações ganhou submenu no menu principal
+- **O que você vê:** o item ⚙ Configurações do menu principal agora tem seta e **abre as seções como filhas indentadas** (Provedores, Ferramentas, Conta, Limites...); cada filho leva direto à seção, com a marca de qual está aberta. O acordeon dentro da tela continua e fica sincronizado com o menu.
+- **Por que:** o serviço novo de provedores tinha entrado só como aba interna — a política do dono (26/10) é seção de uso direto nascer no menu, não escondida. Alvos de toque medidos: 44px no desktop e no celular, sem estouro horizontal na gaveta.
+
 ## v3.19.0 (26/10) — Você escolhe QUAL serviço responde, e os modelos aparecem sozinhos
 - **O que você vê:** no chat, acima da linha de digitar, uma régua com o **seletor do provedor** ("padrão da casa" ou qualquer serviço cadastrado) e, ao escolher, o **seletor do modelo** já preenchido com a lista que o próprio serviço devolve. Cada resposta ganha no rodapé o selo **"via <provedor>"** — e o selo sobrevive ao reabrir a conversa. Em Configurações entrou a aba **Provedores nomeados**: cadastre nome + URL + chave uma vez (a chave mascarada volta, nunca em claro), toque em **descobrir modelos** e o painel monta a lista — igual ao Open WebUI e ao Hermes, que leem `GET /models` do serviço (com fallback `/v1/models` e `/api/tags` do Ollama). O botão **padrão** elege quem responde quando ninguém escolhe; **servir para todos** publica global, desmarcado fica no teu escopo. No celular os seletores têm 44px de alvo de toque e a régua rola na horizontal sem quebrar a página.
 - **O que acontecia:** dava para cadastrar vários provedores, mas a conversa sempre usava UM — trocar de modelo era entrar em Configurações, mexer três campos e voltar. A lista de modelos era digitada na mão e ficava velha.
