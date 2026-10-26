@@ -30,6 +30,23 @@ export function Config({
 }) {
   const [aba, setAba] = useState<Aba>("provider");
 
+  const SECOES: [Aba, string][] = [
+    ["provider", "Provider do chat"],
+    ["ferramentas", "Ferramentas (MCP)"],
+    ["conta", "Conta e chave"],
+    ["limites", "Limites"],
+    ["esquecimento", "Esquecimento"],
+    ["sistema", "Sistema"],
+  ];
+  const CORPO: Record<Aba, import("react").ReactNode> = {
+    provider: <Provider operador={operador} tenant={tenant} onIrPainel={onIrPainel} />,
+    ferramentas: <Ferramentas operador={operador} tenant={tenant} onControleMaquinas={onControleMaquinas} />,
+    conta: <Conta nome={nome} operador={operador} onChaveNova={onChaveNova} />,
+    limites: <Limites />,
+    esquecimento: <Esquecimento />,
+    sistema: <Sistema />,
+  };
+
   return (
     <section className="flex flex-col gap-3" id="telaConfig">
       <div className="barra">
@@ -37,31 +54,30 @@ export function Config({
           Configurações <span className="sub2">— provider, ferramentas e conta</span>
         </h2>
       </div>
-      <div className="grade-cfg">
-        <nav className="cfg-nav" id="cfgNav">
-          {(
-            [
-              ["provider", "Provider do chat"],
-              ["ferramentas", "Ferramentas (MCP)"],
-              ["conta", "Conta e chave"],
-              ["limites", "Limites"],
-              ["esquecimento", "Esquecimento"],
-              ["sistema", "Sistema"],
-            ] as [Aba, string][]
-          ).map(([id, rotulo]) => (
-            <button key={id} className={"cfg-item" + (aba === id ? " cfg-item-on" : "")} data-cfg={id} onClick={() => setAba(id)}>
-              {rotulo}
+      {/* v3.18.1: submenu de configurações em acordeon — no celular o corpo abre
+          embaixo da própria categoria; na tela larga ele cai na coluna 2 da mesma
+          linha (subgrid), então a marcação é uma só para os dois layouts. */}
+      <div className="grade-cfg" id="cfgNav">
+        {SECOES.map(([id, rotulo], i) => (
+          <section
+            key={id}
+            className={"cfg-secao" + (aba === id ? " cfg-secao-on" : "")}
+            style={{ ["--cfg-row" as string]: String(i + 1) } as import("react").CSSProperties}
+          >
+            <button
+              className={"cfg-item" + (aba === id ? " cfg-item-on" : "")}
+              data-cfg={id}
+              aria-expanded={aba === id}
+              onClick={() => setAba(id)}
+            >
+              <span>{rotulo}</span>
+              <svg className="cfg-seta" width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true">
+                <path d="M9 6l6 6-6 6" />
+              </svg>
             </button>
-          ))}
-        </nav>
-        <div className="min-w-0 flex-1">
-          {aba === "provider" && <Provider operador={operador} tenant={tenant} onIrPainel={onIrPainel} />}
-          {aba === "ferramentas" && <Ferramentas operador={operador} tenant={tenant} onControleMaquinas={onControleMaquinas} />}
-          {aba === "conta" && <Conta nome={nome} operador={operador} onChaveNova={onChaveNova} />}
-          {aba === "limites" && <Limites />}
-          {aba === "esquecimento" && <Esquecimento />}
-          {aba === "sistema" && <Sistema />}
-        </div>
+            {aba === id && <div className="cfg-corpo min-w-0">{CORPO[id]}</div>}
+          </section>
+        ))}
       </div>
     </section>
   );
@@ -176,9 +192,10 @@ function Provider({ operador, tenant, onIrPainel }: { operador: boolean; tenant:
   return (
     <div className="cartao">
       <h2 className="mb-3 text-[13px] font-semibold text-txt2">
-        Provider do chat{" "}
-        <span className="sub2">
-          — é o único pré-requisito do Chat · editando:{" "}
+        Provider do chat
+        <span className="sub2 block font-normal">— é o único pré-requisito do Chat</span>
+        <span className="sub2 block font-normal">
+          editando:{" "}
           {p?.escopo === "*" || global ? "padrão global (todos os clientes)" : p?.escopo ? `“${p.escopo}” (${p.origem === "global" ? "herdado do global" : "linha própria"})` : "nada salvo ainda"}
         </span>
       </h2>
@@ -277,7 +294,7 @@ function Provider({ operador, tenant, onIrPainel }: { operador: boolean; tenant:
             </span>
           </label>
         </div>
-        <div className="flex flex-wrap items-center gap-3 border-t border-borda pt-3">
+        <div className="cfg-acoes flex flex-wrap items-center gap-3 border-t border-borda pt-3">
           <label className="check">
             <input type="checkbox" checked={ativo} onChange={(e) => setAtivo(e.target.checked)} /> usar este provider no chat
           </label>

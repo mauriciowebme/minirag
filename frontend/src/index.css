@@ -617,19 +617,58 @@
   }
 
 
-  /* configurações */
+  /* configurações — v3.18.1: acordeon. Celular: corpo embaixo da categoria.
+     Tela larga (≥901px): seção ocupa a linha inteira com subgrid — cabeçalho na
+     coluna 1, corpo na coluna 2 da MESMA linha. Marca única para os dois layouts. */
   .grade-cfg {
-    @apply grid gap-3.5;
-    grid-template-columns: 190px minmax(0, 1fr);
+    display: grid;
+    gap: 12px;
   }
-  .cfg-nav {
-    @apply flex flex-col gap-0.5 self-start;
+  .cfg-secao {
+    display: flex;
+    flex-direction: column;
+    gap: 8px;
   }
   .cfg-item {
-    @apply rounded-lg px-2.5 py-2 text-left text-[13px] text-txt2 hover:bg-sup2 hover:text-txt;
+    @apply flex items-center gap-2 rounded-lg px-2.5 py-2 text-left text-[13px] text-txt2 hover:bg-sup2 hover:text-txt;
+    min-height: 44px; /* alvo de toque: regra do projeto (44px), antes tinha 36 */
   }
   .cfg-item-on {
     @apply bg-sup3 text-txt;
+  }
+  .cfg-seta {
+    @apply ml-auto shrink-0 text-txt3 transition-transform duration-150;
+  }
+  .cfg-secao-on > .cfg-item .cfg-seta {
+    transform: rotate(90deg);
+  }
+  @media (min-width: 901px) {
+    .grade-cfg {
+      grid-template-columns: 190px minmax(0, 1fr);
+      grid-auto-rows: min-content;
+      align-items: start;
+      column-gap: 14px;
+    }
+    .cfg-secao {
+      display: grid;
+      grid-column: 1 / -1;
+      grid-row: var(--cfg-row);
+      grid-template-columns: subgrid;
+      gap: 14px;
+      align-items: start;
+    }
+    .cfg-seta {
+      display: none; /* a lista fica sempre visível na tela larga */
+    }
+  }
+  /* v3.18.1 — no celular a fileira de ações (testar/salvar) cola no pé da tela:
+     antes o botão ficar a 2 telas de rolagem dos campos que ele grava */
+  @media (max-width: 560px) {
+    .cfg-acoes {
+      @apply sticky z-10 -mx-5 mb-0 mt-3 border-t border-borda bg-sup px-5 py-3;
+      bottom: 0;
+      padding-bottom: calc(12px + env(safe-area-inset-bottom));
+    }
   }
 
   /* avisos e modal */
