@@ -745,6 +745,31 @@
      linha de 21px = 44% de texto; aqui o texto fica com 45%). Antes: caixa de 60px
      com raio 26 (cápsula fechada) e botão circular de 42 dentro, que é o que estava
      gordo e brigando com o texto. */
+  /* v3.19: régua de escolha do provedor/modelo, logo acima do composer.
+     Estreita: uma linha com rolagem lateral; no celular o alvo de toque é 44px
+     (regra da casa, references/layout-celular.md). */
+  .chat-modelos {
+    @apply mx-auto flex items-center gap-2 overflow-x-auto pb-1.5;
+    max-width: 780px;
+    scrollbar-width: none;
+  }
+  .chat-modelos::-webkit-scrollbar {
+    display: none;
+  }
+  .chat-modelos select {
+    @apply h-[30px] shrink-0 rounded-lg border border-bordaforte bg-sup2 px-2
+      text-[12px] text-txt2 focus:outline-none;
+    min-width: 0;
+    max-width: 260px;
+  }
+  .chat-modelos select:focus {
+    border-color: rgba(108, 182, 255, 0.5);
+  }
+  @media (max-width: 720px) {
+    .chat-modelos select {
+      @apply h-[44px] px-3 text-[14px];
+    }
+  }
   .chat-composer {
     @apply mx-auto flex items-end gap-2 rounded-xl border border-bordaforte
       bg-sup2 py-1.5 pl-3.5 pr-1.5;

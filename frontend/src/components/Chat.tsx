@@ -7,10 +7,12 @@ import {
   assinar,
   cancelar,
   chaveConversa,
+  definirSelecao,
   descartarUltimos,
   pedirParada,
   registrarTarefa,
   estado,
+  getSelecao,
   enviar as enviarNaConversa,
   limpar as limparConversa,
   reativar,
@@ -21,7 +23,7 @@ import {
   type SegmentoRastro,
   type Transportar,
 } from "../lib/conversa";
-import type { ChatHistorico, Compactacao, ProviderResp } from "../types";
+import type { ChatHistorico, Compactacao, ProviderResp, Provedor } from "../types";
 
 /** linha de status da tarefa viva (GET /chat/tarefas e GET /chat/tarefa/:id) */
 type TarefaStatus = { id: string; pergunta?: string; status: string; parcial: string; ferramentas?: unknown[]; aviso?: string | null };
@@ -298,6 +300,31 @@ export function Chat({
   const tenantParam = operador && escopo.tenant ? escopo.tenant : undefined;
   const chave = chaveConversa(escopo.tenant, memoria);
   const [snap, setSnap] = useState<Estado>(() => estado(chave));
+  /* v3.19: o usuário escolhe qual provedor (e qual modelo) responde esta conversa */
+  const [provedores, setProvedores] = useState<Provedor[]>([]);
+  const [sel, setSel] = useState<{ provedor: string; modelo: string }>(() => getSelecao(chave));
+
+  useEffect(() => {
+    setSel(getSelecao(chave));
+  }, [chave]);
+  useEffect(() => {
+    let vivo = true;
+    get<{ provedores: Provedor[] }>("/provedores")
+      .then((r) => {
+        if (vivo) setProvedores(r.provedores);
+      })
+      .catch(() => {
+        /* sem provedores cadastrados: a régua nem aparece */
+      });
+    return () => {
+      vivo = false;
+    };
+  }, []);
+  const mudarSelecao = (s: { provedor: string; modelo: string }) => {
+    setSel(s);
+    definirSelecao(chave, s);
+  };
+  const selProvedor = provedores.find((x) => x.ativo && x.nome === sel.provedor);
 
   useEffect(() => {
     setMemoria(escopo.memoria);
@@ -335,6 +362,8 @@ export function Chat({
           ...(m.raciocinio ? { raciocinio: String(m.raciocinio) } : {}),
           ...(Array.isArray(m.fontes) && m.fontes.length ? { fontes: m.fontes.map(String) } : {}),
           ...(m.custo ? { custo: m.custo as Record<string, unknown> } : {}),
+          ...(m.provedor ? { provedor: String(m.provedor) } : {}),
+          ...(m.modelo ? { modelo: String(m.modelo) } : {}),
         });
       }
       semear(chave, linhas);
@@ -928,6 +957,9 @@ export function Chat({
                       {Number(m.custo.tok_out)} tok
                     </span>
                   )}
+                  {m.provedor && (
+                    <span className="chat-hora" title={m.modelo ? "modelo: " + m.modelo : ""}>via {m.provedor}</span>
+                  )}
                 </div>
               ) : null}
               {m.aviso && <div className="sub2 mt-1">aviso: {m.aviso}</div>}
@@ -996,6 +1028,44 @@ export function Chat({
               </svg>
               <span className="chat-nova-rotulo">nova conversa</span>
             </button>
+            {provedores.some((p) => p.ativo) && (
+              <div className="chat-modelos" data-testid="chatModelos">
+                <select
+                  aria-label="provedor da conversa"
+                  title="que serviço responde esta conversa"
+                  value={sel.provedor}
+                  onChange={(e) => mudarSelecao({ provedor: e.target.value, modelo: "" })}
+                >
+                  <option value="">padrão da casa</option>
+                  {provedores.filter((p) => p.ativo).map((p) => (
+                    <option key={p.id} value={p.nome}>
+                      {p.nome}
+                      {p.padrao ? " · padrão" : ""}
+                    </option>
+                  ))}
+                </select>
+                {selProvedor && (
+                  <select
+                    aria-label="modelo"
+                    title={
+                      selProvedor.modelos.length
+                        ? selProvedor.modelos_em
+                          ? "modelos descobertos (cache de " + selProvedor.modelos_em.slice(0, 10) + ")"
+                          : "modelos descobertos"
+                        : "só o modelo cadastrado"
+                    }
+                    value={sel.modelo || selProvedor.modelo}
+                    onChange={(e) => mudarSelecao({ provedor: sel.provedor, modelo: e.target.value })}
+                  >
+                    {(selProvedor.modelos.length ? selProvedor.modelos : [selProvedor.modelo]).map((m) => (
+                      <option key={m} value={m}>
+                        {m}
+                      </option>
+                    ))}
+                  </select>
+                )}
+              </div>
+            )}
             <div
               className="chat-composer"
               onClick={(e) => {

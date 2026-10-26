@@ -26,7 +26,7 @@ export type EventoTransporte =
 
 /** quem sabe falar com o servidor (o Chat injeta; o teste injeta um falso) */
 export type Transportar = (
-  pedido: { pergunta: string; memoria: string; tenant?: string },
+  pedido: { pergunta: string; memoria: string; tenant?: string; provedor?: string; modelo?: string },
   onEvent: (e: EventoTransporte) => void,
 ) => Promise<Record<string, unknown>>;
 
@@ -73,6 +73,9 @@ export type Linha = {
   fontes?: string[];
   /** v3.18 (T018): quanto custou (tok_out; tok_in quando o servidor mandou) */
   custo?: Record<string, unknown> | null;
+  /** v3.19: qual provedor nomeado respondeu (ausente = padrão da casa) */
+  provedor?: string;
+  modelo?: string;
 };
 
 export type Estado = {
@@ -133,7 +136,18 @@ function nova(): Conversa {
   return { msgs: [], fila: [], rodando: false, tarefaId: "", parando: false, vivo: "", inicio: 0, ouvintes: new Set() };
 }
 
-export function chaveConversa(tenant: string, memoria: string): string {
+/* v3.19: provedor/modelo escolhidos POR CONVERSA — a tela lembra e todo reenvio
+ * (novo, regenerar, fila, edição) leva junto. "" = padrão da casa. */
+const selecoes = new Map<string, { provedor?: string; modelo?: string }>();
+export function definirSelecao(chave: string, sel: { provedor?: string; modelo?: string }): void {
+  selecoes.set(chave, sel);
+}
+export function getSelecao(chave: string): { provedor: string; modelo: string } {
+  const s = selecoes.get(chave) ?? {};
+  return { provedor: s.provedor ?? "", modelo: s.modelo ?? "" };
+}
+
+export function chaveConversa(tenant: string, memoria: string) {
   return `${tenant || "-"}|${memoria || "-"}`;
 }
 
@@ -347,6 +361,9 @@ export async function reativar(
       /* v3.18: fontes (T004) e custo (T018) chegam no `fim` — a tela mostra e o histórico confirma */
       if (Array.isArray(r.fontes)) bolha.fontes = (r.fontes as string[]).map(String);
       if (r.custo && typeof r.custo === "object") bolha.custo = r.custo as Record<string, unknown>;
+      /* v3.19: quem respondeu */
+      if (r.provedor) bolha.provedor = String(r.provedor);
+      if (r.modelo) bolha.modelo = String(r.modelo);
       bolha.when = new Date().toISOString();
       bolha.aviso = (r.aviso as string) ?? null;
       bolha.compacto = (r.compacto as string) ?? undefined;
@@ -394,7 +411,7 @@ async function bombeia(chave: string, memoria: string, tenant: string | undefine
   const caixa: { dados: Record<string, unknown> | null } = { dados: null };
   let erro = "";
   try {
-    const saida = await transportar({ pergunta: item.texto, memoria, ...(tenant ? { tenant } : {}) }, (e) => {
+    const saida = await transportar({ pergunta: item.texto, memoria, ...(tenant ? { tenant } : {}), ...getSelecao(chave) }, (e) => {
       const bolha = c.msgs.find((m) => m.id === vivoId);
       if (!bolha) return;
       if (e.tipo === "delta") {
@@ -457,6 +474,9 @@ async function bombeia(chave: string, memoria: string, tenant: string | undefine
       /* v3.18: fontes (T004) e custo (T018) chegam no `fim` — a tela mostra e o histórico confirma */
       if (Array.isArray(r.fontes)) bolha.fontes = (r.fontes as string[]).map(String);
       if (r.custo && typeof r.custo === "object") bolha.custo = r.custo as Record<string, unknown>;
+      /* v3.19: quem respondeu */
+      if (r.provedor) bolha.provedor = String(r.provedor);
+      if (r.modelo) bolha.modelo = String(r.modelo);
       bolha.when = new Date().toISOString();
       bolha.aviso = (r.aviso as string) ?? null;
       /* quem desenha o aviso da compactação é a tela; o transporte entrega a linha pronta */

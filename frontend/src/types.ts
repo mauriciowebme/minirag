@@ -289,8 +289,28 @@ export type ChatHistorico = {
     /** v3.18 (T004/T018): de onde a resposta veio e quanto custou */
     fontes?: string[];
     custo?: { tok_in?: number; tok_out?: number } | null;
+    /** v3.19: quem respondeu (nome do provedor; ausente = padrão da casa) */
+    provedor?: string;
+    modelo?: string;
   }[];
 };
+
+/** v3.19: provedor nomeado cadastrado em Configurações (chave nunca volta inteira) */
+export type Provedor = {
+  id: number;
+  nome: string;
+  tipo: string;
+  base_url: string;
+  modelo: string;
+  chave_mascarada: string;
+  ativo: boolean;
+  padrao: boolean;
+  escopo: string;
+  modelos: string[];
+  modelos_em: string | null;
+};
+
+export type ProvedoresResp = { provedores: Provedor[] };
 
 export type ServidorMcp = {
   nome: string;

@@ -1,6 +1,7 @@
 import { useCallback, useEffect, useState } from "react";
 import { del, get, patch, post, put, qs } from "../services/api";
 import { useToast } from "./Toast";
+import { Provedores } from "./Provedores";
 import type {
   ConfigResp,
   HealthResp,
@@ -10,7 +11,7 @@ import type {
   TesteMcpResp,
 } from "../types";
 
-type Aba = "provider" | "ferramentas" | "conta" | "limites" | "esquecimento" | "sistema";
+type Aba = "provider" | "provedores" | "ferramentas" | "conta" | "limites" | "esquecimento" | "sistema";
 
 /** Configurações: provider do chat, ferramentas (MCP), conta, limites, esquecimento e sistema. */
 export function Config({
@@ -32,6 +33,7 @@ export function Config({
 
   const SECOES: [Aba, string][] = [
     ["provider", "Provider do chat"],
+    ["provedores", "Provedores nomeados"],
     ["ferramentas", "Ferramentas (MCP)"],
     ["conta", "Conta e chave"],
     ["limites", "Limites"],
@@ -40,6 +42,7 @@ export function Config({
   ];
   const CORPO: Record<Aba, import("react").ReactNode> = {
     provider: <Provider operador={operador} tenant={tenant} onIrPainel={onIrPainel} />,
+    provedores: <Provedores operador={operador} />,
     ferramentas: <Ferramentas operador={operador} tenant={tenant} onControleMaquinas={onControleMaquinas} />,
     conta: <Conta nome={nome} operador={operador} onChaveNova={onChaveNova} />,
     limites: <Limites />,
