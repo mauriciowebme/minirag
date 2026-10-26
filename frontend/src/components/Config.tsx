@@ -1,24 +1,25 @@
 import { useCallback, useEffect, useState } from "react";
 import { del, get, patch, post, put, qs } from "../services/api";
 import { useToast } from "./Toast";
-import { Provedores } from "./Provedores";
 import type {
   ConfigResp,
   HealthResp,
   ProviderResp,
+  Provedor,
   ServidorMcp,
   ServidoresResp,
   TesteMcpResp,
 } from "../types";
 
-export type Aba = "provider" | "provedores" | "ferramentas" | "conta" | "limites" | "esquecimento" | "sistema";
+export type Aba = "provider" | "ferramentas" | "conta" | "limites" | "esquecimento" | "sistema";
 
 /* v3.19.1: as seções vivem aqui, mas o MENU PRINCIPAL também as conhece —
    o item "Configurações" abre submenu com estas mesmas entradas (política do
-   dono, 26/10: seção nova entra como FILHO no menu, nunca só como aba interna). */
+   dono, 26/10: seção nova entra como FILHO no menu, nunca só como aba interna).
+   v3.21.1: "Provider do chat" + "Provedores nomeados" viraram UMA seção —
+   provider único com tabela (a linha 1 é o padrão da casa). */
 export const SECOES_CFG: [Aba, string][] = [
-  ["provider", "Provider do chat"],
-  ["provedores", "Provedores nomeados"],
+  ["provider", "Provider"],
   ["ferramentas", "Ferramentas (MCP)"],
   ["conta", "Conta e chave"],
   ["limites", "Limites"],
@@ -47,7 +48,6 @@ export function Config({
   const SECOES = SECOES_CFG;
   const CORPO: Record<Aba, import("react").ReactNode> = {
     provider: <Provider operador={operador} tenant={tenant} onIrPainel={onIrPainel} />,
-    provedores: <Provedores operador={operador} />,
     ferramentas: <Ferramentas operador={operador} tenant={tenant} onControleMaquinas={onControleMaquinas} />,
     conta: <Conta nome={nome} operador={operador} onChaveNova={onChaveNova} />,
     limites: <Limites />,
@@ -72,9 +72,16 @@ export function Config({
 
 /* ------------------------------------------------------------- provider */
 
+/** v3.21.1: a seção Provider é UMA: tabela com o padrão da casa (linha 1) + os
+ *  providers nomeados; o form de cada linha abre aqui embaixo. O que era
+ *  "Provider do chat" virou o form da linha padrão; o que era "Provedores
+ *  nomeados" virou as demais linhas. No chat o usuário escolhe provider+modelo. */
 function Provider({ operador, tenant, onIrPainel }: { operador: boolean; tenant: string; onIrPainel: () => void }) {
   const { toast } = useToast();
   const [p, setP] = useState<ProviderResp | null>(null);
+  const [lista, setLista] = useState<Provedor[]>([]);
+  /* form da linha "padrão da casa" */
+  const [formPadraoAberto, setFormPadraoAberto] = useState(false);
   const [tipo, setTipo] = useState<"litellm" | "openai" | "ollama">("litellm");
   const [baseUrl, setBaseUrl] = useState("");
   const [modelo, setModelo] = useState("");
@@ -93,32 +100,66 @@ function Provider({ operador, tenant, onIrPainel }: { operador: boolean; tenant:
   const [global, setGlobal] = useState(false);
   const [teste, setTeste] = useState<{ ok: boolean; msg: string } | null>(null);
   const [ocupado, setOcupado] = useState(false);
+  /* form dos providers nomeados (novo ou edição) */
+  const [novo, setNovo] = useState({ nome: "", tipo: "litellm", base_url: "", chave: "", modelo: "", paraTodos: true, escopoOrig: "global" });
+  const [editando, setEditando] = useState<string | null>(null);
+  const [formNomeadoAberto, setFormNomeadoAberto] = useState(false);
+  const [rodando, setRodando] = useState<string | null>(null);
 
   const carregar = useCallback(async () => {
-    try {
-      const r = await get<ProviderResp>("/config/provider" + (operador && tenant ? "?" + qs({ tenant }) : ""));
+    const [rProv, rLista] = await Promise.allSettled([
+      get<ProviderResp>("/config/provider" + (operador && tenant ? "?" + qs({ tenant }) : "")),
+      get<{ provedores: Provedor[] }>("/provedores"),
+    ]);
+    if (rProv.status === "fulfilled") {
+      const r = rProv.value;
       setP(r);
-      setTipo(r.tipo);
-      setBaseUrl(r.base_url);
-      setModelo(r.modelo);
-      setTemperatura(String(r.temperatura));
-      setPrompt(r.system_prompt ?? "");
-      setRodadas(String(r.max_rodadas));
-      setMemoria(String(r.memoria_turnos ?? 12));
-      setVerbatim(String(r.verbatim_turnos ?? 4));
-      setReserva(String(r.reserva_tokens ?? 1024));
-      setSilencio(String(r.silencio_s ?? 0));
-      setContexto(String(r.contexto_tokens ?? 0));
-      setAtivo(r.configurado || r.ativo);
-      setChave("");
-    } catch (e) {
-      toast("provider: " + (e as Error).message);
+      /* se o form do padrão estiver aberto, sincroniza com o que voltou do servidor */
+      if (formPadraoAberto) {
+        setTipo(r.tipo);
+        setBaseUrl(r.base_url);
+        setModelo(r.modelo);
+        setTemperatura(String(r.temperatura));
+        setPrompt(r.system_prompt ?? "");
+        setRodadas(String(r.max_rodadas));
+        setMemoria(String(r.memoria_turnos ?? 12));
+        setVerbatim(String(r.verbatim_turnos ?? 4));
+        setReserva(String(r.reserva_tokens ?? 1024));
+        setSilencio(String(r.silencio_s ?? 0));
+        setContexto(String(r.contexto_tokens ?? 0));
+        setAtivo(r.configurado || r.ativo);
+        setChave("");
+      }
+    } else {
+      toast("provider: " + (rProv.reason as Error).message);
     }
-  }, [operador, tenant, toast]);
+    if (rLista.status === "fulfilled") setLista(rLista.value.provedores);
+    /* o chat precisa da lista mesmo se o config falhar; falha dela não derruba a tela */
+  }, [operador, tenant, toast, formPadraoAberto]);
 
   useEffect(() => {
     void carregar();
   }, [carregar]);
+
+  function preencherPadrao() {
+    if (!p) return;
+    setTipo(p.tipo);
+    setBaseUrl(p.base_url);
+    setModelo(p.modelo);
+    setTemperatura(String(p.temperatura));
+    setPrompt(p.system_prompt ?? "");
+    setRodadas(String(p.max_rodadas));
+    setMemoria(String(p.memoria_turnos ?? 12));
+    setVerbatim(String(p.verbatim_turnos ?? 4));
+    setReserva(String(p.reserva_tokens ?? 1024));
+    setSilencio(String(p.silencio_s ?? 0));
+    setContexto(String(p.contexto_tokens ?? 0));
+    setAtivo(p.configurado || p.ativo);
+    setGlobal(operador && p.origem === "global");
+    setChave("");
+    setTeste(null);
+    setFormPadraoAberto(true);
+  }
 
   function corpo(extra: Record<string, unknown> = {}) {
     return {
@@ -162,13 +203,15 @@ function Provider({ operador, tenant, onIrPainel }: { operador: boolean; tenant:
     }
   }
 
-  async function salvar() {
+  async function salvarPadrao() {
     setOcupado(true);
     try {
       const r = await put<ProviderResp>("/config/provider", corpo());
       setP(r);
       setChave("");
+      setFormPadraoAberto(false);
       toast("provider salvo");
+      await carregar();
     } catch (e) {
       toast("salvar: " + (e as Error).message);
     } finally {
@@ -176,18 +219,222 @@ function Provider({ operador, tenant, onIrPainel }: { operador: boolean; tenant:
     }
   }
 
+  function preencherNomeado(pr: Provedor) {
+    setEditando(pr.nome);
+    setNovo({ nome: pr.nome, tipo: pr.tipo, base_url: pr.base_url, chave: "", modelo: pr.modelo, paraTodos: pr.escopo === "*", escopoOrig: pr.escopo === "*" ? "global" : pr.escopo });
+    setFormNomeadoAberto(true);
+  }
+
+  async function salvarNomeado() {
+    setRodando("form");
+    try {
+      await put("/provedores", {
+        nome: novo.nome.trim(),
+        tipo: novo.tipo,
+        base_url: novo.base_url.trim(),
+        modelo: novo.modelo.trim(),
+        /* "serve para todos" = escopo global, como no provider da casa;
+           desmarcado = mantém o escopo original da linha (não vira "só do op") */
+        tenant: novo.paraTodos ? "global" : novo.escopoOrig,
+        ...(novo.chave ? { chave: novo.chave } : {}),
+      });
+      toast(editando ? "provedor atualizado" : "provedor cadastrado — descubra os modelos para o chat escolher");
+      setNovo({ nome: "", tipo: "litellm", base_url: "", chave: "", modelo: "", paraTodos: true, escopoOrig: "global" });
+      setEditando(null);
+      setFormNomeadoAberto(false);
+      await carregar();
+    } catch (e) {
+      toast("salvar provedor: " + (e as Error).message);
+    } finally {
+      setRodando(null);
+    }
+  }
+
+  /** AUTO-DESCOBERTA: o serviço devolve a lista dele (GET /models; Ollama: /api/tags). */
+  async function descobrir(pr: Provedor) {
+    setRodando(pr.nome);
+    try {
+      const r = await post<{ modelos: string[]; aviso?: string }>("/provedores/modelos", { id: pr.id });
+      toast(
+        r.modelos.length
+          ? `${pr.nome}: ${r.modelos.length} modelo(s) descobertos`
+          : (r.aviso ?? "descobrir modelos: o serviço não devolveu lista"),
+      );
+      await carregar();
+    } catch (e) {
+      toast("descobrir modelos: " + (e as Error).message);
+    } finally {
+      setRodando(null);
+    }
+  }
+
+  async function definirPadrao(pr: Provedor) {
+    setRodando(pr.nome);
+    try {
+      await patch("/provedores/padrao", { id: pr.id });
+      toast(`"${pr.nome}" agora é o padrão — vale para quem não escolhe nada na conversa`);
+      await carregar();
+    } catch (e) {
+      toast("definir padrão: " + (e as Error).message);
+    } finally {
+      setRodando(null);
+    }
+  }
+
+  async function alternar(pr: Provedor) {
+    setRodando(pr.nome);
+    try {
+      /* chave "***" = mantém a gravada (nunca reenviar segredo do formulário) */
+      await put("/provedores", {
+        nome: pr.nome,
+        tipo: pr.tipo,
+        base_url: pr.base_url,
+        modelo: pr.modelo,
+        chave: "***",
+        /* preserva o escopo da linha: sem tenant, o servidor reatribui a linha ao
+           próprio operador (uma global viraria "só do op" no meio do toggle) */
+        tenant: pr.escopo === "*" ? "global" : pr.escopo,
+        ativo: !pr.ativo,
+      });
+      await carregar();
+    } catch (e) {
+      toast("ligar/desligar: " + (e as Error).message);
+    } finally {
+      setRodando(null);
+    }
+  }
+
+  async function apagarNomeado(pr: Provedor) {
+    if (!confirm(`apagar o provedor "${pr.nome}"? as conversas voltam a usar o padrão da casa.`)) return;
+    setRodando(pr.nome);
+    try {
+      await del(`/provedores/${pr.id}`);
+      toast("provedor removido");
+      await carregar();
+    } catch (e) {
+      toast("remover: " + (e as Error).message);
+    } finally {
+      setRodando(null);
+    }
+  }
+
   return (
     <div className="cartao">
-      <h2 className="mb-3 text-[13px] font-semibold text-txt2">
-        Provider do chat
-        <span className="sub2 block font-normal">— é o único pré-requisito do Chat</span>
+      <h2 className="mb-1 text-[13px] font-semibold text-txt2">
+        Provider
         <span className="sub2 block font-normal">
-          editando:{" "}
-          {p?.escopo === "*" || global ? "padrão global (todos os clientes)" : p?.escopo ? `“${p.escopo}” (${p.origem === "global" ? "herdado do global" : "linha própria"})` : "nada salvo ainda"}
+          crie, edite e apague providers — no chat você escolhe o <b>provider</b> e o <b>modelo</b> de cada conversa
         </span>
       </h2>
-      <div className="flex max-w-[620px] flex-col gap-3" id="formProvider">
-        <div className="grade-2 !gap-3">
+
+      <table className="tabela mt-3" id="listaProviders">
+        <thead>
+          <tr>
+            <th>provider</th>
+            <th>tipo · URL base</th>
+            <th>modelo(s)</th>
+            <th>status</th>
+            {operador && <th></th>}
+          </tr>
+        </thead>
+        <tbody>
+          {/* linha 1: o padrão da casa (ex-provider do chat) — não se apaga, só edita */}
+          <tr id="prov-padrao">
+            <td>
+              <b className="mono">padrão da casa</b>
+              <span className="sub2 block">
+                {p?.configurado
+                  ? "responde quando o chat não escolhe outro"
+                  : "ainda não configurado — sem ele o Chat fica desligado"}
+              </span>
+            </td>
+            <td className="mono break-all">{p ? `${p.tipo} · ${p.base_url}` : "—"}</td>
+            <td className="mono break-all">{p?.modelo || "—"}</td>
+            <td>
+              {p?.configurado ? (
+                p.ativo ? (
+                  <span className="chip chip-verde">ativo</span>
+                ) : (
+                  <span className="chip">inativo</span>
+                )
+              ) : (
+                <span className="chip">sem config</span>
+              )}
+              {p?.tem_chave ? <span className="chip">{p.chave_mascarada}</span> : null}
+            </td>
+            {operador && (
+              <td className="text-right">
+                <button className="btn btn-mini" disabled={formPadraoAberto || ocupado} onClick={preencherPadrao}>
+                  {formPadraoAberto ? "editando…" : "editar"}
+                </button>
+              </td>
+            )}
+          </tr>
+          {/* linhas 2..n: providers nomeados */}
+          {lista.map((pr) => (
+            <tr key={pr.id} id={"prov-" + pr.nome} className={pr.ativo ? "" : "op-60"}>
+              <td>
+                <b className="mono">{pr.nome}</b>
+                <span className="sub2 block">{pr.escopo === "*" ? "serve para todos" : `escopo: ${pr.escopo}`}</span>
+              </td>
+              <td className="mono break-all">
+                {pr.tipo} · {pr.base_url}
+              </td>
+              <td className="mono break-all">
+                {pr.modelos.length ? pr.modelos.join(" · ") : pr.modelo || "—"}
+              </td>
+              <td>
+                {pr.padrao ? (
+                  <span className="chip chip-verde">padrão</span>
+                ) : pr.ativo ? (
+                  <span className="chip chip-verde">ativo</span>
+                ) : (
+                  <span className="chip">inativo</span>
+                )}
+                {pr.chave_mascarada ? <span className="chip">{pr.chave_mascarada}</span> : null}
+              </td>
+              {operador && (
+                <td className="text-right">
+                  <button className="btn btn-mini" disabled={rodando === pr.nome} onClick={() => void descobrir(pr)}>
+                    modelos
+                  </button>
+                  {!pr.padrao && (
+                    <button className="btn btn-mini ml-1" disabled={rodando === pr.nome} onClick={() => void definirPadrao(pr)}>
+                      padrão
+                    </button>
+                  )}
+                  <button className="btn btn-mini ml-1" disabled={rodando === pr.nome} onClick={() => void alternar(pr)}>
+                    {pr.ativo ? "desligar" : "ligar"}
+                  </button>
+                  <button className="btn btn-mini ml-1" disabled={rodando === pr.nome} onClick={() => preencherNomeado(pr)}>
+                    {editando === pr.nome && formNomeadoAberto ? "editando…" : "editar"}
+                  </button>
+                  <button className="btn btn-mini ml-1" disabled={rodando === pr.nome} onClick={() => void apagarNomeado(pr)}>
+                    apagar
+                  </button>
+                </td>
+              )}
+            </tr>
+          ))}
+        </tbody>
+      </table>
+
+      {operador && !formNomeadoAberto && (
+        <button
+          id="btnNovoProvedor"
+          className="btn mt-3 self-start"
+          onClick={() => {
+            setEditando(null);
+            setFormNomeadoAberto(true);
+          }}
+        >
+          + novo provider
+        </button>
+      )}
+
+      {/* form da linha "padrão da casa" (ex-provider do chat) */}
+      {formPadraoAberto && operador && (
+        <div className="mt-3 flex max-w-[620px] flex-col gap-3 border-t border-borda pt-3" id="formProvider">
           <label className="rotulo m-0">
             tipo
             <select className="campo mt-1" value={tipo} onChange={(e) => setTipo(e.target.value as typeof tipo)}>
@@ -196,128 +443,182 @@ function Provider({ operador, tenant, onIrPainel }: { operador: boolean; tenant:
               <option value="ollama">Ollama local</option>
             </select>
           </label>
-          <label className="rotulo m-0">
-            modelo
-            <input id="provModelo" className="campo mt-1" value={modelo} placeholder="ex.: claude-sonnet-4.5" onChange={(e) => setModelo(e.target.value)} />
-          </label>
-        </div>
-        <label className="rotulo m-0">
-          URL base
-          <input id="provUrl" className="campo mt-1 mono" value={baseUrl} placeholder="https://litellm.exemplo.com/v1" onChange={(e) => setBaseUrl(e.target.value)} />
-          <span className="dica mt-1 block">sem /chat/completions no fim — o sistema completa</span>
-        </label>
-        <label className="rotulo m-0">
-          chave da API
-          <input
-            id="provChave"
-            type="password"
-            className="campo mt-1 mono"
-            value={chave}
-            placeholder={p?.tem_chave ? `${p.chave_mascarada} (deixe vazio para manter)` : "cole a chave do provider"}
-            onChange={(e) => setChave(e.target.value)}
-            autoComplete="new-password"
-          />
-          <span className="dica mt-1 block">guardada no servidor; a tela só vê os 4 últimos caracteres</span>
-        </label>
-        <label className="rotulo m-0">
-          instruções do modelo (system prompt)
-          <textarea
-            id="provPrompt"
-            className="campo mt-1"
-            rows={5}
-            value={prompt}
-            placeholder="ex.: você é meu assistente de notas fiscais; responda curto, em tabela, citando o documento."
-            onChange={(e) => setPrompt(e.target.value)}
-          />
-          <span className="dica mt-1 block" id="provPromptDica">
-            vazio = nenhuma instrução (o modelo conversa puro, sem citar fonte). Não há regra embutida pelo sistema.
-            {p?.tem_system_prompt ? ` · em uso: ${prompt.length} caracteres` : ""}
-          </span>
-        </label>
-        <div className="grade-2 !gap-3">
-          <label className="rotulo m-0">
-            temperatura
-            <input className="campo mt-1" value={temperatura} onChange={(e) => setTemperatura(e.target.value)} />
-          </label>
-          <label className="rotulo m-0">
-            rodadas do agente (loop de ferramentas; ao bater o teto ele para e avisa)
-            <input id="provRodadas" className="campo mt-1" value={rodadas} onChange={(e) => setRodadas(e.target.value)} />
-            <span className="dica mt-1 block">0 = nunca chamar ferramenta (0 a 60; padrão 5)</span>
-          </label>
-        </div>
-        <div className="grade-2 !gap-3">
-          <label className="rotulo m-0">
-            memória da conversa (mensagens)
-            <input id="provMemoria" className="campo mt-1" value={memoria} onChange={(e) => setMemoria(e.target.value)} />
-            <span className="dica mt-1 block">quantas mensagens antigas desta gaveta voltam ao modelo · 0 = sem memória</span>
-          </label>
-          <label className="rotulo m-0">
-            últimas intactas na compactação
-            <input id="provVerbatim" className="campo mt-1" value={verbatim} onChange={(e) => setVerbatim(e.target.value)} />
-            <span className="dica mt-1 block">o resto vira uma linha curta (regra, sem custo; nada é resumido por IA)</span>
-          </label>
-        </div>
-        <div className="grade-3 !gap-3">
-          <label className="rotulo m-0">
-            janela de contexto (tokens)
-            <input id="provContexto" className="campo mt-1" value={contexto} onChange={(e) => setContexto(e.target.value)} />
-            <span className="dica mt-1 block" id="provJanelaDica">
-              0 = automático · em uso: {(p?.janela_efetiva ?? 0).toLocaleString("pt-BR")} tokens (
-              {p?.origem_janela === "configurada" ? "você digitou" : p?.origem_janela === "detectada" ? "detectada no testar conexão" : "padrão do sistema"})
-              {p?.contexto_detectado ? ` · detectado: ${p.contexto_detectado.toLocaleString("pt-BR")}` : ""}
-            </span>
-          </label>
-          <label className="rotulo m-0">
-            reserva para a resposta (tokens)
-            <input id="provReserva" className="campo mt-1" value={reserva} onChange={(e) => setReserva(e.target.value)} />
-            <span className="dica mt-1 block">espaço deixado livre para o modelo escrever</span>
-          </label>
-          <label className="rotulo m-0">
-            espera sem sinal do modelo (segundos)
-            <input id="provSilencio" className="campo mt-1" value={silencio} onChange={(e) => setSilencio(e.target.value)} />
-            <span className="dica mt-1 block" id="provSilencioDica">
-              0 = {p?.silencio_efetivo_s ?? 180} s · é o tempo que o modelo pode passar sem escrever nada antes de eu
-              desistir; resposta longa que não para de escrever nunca é cortada por tempo
-            </span>
-          </label>
-        </div>
-        <div className="cfg-acoes flex flex-wrap items-center gap-3 border-t border-borda pt-3">
-          <label className="check">
-            <input type="checkbox" checked={ativo} onChange={(e) => setAtivo(e.target.checked)} /> usar este provider no chat
-          </label>
-          {operador && (
-            <label className="check">
-              <input type="checkbox" checked={global} onChange={(e) => setGlobal(e.target.checked)} /> gravar como padrão de todos
+          <div className="grade-2 !gap-3">
+            <label className="rotulo m-0">
+              modelo
+              <input id="provModelo" className="campo mt-1" value={modelo} placeholder="ex.: claude-sonnet-4.5" onChange={(e) => setModelo(e.target.value)} />
             </label>
-          )}
-          <span className="flex-1" />
-          <button id="provTestar" className="btn" disabled={ocupado} onClick={() => void testar()}>
-            testar conexão
-          </button>
-          <button id="provSalvar" className="btn btn-primario" disabled={ocupado} onClick={() => void salvar()}>
-            salvar
-          </button>
-        </div>
-        {teste && (
-          <p className={teste.ok ? "text-[13px] text-verde" : "text-[13px] text-vermelho"} id="provTesteResultado">
-            {teste.ok ? "✓ " : "✕ "}
-            {teste.msg}
-          </p>
-        )}
-        {p && !p.configurado && (
-          <div className="aviso">
-            <span>Sem provider o Chat fica desligado — a Busca continua funcionando normalmente.</span>
           </div>
-        )}
-        {p?.configurado && (
-          <button className="btn btn-sutil self-start" onClick={onIrPainel}>
-            ver no painel
-          </button>
-        )}
-      </div>
+          <label className="rotulo m-0">
+            URL base
+            <input id="provUrl" className="campo mt-1 mono" value={baseUrl} placeholder="https://litellm.exemplo.com/v1" onChange={(e) => setBaseUrl(e.target.value)} />
+            <span className="dica mt-1 block">sem /chat/completions no fim — o sistema completa</span>
+          </label>
+          <label className="rotulo m-0">
+            chave da API
+            <input
+              id="provChave"
+              type="password"
+              className="campo mt-1 mono"
+              value={chave}
+              placeholder={p?.tem_chave ? `${p.chave_mascarada} (deixe vazio para manter)` : "cole a chave do provider"}
+              onChange={(e) => setChave(e.target.value)}
+              autoComplete="new-password"
+            />
+            <span className="dica mt-1 block">guardada no servidor; a tela só vê os 4 últimos caracteres</span>
+          </label>
+          <label className="rotulo m-0">
+            instruções do modelo (system prompt)
+            <textarea
+              id="provPrompt"
+              className="campo mt-1"
+              rows={5}
+              value={prompt}
+              placeholder="ex.: você é meu assistente de notas fiscais; responda curto, em tabela, citando o documento."
+              onChange={(e) => setPrompt(e.target.value)}
+            />
+            <span className="dica mt-1 block" id="provPromptDica">
+              vazio = nenhuma instrução (o modelo conversa puro, sem citar fonte). Não há regra embutida pelo sistema.
+              {p?.tem_system_prompt ? ` · em uso: ${prompt.length} caracteres` : ""}
+            </span>
+          </label>
+          <div className="grade-2 !gap-3">
+            <label className="rotulo m-0">
+              temperatura
+              <input className="campo mt-1" value={temperatura} onChange={(e) => setTemperatura(e.target.value)} />
+            </label>
+            <label className="rotulo m-0">
+              rodadas do agente (loop de ferramentas; ao bater o teto ele para e avisa)
+              <input id="provRodadas" className="campo mt-1" value={rodadas} onChange={(e) => setRodadas(e.target.value)} />
+              <span className="dica mt-1 block">0 = nunca chamar ferramenta (0 a 60; padrão 5)</span>
+            </label>
+          </div>
+          <div className="grade-2 !gap-3">
+            <label className="rotulo m-0">
+              memória da conversa (mensagens)
+              <input id="provMemoria" className="campo mt-1" value={memoria} onChange={(e) => setMemoria(e.target.value)} />
+              <span className="dica mt-1 block">quantas mensagens antigas desta gaveta voltam ao modelo · 0 = sem memória</span>
+            </label>
+            <label className="rotulo m-0">
+              últimas intactas na compactação
+              <input id="provVerbatim" className="campo mt-1" value={verbatim} onChange={(e) => setVerbatim(e.target.value)} />
+              <span className="dica mt-1 block">o resto vira uma linha curta (regra, sem custo; nada é resumido por IA)</span>
+            </label>
+          </div>
+          <div className="grade-3 !gap-3">
+            <label className="rotulo m-0">
+              janela de contexto (tokens)
+              <input id="provContexto" className="campo mt-1" value={contexto} onChange={(e) => setContexto(e.target.value)} />
+              <span className="dica mt-1 block" id="provJanelaDica">
+                0 = automático · em uso: {(p?.janela_efetiva ?? 0).toLocaleString("pt-BR")} tokens (
+                {p?.origem_janela === "configurada" ? "você digitou" : p?.origem_janela === "detectada" ? "detectada no testar conexão" : "padrão do sistema"})
+                {p?.contexto_detectado ? ` · detectado: ${p.contexto_detectado.toLocaleString("pt-BR")}` : ""}
+              </span>
+            </label>
+            <label className="rotulo m-0">
+              reserva para a resposta (tokens)
+              <input id="provReserva" className="campo mt-1" value={reserva} onChange={(e) => setReserva(e.target.value)} />
+              <span className="dica mt-1 block">espaço deixado livre para o modelo escrever</span>
+            </label>
+            <label className="rotulo m-0">
+              espera sem sinal do modelo (segundos)
+              <input id="provSilencio" className="campo mt-1" value={silencio} onChange={(e) => setSilencio(e.target.value)} />
+              <span className="dica mt-1 block" id="provSilencioDica">
+                0 = {p?.silencio_efetivo_s ?? 180} s · é o tempo que o modelo pode passar sem escrever nada antes de eu
+                desistir; resposta longa que não para de escrever nunca é cortada por tempo
+              </span>
+            </label>
+          </div>
+          <div className="cfg-acoes flex flex-wrap items-center gap-3 border-t border-borda pt-3">
+            <label className="check">
+              <input type="checkbox" checked={ativo} onChange={(e) => setAtivo(e.target.checked)} /> usar este provider no chat
+            </label>
+            {operador && (
+              <label className="check">
+                <input type="checkbox" checked={global} onChange={(e) => setGlobal(e.target.checked)} /> gravar como padrão de todos
+              </label>
+            )}
+            <span className="flex-1" />
+            <button id="provTestar" className="btn" disabled={ocupado} onClick={() => void testar()}>
+              testar conexão
+            </button>
+            <button id="provSalvar" className="btn btn-primario" disabled={ocupado} onClick={() => void salvarPadrao()}>
+              salvar
+            </button>
+            <button className="btn btn-sutil" onClick={() => setFormPadraoAberto(false)}>
+              cancelar
+            </button>
+          </div>
+          {teste && (
+            <p className={teste.ok ? "text-[13px] text-verde" : "text-[13px] text-vermelho"} id="provTesteResultado">
+              {teste.ok ? "✓ " : "✕ "}
+              {teste.msg}
+            </p>
+          )}
+          {p && !p.configurado && (
+            <div className="aviso">
+              <span>Sem provider o Chat fica desligado — a Busca continua funcionando normalmente.</span>
+            </div>
+          )}
+        </div>
+      )}
+
+      {/* form de criação/edição dos providers nomeados */}
+      {formNomeadoAberto && operador && (
+        <div className="mt-3 flex max-w-[560px] flex-col gap-3 border-t border-borda pt-3" id="formNovoProvedor">
+          <label className="rotulo m-0">
+            nome (é o que aparece no seletor do chat)
+            <input id="provNome" className="campo mt-1" value={novo.nome} placeholder="ex.: claude, gemini, llama-local"
+              disabled={Boolean(editando)} onChange={(e) => setNovo({ ...novo, nome: e.target.value })} />
+          </label>
+          <label className="rotulo m-0">
+            tipo
+            <select id="provTipo" className="campo mt-1" value={novo.tipo} onChange={(e) => setNovo({ ...novo, tipo: e.target.value })}>
+              <option value="litellm">litellm / OpenAI-compatível</option>
+              <option value="openai">openai</option>
+              <option value="ollama">ollama</option>
+            </select>
+          </label>
+          <label className="rotulo m-0">
+            URL do serviço
+            <input id="provUrlNomeado" className="campo mt-1 mono" value={novo.base_url} placeholder="https://gw.exemplo.com/v1"
+              onChange={(e) => setNovo({ ...novo, base_url: e.target.value })} />
+          </label>
+          <label className="rotulo m-0">
+            chave {editando ? "(deixe em branco para manter a atual)" : ""}
+            <input id="provChaveNomeado" className="campo mt-1 mono" type="password" value={novo.chave} placeholder={editando ? "••••••" : "sk-…"}
+              onChange={(e) => setNovo({ ...novo, chave: e.target.value })} />
+          </label>
+          <label className="rotulo m-0">
+            modelo preferido (o chat pode trocar por outro descoberto)
+            <input id="provModeloNomeado" className="campo mt-1 mono" value={novo.modelo} placeholder="ex.: claude-sonnet-4-20250514"
+              onChange={(e) => setNovo({ ...novo, modelo: e.target.value })} />
+          </label>
+          <label className="check">
+            <input id="provGlobal" type="checkbox" checked={novo.paraTodos}
+              onChange={(e) => setNovo({ ...novo, paraTodos: e.target.checked })} />
+            servir para todos (global) — desmarcado, só o teu escopo usa
+          </label>
+          <div>
+            <button id="btnSalvarProvedor" className="btn" disabled={rodando === "form"} onClick={() => void salvarNomeado()}>
+              {editando ? "salvar mudanças" : "cadastrar"}
+            </button>
+            <button className="btn btn-mini ml-2" onClick={() => { setFormNomeadoAberto(false); setEditando(null); setNovo({ nome: "", tipo: "litellm", base_url: "", chave: "", modelo: "", paraTodos: true, escopoOrig: "global" }); }}>
+              fechar
+            </button>
+          </div>
+        </div>
+      )}
+
+      {p?.configurado && (
+        <button className="btn btn-sutil mt-3 self-start" onClick={onIrPainel}>
+          ver no painel
+        </button>
+      )}
     </div>
   );
 }
+
 
 /* ---------------------------------------------------------- ferramentas */
 
