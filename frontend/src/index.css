@@ -274,20 +274,29 @@
     @apply flex w-full items-center gap-2.5 rounded-[9px] px-2.5 py-[9px] text-left
       text-[13.5px] text-txt2 transition-colors hover:bg-sup2 hover:text-txt
       focus-visible:outline-none focus-visible:ring-[3px] focus-visible:ring-[color:var(--azul-suave)];
+    min-height: 44px; /* v3.19.2: ritmo unico — pai e filho com o mesmo alvo de toque */
   }
   .nav-item-on {
     @apply bg-sup3 font-[550] text-txt;
     box-shadow: inset 2px 0 0 #3fb950;
   }
-  /* v3.19.1: filho de submenu do menu principal — indentado, levemente menor,
-     mas com os mesmos 44px de alvo de toque (padrão celular medido). */
+  /* v3.19.2: filho de submenu — texto alinhado com o texto do pai (46px da borda
+     do aside), mesmo ritmo de 44px, mesma cor de item inativo do topo. */
   .nav-filho {
-    @apply flex w-full items-center rounded-[9px] py-[9px] pl-[30px] pr-2.5 text-left text-[12.5px] text-txt3 transition-colors hover:bg-sup2 hover:text-txt;
+    @apply flex w-full items-center rounded-[9px] py-[9px] pl-[36px] pr-2.5 text-left text-[13px] text-txt2 transition-colors hover:bg-sup2 hover:text-txt;
     min-height: 44px;
   }
   .nav-filho-on {
     @apply bg-sup3 font-[550] text-txt;
     box-shadow: inset 2px 0 0 #3fb950;
+  }
+  .nav-seta {
+    @apply ml-auto flex items-center text-txt2;
+    margin-right: 2px;
+    transition: transform 0.15s ease;
+  }
+  .nav-seta-on {
+    transform: rotate(90deg);
   }
   .mono {
     @apply font-mono text-[12px] text-txt2;
@@ -838,7 +847,8 @@
     @apply flex items-center justify-between gap-2;
   }
   .conv-legenda {
-    @apply text-[10.5px] tracking-[0.4px] text-txt3;
+    /* v3.19.2: legenda do card subiu de 10.5px/txt3 — quase ilegível no escuro */
+    @apply text-[11px] tracking-[0.4px] text-txt2;
   }
   .conv-gav {
     @apply max-w-[130px] cursor-pointer truncate rounded-full border border-[rgba(108,182,255,.35)]
@@ -848,7 +858,7 @@
     @apply max-w-[130px] truncate text-txt2;
   }
   .conv-detalhe {
-    @apply text-[10.5px] text-txt3;
+    @apply text-[11px] text-txt2;
   }
   .conv-detalhe summary {
     @apply cursor-pointer list-none hover:text-txt2;
