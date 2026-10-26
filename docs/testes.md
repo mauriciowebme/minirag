@@ -1,5 +1,7 @@
 # Testes do minirag — lacunas preenchidas pela skill canônica `suite-de-testes`
 
+> **Última atualização:** 2026-10-23 · **Dono:** Mauricio
+
 Este arquivo é o que a canônica exige em cada repo (`docs/testes.md`): **qual modo, qual alvo,
 onde entra o escopo de isolamento, papéis reais, onde a versão aparece na prova de release e qual
 bloco é destrutivo**. O método (regras, esqueleto, buracos clássicos) não se repete aqui — está em
