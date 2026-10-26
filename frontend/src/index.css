@@ -547,6 +547,61 @@
     @apply overflow-x-auto;
   }
 
+  /* ---------------- v3.18: realce, bloco com barra, imagem, fontes, hora ---------------- */
+  .chat-bloco {
+    @apply my-2 overflow-hidden rounded-campo border border-borda bg-[#0c1017];
+  }
+  .chat-bloco-topo {
+    @apply flex items-center justify-between border-b border-borda bg-sup3 px-3 py-1 text-[11px] text-txt3;
+  }
+  .chat-pre-copiar {
+    @apply cursor-pointer border-0 bg-transparent text-[11px] text-txt3 hover:text-txt;
+  }
+  .msg-ia .md .chat-bloco pre {
+    @apply my-0 overflow-x-auto p-3 font-mono text-[13px] whitespace-pre;
+  }
+  .hl-kw {
+    color: #c792ea;
+  }
+  .hl-str {
+    color: #a5d6a7;
+  }
+  .hl-com {
+    color: #5c6672;
+    font-style: italic;
+  }
+  .hl-num {
+    color: #f78c6c;
+  }
+  .chat-img {
+    @apply my-2 max-h-[420px] max-w-full rounded-campo object-contain;
+  }
+  .chat-fontes {
+    @apply mt-1 flex flex-wrap gap-1;
+  }
+  .chat-fonte {
+    @apply max-w-[220px] truncate rounded-full border border-borda bg-sup3 px-2 py-0.5 text-[11px] text-txt2;
+  }
+  .chat-hora {
+    @apply text-[11px] text-txt3;
+  }
+  .chat-acoes-eu {
+    @apply mt-1 flex items-center justify-end gap-1 opacity-70;
+  }
+  .chat-mic-vivo {
+    color: var(--vermelho, #e5534b);
+    animation: mic-pulso 1.2s ease-in-out infinite;
+  }
+  @keyframes mic-pulso {
+    50% {
+      opacity: 0.45;
+    }
+  }
+  /* o pé sobe com o teclado (T008) — transição para não saltar */
+  .chat-piso {
+    transition: transform 0.15s ease-out;
+  }
+
   /* cursor de digitação enquanto a resposta chega em pedaços */
   .msg-ia .md.vivo::after {
     content: "\258D";
@@ -798,6 +853,10 @@
     justify-content: center;
   }
   .chat-nova-rotulo {
+    @apply hidden;
+  }
+  /* v3.18 — no celular o chip de edição é só o ✕: o rótulo de 72px esmagava o campo */
+  .chat-editar-rotulo {
     @apply hidden;
   }
   /* máscara de chave é detalhe de tela larga: no celular cabe só o essencial */

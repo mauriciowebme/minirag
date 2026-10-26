@@ -1,5 +1,5 @@
 import { useCallback, useEffect, useMemo, useState } from "react";
-import { baixar, del, get, post, qs } from "../services/api";
+import { baixar, del, get, post, put, qs } from "../services/api";
 import { fmtData, slug } from "../lib/fmt";
 import { useToast } from "./Toast";
 import type { DecayResp, Gaveta, GavetasResp, RemoverUsuarioResp, UsuarioItem } from "../types";
@@ -25,7 +25,8 @@ const PAGINA = 9; // usuários por página
 const PAGINA_GAVETAS = 20; // gavetas por página dentro do usuário
 
 function cmpH(a: Gaveta, b: Gaveta): number {
-  return (a.memoria || "").localeCompare(b.memoria || "");
+  /* v3.18 (T019): fixada primeiro; dentro do mesmo grupamento, a ordem de sempre */
+  return Number(Boolean(b.fixada)) - Number(Boolean(a.fixada)) || (a.memoria || "").localeCompare(b.memoria || "");
 }
 
 function ordemGaveta(a: Gaveta, b: Gaveta, ordem: Ordem): number {
@@ -78,6 +79,47 @@ export function Gavetas({ operador, tenant, usuario, onAbrirUsuario, onVoltar, o
      botão em duas fases (primeiro clique arma, segundo confirma) e rótulo do prazo. */
   const [contas, setContas] = useState<Record<string, UsuarioItem>>({});
   const [confirmarApagar, setConfirmarApagar] = useState<string | null>(null);
+  /* v3.18 (T021): buscar DENTRO do histórico de conversas (texto das mensagens) */
+  const [termoBusca, setTermoBusca] = useState("");
+  const [achados, setAchados] = useState<{ id: number; memoria: string; papel: string; trecho: string; quando: string }[] | null>(null);
+  const [buscando, setBuscando] = useState(false);
+
+  /** meta da gaveta (T015 renomear / T019 fixar-arquivar): rótulo e flags, nunca o nome técnico */
+  async function metaGaveta(g: Gaveta, mud: { titulo?: string; fixada?: boolean; arquivada?: boolean }, brinde: string) {
+    try {
+      await put("/gavetas/meta", { tenant: g.tenant, memoria: g.memoria, ...mud });
+      toast(brinde);
+      void carregar();
+    } catch (e) {
+      toast("gaveta: " + (e as Error).message);
+    }
+  }
+
+  function renomearGaveta(g: Gaveta) {
+    const t = window.prompt("Novo rótulo da gaveta (o nome técnico não muda):", g.titulo ?? g.memoria);
+    if (t === null) return;
+    void metaGaveta(g, { titulo: t.trim() }, "rótulo salvo");
+  }
+
+  async function buscarHistorico(e: { preventDefault(): void }) {
+    e.preventDefault();
+    const q = termoBusca.trim();
+    if (q.length < 2) {
+      setAchados(null);
+      return;
+    }
+    setBuscando(true);
+    try {
+      const r = await get<{ resultados: { id: number; memoria: string; papel: string; trecho: string; quando: string }[] }>(
+        "/chat/mensagens?" + qs({ q, ...(alvo ? { tenant: alvo } : {}) }),
+      );
+      setAchados(r.resultados ?? []);
+    } catch (err) {
+      toast("buscar: " + (err as Error).message);
+    } finally {
+      setBuscando(false);
+    }
+  }
 
   /* operador começa escolhendo o usuário; quem entra com login comum já vê as suas gavetas */
   const modoUsuarios = operador && usuario === null;
@@ -580,6 +622,50 @@ export function Gavetas({ operador, tenant, usuario, onAbrirUsuario, onVoltar, o
             </button>
           </form>
         )}
+        {/* v3.18 (T021): buscar DENTRO do histórico de conversas — o que a Gaveta mostra
+            são documentos; isto aqui acha a frase que você disse numa conversa qualquer. */}
+        {!modoUsuarios && (
+          <form className="flex items-center gap-2 pb-2" onSubmit={buscarHistorico}>
+            <input
+              id="gavHistoricoQ"
+              className="campo min-w-0 flex-1"
+              value={termoBusca}
+              onChange={(e) => {
+                setTermoBusca(e.target.value);
+                if (!e.target.value.trim()) setAchados(null);
+              }}
+              placeholder="buscar dentro das conversas…"
+              title="procura nas mensagens (não nos documentos)"
+            />
+            <button id="gavHistoricoBtn" className="btn btn-sutil" disabled={buscando}>
+              {buscando ? "buscando…" : "buscar"}
+            </button>
+          </form>
+        )}
+        {achados && (
+          <ul className="mb-2 divide-y divide-borda/60 overflow-hidden rounded-cartao border border-borda bg-sup">
+            {achados.length === 0 ? (
+              <li className="px-3 py-2 text-[12px] text-txt3">nenhuma conversa contém “{termoBusca.trim()}”</li>
+            ) : (
+              achados.map((r) => (
+                <li key={r.id}>
+                  <button
+                    className="w-full cursor-pointer border-0 bg-transparent px-3 py-2 text-left transition-colors hover:bg-sup2"
+                    onClick={() => onAbrir(alvo, r.memoria)}
+                    title={r.trecho}
+                  >
+                    <div className="flex gap-2 text-[11px] text-txt3">
+                      <span className="font-semibold text-txt2">{r.memoria || "padrão"}</span>
+                      <span>{r.papel === "user" ? "você" : "minirag"}</span>
+                      <span>{fmtData(r.quando)}</span>
+                    </div>
+                    <p className="truncate text-[12px]">{r.trecho}</p>
+                  </button>
+                </li>
+              ))
+            )}
+          </ul>
+        )}
         {!carregando && (
           <ul className="divide-y divide-borda/60 overflow-hidden rounded-cartao border border-borda bg-sup">
             {gavetasVisiveis.map((g) => (
@@ -593,9 +679,16 @@ export function Gavetas({ operador, tenant, usuario, onAbrirUsuario, onVoltar, o
                 >
                   <div className="min-w-0 flex-1">
                     <div className="flex flex-wrap items-center gap-1.5">
-                      <span className="truncate text-[13px] font-semibold" title={g.memoria || "padrão"}>
-                        {ehTecnica(g.memoria) ? "gaveta do perfil" : g.memoria || "padrão"}
+                      <span className="truncate text-[13px] font-semibold" title={g.titulo || g.memoria || "padrão"}>
+                        {g.titulo || (ehTecnica(g.memoria) ? "gaveta do perfil" : g.memoria || "padrão")}
                       </span>
+                      {/* v3.18 (T019/T016): rótulo automático/fixada/arquivada aparecem na linha */}
+                      {g.fixada && (
+                        <span className="chip" title="fixada no topo">📌 fixada</span>
+                      )}
+                      {g.arquivada && (
+                        <span className="chip" title="fora da barra lateral; ainda abre por aqui">arquivada</span>
+                      )}
                       {ehTecnica(g.memoria) && (
                         <span className="chip" title={g.memoria}>
                           {curto(g.memoria)}
@@ -618,6 +711,37 @@ export function Gavetas({ operador, tenant, usuario, onAbrirUsuario, onVoltar, o
 
                   {g.docs === 0 && g.chunks === 0 ? (
                     <div className="flex shrink-0 items-center gap-1">
+                      {/* v3.18 (T015/T019): rótulo, fixar e arquivar — a gaveta vazia (só conversa) também existe */}
+                      <button
+                        className="btn btn-sutil btn-mini"
+                        title="renomear (rótulo; o nome técnico não muda)"
+                        onClick={(e) => {
+                          e.stopPropagation();
+                          renomearGaveta(g);
+                        }}
+                      >
+                        ✎
+                      </button>
+                      <button
+                        className="btn btn-sutil btn-mini"
+                        title={g.fixada ? "desafixar do topo" : "fixar no topo"}
+                        onClick={(e) => {
+                          e.stopPropagation();
+                          void metaGaveta(g, { fixada: !g.fixada }, g.fixada ? "desafixada" : "fixada no topo");
+                        }}
+                      >
+                        📌
+                      </button>
+                      <button
+                        className="btn btn-sutil btn-mini"
+                        title={g.arquivada ? "devolver do arquivo" : "arquivar (some da barra lateral)"}
+                        onClick={(e) => {
+                          e.stopPropagation();
+                          void metaGaveta(g, { arquivada: !g.arquivada }, g.arquivada ? "devolvida" : "arquivada");
+                        }}
+                      >
+                        🗄
+                      </button>
                       <span className="btn btn-primario btn-mini">＋ documento</span>
                       <button
                         className="btn btn-perigo btn-mini"
@@ -632,6 +756,37 @@ export function Gavetas({ operador, tenant, usuario, onAbrirUsuario, onVoltar, o
                     </div>
                   ) : (
                     <div className="flex shrink-0 gap-1">
+                      {/* v3.18 (T015/T019): rótulo, fixar, arquivar */}
+                      <button
+                        className="btn btn-sutil btn-mini"
+                        title="renomear (rótulo; o nome técnico não muda)"
+                        onClick={(e) => {
+                          e.stopPropagation();
+                          renomearGaveta(g);
+                        }}
+                      >
+                        ✎
+                      </button>
+                      <button
+                        className="btn btn-sutil btn-mini"
+                        title={g.fixada ? "desafixar do topo" : "fixar no topo"}
+                        onClick={(e) => {
+                          e.stopPropagation();
+                          void metaGaveta(g, { fixada: !g.fixada }, g.fixada ? "desafixada" : "fixada no topo");
+                        }}
+                      >
+                        📌
+                      </button>
+                      <button
+                        className="btn btn-sutil btn-mini"
+                        title={g.arquivada ? "devolver do arquivo" : "arquivar (some da barra lateral)"}
+                        onClick={(e) => {
+                          e.stopPropagation();
+                          void metaGaveta(g, { arquivada: !g.arquivada }, g.arquivada ? "devolvida" : "arquivada");
+                        }}
+                      >
+                        🗄
+                      </button>
                       <button
                         className="btn btn-sutil btn-mini"
                         title="baixar esta gaveta em zip"

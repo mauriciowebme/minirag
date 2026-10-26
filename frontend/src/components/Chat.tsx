@@ -3,9 +3,13 @@ import { ApiErro, del, get, getStream, post, postStream, qs } from "../services/
 import { useToast } from "./Toast";
 import { mdParaHtml } from "../lib/md";
 import {
+  apararAteSid,
   assinar,
   cancelar,
   chaveConversa,
+  descartarUltimos,
+  pedirParada,
+  registrarTarefa,
   estado,
   enviar as enviarNaConversa,
   limpar as limparConversa,
@@ -271,6 +275,14 @@ export function Chat({
   const colado = useRef(true);
   const [noFundo, setNoFundo] = useState(true);
   const [novoAbaixo, setNovoAbaixo] = useState(false);
+  /* ---------------- v3.18: edição de pergunta, ditado por voz, rascunho por gaveta ---------------- */
+  const [editando, setEditando] = useState<number | null>(null); // sid da pergunta que está sendo editada
+  const [ditando, setDitando] = useState(false);
+  const recRef = useRef<{ stop(): void } | null>(null);
+  /* T014: trocar de gaveta não mata o texto que você começou a digitar na outra */
+  const rascunhos = useRef(new Map<string, string>());
+  const perguntaRef = useRef(pergunta);
+  perguntaRef.current = pergunta;
   /* v3.15: abrir/recolher o rastro é preferência do usuário e vale para TODAS as mensagens
      (o jeito do IA_GO). Sem escolha ainda: aberto enquanto o turno vive, recolhido no fim. */
   const [rastroPref, setRastroPref] = useState<"1" | "0" | null>(
@@ -304,7 +316,7 @@ export function Chat({
   const carregarHistorico = useCallback(async () => {
     try {
       const h = await get<ChatHistorico>("/chat?" + qs({ memoria, ...(tenantParam ? { tenant: tenantParam } : {}) }));
-      const linhas: { id: string; papel: "user" | "assistant"; texto: string; ferramentas: (typeof h.mensagens)[number]["ferramentas"]; fala?: boolean; raciocinio?: string; rastro?: SegmentoRastro[] }[] = [];
+      const linhas: { id: string; papel: "user" | "assistant"; texto: string; ferramentas: (typeof h.mensagens)[number]["ferramentas"]; fala?: boolean; raciocinio?: string; rastro?: SegmentoRastro[]; sid?: number; when?: string; fontes?: string[]; custo?: Record<string, unknown> | null }[] = [];
       for (const m of h.mensagens) {
         const trilha = (m.rastro ?? []) as SegmentoRastro[];
         /* v.8: as falas de caminho voltam como balões próprios na ordem em que foram escritas —
@@ -316,8 +328,13 @@ export function Chat({
         linhas.push({
           id: `h${m.id}`, papel: m.papel as "user" | "assistant", texto: m.texto,
           ferramentas: m.ferramentas ?? [],
+          /* v3.18: sid (âncora do editar/reenviar), hora, fontes e custo voltam com a linha */
+          sid: Number(m.id),
+          when: String(m.quando ?? ""),
           ...(trilha.length ? { rastro: trilha } : {}),
           ...(m.raciocinio ? { raciocinio: String(m.raciocinio) } : {}),
+          ...(Array.isArray(m.fontes) && m.fontes.length ? { fontes: m.fontes.map(String) } : {}),
+          ...(m.custo ? { custo: m.custo as Record<string, unknown> } : {}),
         });
       }
       semear(chave, linhas);
@@ -354,6 +371,62 @@ export function Chat({
     irParaOFim();
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [chave]);
+
+  /* T014 (v3.18): o texto digitado é POR GAVETA — trocar e voltar não apaga o rascunho */
+  const chaveAnterior = useRef(chave);
+  useEffect(() => {
+    if (chaveAnterior.current === chave) return;
+    if (perguntaRef.current.trim()) rascunhos.current.set(chaveAnterior.current, perguntaRef.current);
+    setPergunta(rascunhos.current.get(chave) ?? "");
+    setEditando(null);
+    chaveAnterior.current = chave;
+    requestAnimationFrame(() => {
+      if (campoRef.current) ajustarAltura(campoRef.current);
+    });
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [chave]);
+
+  /* T008 (v3.18): teclado aberto no celular não pode esconder a barra de digitar —
+     o visualViewport conta quantos pixels o teclado cobriu e a gente empurra o pé para cima.
+     Sem essa API (desktop), nada acontece. */
+  useEffect(() => {
+    const vv = window.visualViewport;
+    if (!vv) return;
+    const mexer = () => {
+      const piso = document.getElementById("chatPiso");
+      if (!piso) return;
+      const coberto = Math.max(0, window.innerHeight - vv.height - vv.offsetTop);
+      piso.style.transform = coberto > 60 ? `translateY(-${coberto - 16}px)` : "";
+      if (coberto > 60 && document.activeElement === campoRef.current) {
+        campoRef.current?.scrollIntoView({ block: "center" });
+      }
+    };
+    vv.addEventListener("resize", mexer);
+    vv.addEventListener("scroll", mexer);
+    return () => {
+      vv.removeEventListener("resize", mexer);
+      vv.removeEventListener("scroll", mexer);
+    };
+  }, []);
+
+  /* T009 (v3.18): o botão "copiar" mora no HTML vindo do md.ts (dangerouslySetInnerHTML),
+     então o React não vê o clique — escuta delegada no recipiente das mensagens. */
+  const delegou = useRef(false);
+  useEffect(() => {
+    const a = area.current;
+    if (!a || delegou.current) return;
+    delegou.current = true;
+    const pegar = (e: MouseEvent) => {
+      const alvo = e.target as HTMLElement | null;
+      const botao = alvo?.closest?.(".chat-pre-copiar") as HTMLElement | null;
+      if (!botao) return;
+      const pre = botao.closest(".chat-bloco")?.querySelector("pre");
+      if (pre) void copiarTexto(pre.textContent ?? "", "bloco copiado");
+    };
+    a.addEventListener("click", pegar);
+    return () => a.removeEventListener("click", pegar);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [snap.msgs.length]);
 
   /** medir é o que decide: folga menor que 80px = você está acompanhando de baixo */
   function medirRolagem() {
@@ -417,6 +490,10 @@ export function Chat({
      para sempre chamar a função atual do App. */
   const vivoRef = useRef(onProviderConfirmado);
   vivoRef.current = onProviderConfirmado;
+  /* v3.18: o transporte (estável, sem deps) precisa do escopo de AGORA para registrar a
+     tarefa na conversa certa quando a tela está noutra gaveta — o truque do vivoRef de novo. */
+  const escopoRef = useRef(escopo);
+  escopoRef.current = escopo;
 
   /** o transporte sabe falar com o servidor; a conversa não precisa de tela aberta para existir */
   const transportar = useCallback<Transportar>(
@@ -427,6 +504,8 @@ export function Chat({
       let idTarefa = "";
       try {
         idTarefa = String((await post<{ id: string }>("/chat/tarefa", pedido)).id);
+        /* v3.18 (T001): a conversa dona da tarefa registra o id — é assim que o "parar" sabe o que matar */
+        registrarTarefa(chaveConversa(escopoRef.current.tenant, String(pedido.memoria ?? "")), idTarefa);
       } catch (e) {
         if (e instanceof ApiErro && e.status === 404) {
           await postStream("/chat/stream", pedido, (ev) => {
@@ -454,9 +533,9 @@ export function Chat({
     el.style.height = `${Math.min(el.scrollHeight, 150)}px`;
   }
 
-  /* copiar a resposta: área de transferência do navegador com reserva para http sem
-     suporte (o painel local do cliente roda em http://127.0.0.1, onde o clipboard pode faltar) */
-  async function copiarResposta(texto: string) {
+  /* copiar (resposta, pergunta ou bloco de código): área de transferência do navegador com
+     reserva para http sem suporte (o painel local do cliente roda em http://127.0.0.1, onde o clipboard pode faltar) */
+  async function copiarTexto(texto: string, brinde: string) {
     try {
       if (navigator.clipboard?.writeText) {
         await navigator.clipboard.writeText(texto);
@@ -470,21 +549,163 @@ export function Chat({
         document.execCommand("copy");
         sujo.remove();
       }
-      toast("resposta copiada");
+      toast(brinde);
     } catch {
       toast("o navegador nao deixou copiar — selecione o texto e copie");
     }
   }
 
+  const copiarResposta = (texto: string) => copiarTexto(texto, "resposta copiada");
+
   function enviar() {
     const texto = pergunta.trim();
     if (!texto) return;
     setPergunta("");
+    rascunhos.current.delete(chave); // v3.18 (T014): rascunho daquela gaveta foi usado
     if (campoRef.current) {
       campoRef.current.style.height = "auto";
       campoRef.current.focus();
     }
     enviarNaConversa(chave, texto, memoria, tenantParam, transportar);
+  }
+
+  /* ---------------- v3.18: parar, regenerar, editar, repetir, exportar, voz, hora ---------------- */
+
+  const fmtHora = (iso?: string): string => {
+    if (!iso) return "";
+    const d = new Date(iso);
+    return Number.isNaN(d.getTime()) ? "" : d.toLocaleTimeString("pt-BR", { hour: "2-digit", minute: "2-digit" });
+  };
+
+  /** T001: "parar" — o servidor aborta a chamada em curso e devolve pelo stream o que já tinha saído */
+  function pararResposta() {
+    const id = pedirParada(chave);
+    if (!id) return;
+    void post(`/chat/tarefa/${encodeURIComponent(id)}/cancelar${tenantParam ? "?" + qs({ tenant: tenantParam }) : ""}`, {}).catch((e) => {
+      toast("parar: " + (e as Error).message);
+    });
+  }
+
+  /** T002: regenerar — o servidor corta o último par; a tela reenvia a pergunta pelo caminho normal */
+  async function regenerar() {
+    if (rodando) return;
+    try {
+      const r = await post<{ pergunta: string; removidas: number }>(
+        "/chat/regenerar",
+        { memoria, ...(tenantParam ? { tenant: tenantParam } : {}) },
+      );
+      const p = String(r.pergunta ?? "").trim();
+      if (!p) return;
+      descartarUltimos(chave, Number(r.removidas ?? 2));
+      enviarNaConversa(chave, p, memoria, tenantParam, transportar);
+    } catch (e) {
+      toast("regenerar: " + (e as Error).message);
+    }
+  }
+
+  /** T003: editar e reenviar — o corte no servidor vem antes; se ele falar, nada se move na tela */
+  function comecarEdicao(sid: number, texto: string) {
+    setEditando(sid);
+    setPergunta(texto);
+    requestAnimationFrame(() => {
+      const el = campoRef.current;
+      if (el) {
+        el.focus();
+        ajustarAltura(el);
+      }
+    });
+  }
+
+  function cancelarEdicao() {
+    setEditando(null);
+    setPergunta("");
+  }
+
+  async function confirmarEdicao() {
+    const texto = pergunta.trim();
+    const sid = editando;
+    setEditando(null);
+    setPergunta("");
+    if (!texto || sid === null) return;
+    try {
+      await post("/chat/reenviar-corte", { memoria, ...(tenantParam ? { tenant: tenantParam } : {}), id: sid });
+      apararAteSid(chave, sid);
+      enviarNaConversa(chave, texto, memoria, tenantParam, transportar);
+    } catch (e) {
+      toast("reenviar: " + (e as Error).message);
+    }
+  }
+
+  /** T013: erro com botão visível de repetir a última pergunta */
+  function repetirUltima() {
+    const alvo = [...msgs].reverse().find((m) => m.papel === "user");
+    if (!alvo) {
+      toast("nenhuma pergunta para repetir");
+      return;
+    }
+    enviarNaConversa(chave, alvo.texto, memoria, tenantParam, transportar);
+  }
+
+  /** T017: exportar a conversa visível como markdown (balões na ordem, com hora) */
+  function exportarConversa() {
+    const corpo = msgs
+      .filter((m) => m.texto.trim())
+      .map((m) => `${m.papel === "user" ? "**você**" : "**minirag**"}${m.when ? ` · ${fmtHora(m.when)}` : ""}\n\n${m.texto}\n`)
+      .join("\n---\n\n");
+    if (!corpo) {
+      toast("nada para exportar ainda");
+      return;
+    }
+    const blob = new Blob([`# conversa${memoria ? ` — ${memoria}` : ""} (minirag)\n\n${corpo}`], { type: "text/markdown;charset=utf-8" });
+    const a = document.createElement("a");
+    a.href = URL.createObjectURL(blob);
+    a.download = `conversa-${(memoria || "padrao").replace(/[^\w-]+/g, "_").slice(0, 40)}.md`;
+    document.body.appendChild(a);
+    a.click();
+    a.remove();
+    setTimeout(() => URL.revokeObjectURL(a.href), 5000);
+  }
+
+  /** T022: ditado por voz do próprio navegador (Web Speech). Sem suporte: avisa, não finge. */
+  function alternarDitado() {
+    const SR = (window as unknown as { SpeechRecognition?: any; webkitSpeechRecognition?: any });
+    const Fabrica = SR.SpeechRecognition ?? SR.webkitSpeechRecognition;
+    if (!Fabrica) {
+      toast("seu navegador não tem ditado por voz (funciona no Chrome/Edge)");
+      return;
+    }
+    if (ditando) {
+      recRef.current?.stop();
+      setDitando(false);
+      return;
+    }
+    const rec = new Fabrica();
+    rec.lang = "pt-BR";
+    rec.interimResults = false;
+    rec.continuous = true;
+    rec.onresult = (ev: any) => {
+      let novo = "";
+      for (let k = ev.resultIndex; k < ev.results.length; k++) {
+        if (ev.results[k].isFinal) novo += ev.results[k][0].transcript;
+      }
+      if (!novo) return;
+      setPergunta((p) => (p.trim() ? `${p.trimEnd()} ${novo}` : novo));
+      requestAnimationFrame(() => {
+        if (campoRef.current) ajustarAltura(campoRef.current);
+      });
+    };
+    rec.onerror = (ev: any) => {
+      toast("ditado: " + String(ev?.error ?? "falhou") + " (o microfone pode estar bloqueado)");
+      setDitando(false);
+    };
+    rec.onend = () => setDitando(false);
+    recRef.current = rec;
+    setDitando(true);
+    try {
+      rec.start();
+    } catch {
+      setDitando(false);
+    }
   }
 
   function tirarDaFila(id?: number | string) {
@@ -507,6 +728,15 @@ export function Chat({
   const naFila = snap.fila.length;
   const msgs = snap.msgs;
   const rodando = snap.rodando;
+
+  /* o botão "regenerar" só faz sentido na ÚLTIMA resposta (a que está no fim da corrida) */
+  let idxUltimaResposta = -1;
+  for (let k = msgs.length - 1; k >= 0; k--) {
+    if (msgs[k].papel === "assistant" && !msgs[k].fala && !msgs[k].escrevendo) {
+      idxUltimaResposta = k;
+      break;
+    }
+  }
 
   return (
     <section className="chat-tela flex flex-col gap-3 max-[720px]:gap-0" id="telaChat">
@@ -607,6 +837,34 @@ export function Chat({
                       ✕ na fila
                     </button>
                   )}
+                  {/* v3.18 (T012/T020/T003): hora, copiar a própria pergunta e editar-e-reenviar */}
+                  <span className="chat-acoes chat-acoes-eu">
+                    {m.when && <span className="chat-hora">{fmtHora(m.when)}</span>}
+                    <button
+                      className="chat-acao-icone"
+                      title="copiar a pergunta"
+                      aria-label="copiar a pergunta"
+                      onClick={() => void copiarTexto(m.texto, "pergunta copiada")}
+                    >
+                      <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round" aria-hidden="true">
+                        <rect x="9" y="9" width="11" height="11" rx="2" />
+                        <path d="M15 5H6a2 2 0 0 0-2 2v9" />
+                      </svg>
+                    </button>
+                    {m.sid !== undefined && !rodando && editando === null && (
+                      <button
+                        className="chat-acao-icone"
+                        title="editar e reenviar (corta daqui para frente)"
+                        aria-label="editar pergunta"
+                        onClick={() => comecarEdicao(m.sid as number, m.texto)}
+                      >
+                        <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round" aria-hidden="true">
+                          <path d="M4 20l1-4L16.5 4.5a2.1 2.1 0 0 1 3 3L8 19l-4 1z" />
+                        </svg>
+                      </button>
+                    )}
+                    {editando === m.sid && <span className="chat-hora">editando aí embaixo…</span>}
+                  </span>
                 </>
               )}
               {m.ferramentas.length > 0 && !(m.rastro && m.rastro.length > 0) && (
@@ -627,8 +885,17 @@ export function Chat({
                   ))}
                 </details>
               )}
-              {/* v3.14 — ações sobre a resposta pronta: só o que age. "refazer" ficou de fora
-                  porque regenerar exige mexer no histórico no servidor (ainda não existe). */}
+              {/* v3.18 (T004): de onde a resposta veio — os documentos que a busca tocou.
+                 Chip só com fonte real; resposta sem ferramentas não inventa procedência. */}
+              {m.papel === "assistant" && m.fontes && m.fontes.length > 0 && (
+                <div className="chat-fontes" title="documentos usados nesta resposta">
+                  {m.fontes.slice(0, 6).map((f, k) => (
+                    <span className="chat-fonte" key={k}>{f}</span>
+                  ))}
+                </div>
+              )}
+              {/* ações sobre a resposta pronta. v3.18: "refazer" virou REGENERAR — o corte
+                 de histórico no servidor (T002) foi o osso que faltava. */}
               {m.papel === "assistant" && !m.escrevendo && m.texto ? (
                 <div className="chat-acoes">
                   <button
@@ -642,10 +909,36 @@ export function Chat({
                       <path d="M15 5H6a2 2 0 0 0-2 2v9" />
                     </svg>
                   </button>
+                  {i === idxUltimaResposta && !rodando && (
+                    <button
+                      className="chat-acao-icone"
+                      title="regenerar a resposta (refaz a última pergunta)"
+                      aria-label="regenerar"
+                      onClick={() => void regenerar()}
+                    >
+                      <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round" aria-hidden="true">
+                        <path d="M20 12a8 8 0 1 1-2.3-5.6" />
+                        <path d="M20 4v5h-5" />
+                      </svg>
+                    </button>
+                  )}
+                  {m.when && <span className="chat-hora">{fmtHora(m.when)}</span>}
+                  {m.custo && Number(m.custo.tok_out ?? 0) > 0 && (
+                    <span className="chat-hora" title={(m.custo.tok_in ? `${m.custo.tok_in} tok de entrada · ` : "") + "tokens da resposta"}>
+                      {Number(m.custo.tok_out)} tok
+                    </span>
+                  )}
                 </div>
               ) : null}
               {m.aviso && <div className="sub2 mt-1">aviso: {m.aviso}</div>}
               {m.compacto && <div className="sub2 mt-1">{m.compacto}</div>}
+              {/* v3.18 (T013): erro com botão de repetir visível — antes, a frase de erro
+                 morava sozinha na tela e a pessoa recomeçava do zero sem saber */}
+              {m.falha && (
+                <div className="chat-acoes">
+                  <button className="btn btn-mini" onClick={repetirUltima}>↻ tentar de novo</button>
+                </div>
+              )}
             </div>
           ))}
           {rodando && !msgs.some((m) => m.escrevendo) && (
@@ -671,13 +964,26 @@ export function Chat({
         {/* v3.16 — pé da conversa: "nova conversa" mudou de lado e desceu para a linha do
             campo, oposto ao enviar (ação perto do dedo, nada de reset no topo). A dica de
             teclado saiu da tela — vive no título (hover) do campo. */}
-        <div className="chat-piso">
+        <div className="chat-piso" id="chatPiso">
           {rodando && (
             <p className="chat-segundo-plano" id="chatSegundoPlano" title="a tarefa continua mesmo se você for ver outra página">
               · trabalhando em segundo plano{naFila > 0 ? ` · ${naFila} na fila` : ""}
             </p>
           )}
           <div className="chat-piso-linha">
+            {/* v3.18 (T017): descer a conversa em markdown — nada de PrintScreen */}
+            <button
+              id="chatExportar"
+              className="chat-acao"
+              title="exportar a conversa (markdown)"
+              aria-label="exportar conversa"
+              onClick={exportarConversa}
+            >
+              <svg className="chat-ico" width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true">
+                <path d="M12 3v11M8 10l4 4 4-4" />
+                <path d="M4 19h16" />
+              </svg>
+            </button>
             <button
               id="chatNovaConversa"
               className="chat-nova"
@@ -702,26 +1008,67 @@ export function Chat({
                 ref={campoRef}
                 className="chat-campo"
                 rows={1}
-                placeholder={rodando ? "próxima pergunta… (fila)" : "pergunte qualquer coisa…"}
-                title="Enter envia · Shift+Enter quebra linha"
+                placeholder={editando !== null ? "reenviar pergunta editada… (Enter)" : rodando ? "próxima pergunta… (fila)" : "pergunte qualquer coisa…"}
+                title={editando !== null ? "Enter reenvia · Esc cancela a edição" : "Enter envia · Shift+Enter quebra linha"}
+                enterKeyHint="send"
                 value={pergunta}
               onChange={(e) => {
                 setPergunta(e.target.value);
                 ajustarAltura(e.currentTarget);
               }}
               onKeyDown={(e) => {
+                /* v3.18 (T005): Enter QUE ACEITA AUTOCORREÇÃO do teclado não envia — no celular
+                   isso mandava a pergunta pela metade (o evento vem com isComposing, e em teclado
+                   antigo com keyCode 229). Igual ao truque do Hermes/Open WebUI. */
+                if (e.nativeEvent.isComposing || e.keyCode === 229) return;
                 if (e.key === "Enter" && !e.shiftKey) {
                   e.preventDefault();
-                  enviar();
+                  if (editando !== null) void confirmarEdicao();
+                  else enviar();
+                } else if (e.key === "Escape" && editando !== null) {
+                  cancelarEdicao();
                 }
               }}
             />
+            {/* v3.18 (T022): ditado por voz do próprio navegador */}
+            <button
+              id="chatMic"
+              className={"chat-acao-icone" + (ditando ? " chat-mic-vivo" : "")}
+              title={ditando ? "parar de ditar" : "ditar a pergunta (voz)"}
+              aria-label="ditar"
+              onClick={alternarDitado}
+            >
+              <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round" aria-hidden="true">
+                <rect x="9" y="3" width="6" height="11" rx="3" />
+                <path d="M5 11a7 7 0 0 0 14 0M12 18v3" />
+              </svg>
+            </button>
+            {rodando && (
+              /* v3.18 (T001): parar — o servidor corta a chamada e o que chegou fica na tela */
+              <button
+                id="chatParar"
+                className="chat-acao-icone"
+                title={snap.parando ? "parando…" : "parar esta resposta"}
+                aria-label="parar a resposta"
+                disabled={snap.parando}
+                onClick={pararResposta}
+              >
+                <svg width="15" height="15" viewBox="0 0 24 24" fill="currentColor" aria-hidden="true">
+                  <rect x="6" y="6" width="12" height="12" rx="2" />
+                </svg>
+              </button>
+            )}
+            {editando !== null && (
+              <button className="btn btn-mini" title="cancelar a edição (Esc)" onClick={cancelarEdicao}>
+                ✕<span className="chat-editar-rotulo"> editar</span>
+              </button>
+            )}
             <button
               id="chatEnviar"
               className="chat-enviar"
               disabled={!pergunta.trim()}
-              title={rodando ? "colocar na fila" : "enviar"}
-              onClick={enviar}
+              title={editando !== null ? "reenviar editada" : rodando ? "colocar na fila" : "enviar"}
+              onClick={editando !== null ? confirmarEdicao : enviar}
             >
               <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.2" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true">
                 <path d="M12 19V5" />

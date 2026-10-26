@@ -5,7 +5,9 @@
  *
  * Suporta: cabeçalhos (# a ####), negrito/itálico, código (`x` e bloco ```),
  * links [texto](http), listas com nível (ol e ul), citação (>), linha horizontal,
- * tabelas GFM e quebra de linha dentro do parágrafo. */
+ * tabelas GFM e quebra de linha dentro do parágrafo.
+ * v3.18: imagens (T007), bloco de código com idioma + botão copiar (T009) e realce de sintaxe
+ * leve por heurística (T010) — sem highlight.js: 300 KB de pacote para colorir 4 classes não se paga. */
 
 const ESCAPE = new Map<string, string>([
   ["&", "&amp;"],
@@ -36,9 +38,43 @@ function inline(escapado: string): string {
   s = s.replace(/`([^`]+)`/g, "<code>$1</code>");
   s = s.replace(/\*\*(.+?)\*\*/g, "<b>$1</b>");
   s = s.replace(/(^|[\s(])\*([^*\n]+?)\*(?=[\s).,!;:]|$)/g, "$1<i>$2</i>");
+  /* imagem ANTES do link: a sintaxe dela começa com a do link (T007). http(s) ou data:image
+     base64 — nada de javascript:, nada de protocol-relative; o alt já veio escapado. */
+  s = s.replace(/!\[([^\]]*)\]\((https?:[^)\s]+|data:image\/[a-zA-Z+]+;base64,[A-Za-z0-9+/=]+)\)/g, '<img src="$2" alt="$1" class="chat-img" loading="lazy">');
   /* link: só http(s) — `javascript:` e companhia ficam de fora por construção */
   s = s.replace(/\[([^\]]+)\]\((https?:[^)\s]+)\)/g, '<a href="$2" target="_blank" rel="noreferrer">$1</a>');
   return s;
+}
+
+/** v3.18 (T010): realce de sintaxe HEURÍSTICO, uma passada só, sobre texto JÁ ESCAPADO —
+   por isso casa `&quot;` em vez de aspas duplas. Classes: hl-str/hl-com/hl-kw/hl-num.
+   Não é parser: uma aspa torta numa string exótica desenha um trecho colorido a mais, e é
+   só tinta — o conteúdo escapado nunca vira HTML de origem duvidosa. */
+function destacar(codigoEscapado: string, lang: string): string {
+  /* cerca sem idioma não ganha tinta: contrato v2.9 "dentro do bloco nada é marca" */
+  if (!(lang || "").trim()) return codigoEscapado;
+  const KW =
+    "const|let|var|function|return|if|else|elif|for|while|class|new|import|export|from|async|await|" +
+    "def|true|false|True|False|null|nil|None|this|try|catch|except|finally|throw|switch|case|break|" +
+    "continue|public|private|static|int|string|float|bool|void|struct|enum|interface|type|extends|" +
+    "SELECT|FROM|WHERE|INSERT|UPDATE|DELETE|JOIN";
+  const RE = new RegExp(
+    "(&quot;[^\\n]*?&quot;|'[^'\\n]*'|`[^`\\n]*?`)" + "|(//[^\\n]*|#[^\\n]*|/\\*[\\s\\S]*?\\*/)" +
+    "|\\b(" + KW + ")\\b|\\b(\\d[\\d._]*)\\b",
+    "g",
+  );
+  let out = "";
+  let last = 0;
+  let m: RegExpExecArray | null;
+  while ((m = RE.exec(codigoEscapado))) {
+    out += codigoEscapado.slice(last, m.index);
+    if (m[1]) out += `<span class="hl-str">${m[1]}</span>`;
+    else if (m[2]) out += `<span class="hl-com">${m[2]}</span>`;
+    else if (m[3]) out += `<span class="hl-kw">${m[3]}</span>`;
+    else out += `<span class="hl-num">${m[4]}</span>`;
+    last = m.index + m[0].length;
+  }
+  return out + codigoEscapado.slice(last);
 }
 
 type Item = { nivel: number; tag: string; texto: string };
@@ -91,14 +127,20 @@ export function mdParaHtml(md: string): string {
   while (i < linhas.length) {
     const ln = linhas[i];
 
-    /* bloco de código ``` — o conteúdo NÃO recebe marca nenhuma, só escape */
+    /* bloco de código ``` — o conteúdo NÃO recebe marca de texto; v3.18 (T009/T010) ganha
+       barra com idioma, botão copiar (delegado na tela) e realce por heurística dentro do <pre> */
     if (/^\s*```/.test(ln)) {
       fecharPar();
+      const lang = (/^\s*```([A-Za-z0-9+#._-]{1,20})/.exec(ln)?.[1] ?? "").toLowerCase();
       const corpo: string[] = [];
       i++;
       while (i < linhas.length && !/^\s*```/.test(linhas[i])) corpo.push(linhas[i++]);
       i++; /* pula o fechamento */
-      out.push(`<pre>${corpo.join("\n")}</pre>`);
+      out.push(
+        `<div class="chat-bloco"><div class="chat-bloco-topo"><span>${lang || "código"}</span>` +
+          `<button type="button" class="chat-pre-copiar" title="copiar este bloco">copiar</button></div>` +
+          `<pre>${destacar(corpo.join("\n"), lang)}</pre></div>`,
+      );
       continue;
     }
 

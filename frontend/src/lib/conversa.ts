@@ -44,6 +44,8 @@ export type SegmentoRastro =
 
 export type Linha = {
   id: string;
+  /** id no banco (v3.18): só as linhas vindas do servidor têm — é a alavanca do "editar e reenviar" */
+  sid?: number;
   papel: "user" | "assistant";
   texto: string;
   ferramentas: FerramentaLinha[];
@@ -65,12 +67,22 @@ export type Linha = {
   raciocinioFim?: number;
   aviso?: string | null;
   compacto?: string;
+  /** v3.18: hora ISO da mensagem (T012 — o servidor já mandava `quando`, a tela ignorava) */
+  when?: string;
+  /** v3.18 (T004): de quais documentos a resposta veio */
+  fontes?: string[];
+  /** v3.18 (T018): quanto custou (tok_out; tok_in quando o servidor mandou) */
+  custo?: Record<string, unknown> | null;
 };
 
 export type Estado = {
   msgs: Linha[];
   fila: { id: string; texto: string }[];
   rodando: boolean;
+  /** v3.18 (T001): id da tarefa no servidor do turno em curso ("" = nada para parar) */
+  tarefaId: string;
+  /** "parar" apertado — aguardando o `fim` com o parcial (botão vira "parando…") */
+  parando: boolean;
   /** a bolha que está sendo escrita agora (vazio = nenhuma) */
   vivo: string;
   /** desde quando esta tarefa corre, em epoch ms (0 = parada) — a tela mostra o tempo certo ao voltar */
@@ -118,7 +130,7 @@ const proximoId = () => `c${Date.now().toString(36)}-${++seq}`;
 const conversas = new Map<string, Conversa>();
 
 function nova(): Conversa {
-  return { msgs: [], fila: [], rodando: false, vivo: "", inicio: 0, ouvintes: new Set() };
+  return { msgs: [], fila: [], rodando: false, tarefaId: "", parando: false, vivo: "", inicio: 0, ouvintes: new Set() };
 }
 
 export function chaveConversa(tenant: string, memoria: string): string {
@@ -150,7 +162,7 @@ function notifica(chave: string): void {
 /** fotografia imutável do estado (o que o Chat renderiza) */
 export function estado(chave: string): Estado {
   const c = pega(chave);
-  return { msgs: c.msgs.slice(), fila: c.fila.slice(), rodando: c.rodando, vivo: c.vivo, inicio: c.inicio };
+  return { msgs: c.msgs.slice(), fila: c.fila.slice(), rodando: c.rodando, tarefaId: c.tarefaId, parando: c.parando, vivo: c.vivo, inicio: c.inicio };
 }
 
 /** dá para assinar mesmo com a tela fechada: o trabalho continua e a tela volta quando quiser */
@@ -172,7 +184,7 @@ export function semear(chave: string, msgs: Linha[]): void {
 export function enviar(chave: string, texto: string, memoria: string, tenant: string | undefined, transportar: Transportar): string {
   const c = pega(chave);
   const id = proximoId();
-  c.msgs.push({ id, papel: "user", texto, ferramentas: [], naFila: true });
+  c.msgs.push({ id, papel: "user", texto, ferramentas: [], naFila: true, when: new Date().toISOString() });
   c.fila.push({ id, texto });
   notifica(chave);
   void bombeia(chave, memoria, tenant, transportar);
@@ -184,6 +196,43 @@ export function cancelar(chave: string, id: string): void {
   const c = pega(chave);
   c.fila = c.fila.filter((x) => x.id !== id);
   c.msgs = c.msgs.filter((m) => m.id !== id);
+  notifica(chave);
+}
+
+/** v3.18 (T001): a tela registrou o id da tarefa criada (transporte chama depois do POST /chat/tarefa) */
+export function registrarTarefa(chave: string, id: string): void {
+  const c = pega(chave);
+  c.tarefaId = id;
+  c.parando = false;
+  notifica(chave);
+}
+
+/** v3.18 (T001): "parar" — marca o estado do botão e devolve o id para o POST .../cancelar.
+ *  Sem tarefa conhecida (servidor antigo / turno local): devolve "" e a tela não faz nada. */
+export function pedirParada(chave: string): string {
+  const c = pega(chave);
+  if (!c.tarefaId || !c.rodando) return "";
+  c.parando = true;
+  notifica(chave);
+  return c.tarefaId;
+}
+
+/** v3.18 (T002): regenerar — derruba os N últimos balões da tela (o servidor cortou antes). */
+export function descartarUltimos(chave: string, n: number): void {
+  const c = pega(chave);
+  c.msgs = c.msgs.slice(0, Math.max(0, c.msgs.length - n));
+  c.fila = c.fila.filter((f) => c.msgs.some((m) => m.id === f.id && m.naFila));
+  notifica(chave);
+}
+
+/** v3.18 (T003): editar e reenviar — corta da mensagem `sid` para frente (a própria excluída;
+ *  a tela reenvia o texto editado pelo caminho normal, e ele entra de novo como pergunta). */
+export function apararAteSid(chave: string, sid: number): void {
+  const c = pega(chave);
+  const i = c.msgs.findIndex((m) => m.sid === sid);
+  if (i < 0) return;
+  c.msgs = c.msgs.slice(0, i);
+  c.fila = c.fila.filter((f) => c.msgs.some((m) => m.id === f.id && m.naFila));
   notifica(chave);
 }
 
@@ -218,10 +267,12 @@ export async function reativar(
   c.inicio = Date.now();
   const vivoId = proximoId();
   c.vivo = vivoId;
+  const agora = new Date().toISOString();
   c.msgs.push(
-    { id: proximoId(), papel: "user", texto: tarefa.pergunta, ferramentas: [] },
-    { id: vivoId, papel: "assistant", texto: tarefa.parcial, ferramentas: [], escrevendo: true },
+    { id: proximoId(), papel: "user", texto: tarefa.pergunta, ferramentas: [], when: agora },
+    { id: vivoId, papel: "assistant", texto: tarefa.parcial, ferramentas: [], escrevendo: true, when: agora },
   );
+  c.tarefaId = tarefa.id; // v3.18: quem reanexou uma tarefa viva também pode pará-la
   notifica(chave);
 
   let bruto = tarefa.parcial;
@@ -293,6 +344,10 @@ export async function reativar(
         );
       }
       bolha.ferramentas = (r.ferramentas as FerramentaLinha[]) ?? bolha.ferramentas;
+      /* v3.18: fontes (T004) e custo (T018) chegam no `fim` — a tela mostra e o histórico confirma */
+      if (Array.isArray(r.fontes)) bolha.fontes = (r.fontes as string[]).map(String);
+      if (r.custo && typeof r.custo === "object") bolha.custo = r.custo as Record<string, unknown>;
+      bolha.when = new Date().toISOString();
       bolha.aviso = (r.aviso as string) ?? null;
       bolha.compacto = (r.compacto as string) ?? undefined;
       bolha.escrevendo = false;
@@ -309,6 +364,8 @@ export async function reativar(
     c.rodando = false;
     c.inicio = 0;
     c.vivo = "";
+    c.tarefaId = "";
+    c.parando = false;
     notifica(chave);
   }
 }
@@ -330,7 +387,7 @@ async function bombeia(chave: string, memoria: string, tenant: string | undefine
 
   const vivoId = proximoId();
   c.vivo = vivoId;
-  c.msgs.push({ id: vivoId, papel: "assistant", texto: "", ferramentas: [], escrevendo: true });
+  c.msgs.push({ id: vivoId, papel: "assistant", texto: "", ferramentas: [], escrevendo: true, when: new Date().toISOString() });
   let bruto = "";
   let falou = false; // se os balões chegaram pelo stream, o `fim` nao re-insere (nem duplica)
   /* caixa mutável: o evento `fim` escreve aqui por dentro do closure */
@@ -397,6 +454,10 @@ async function bombeia(chave: string, memoria: string, tenant: string | undefine
         );
       }
       bolha.ferramentas = (r.ferramentas as FerramentaLinha[]) ?? bolha.ferramentas;
+      /* v3.18: fontes (T004) e custo (T018) chegam no `fim` — a tela mostra e o histórico confirma */
+      if (Array.isArray(r.fontes)) bolha.fontes = (r.fontes as string[]).map(String);
+      if (r.custo && typeof r.custo === "object") bolha.custo = r.custo as Record<string, unknown>;
+      bolha.when = new Date().toISOString();
       bolha.aviso = (r.aviso as string) ?? null;
       /* quem desenha o aviso da compactação é a tela; o transporte entrega a linha pronta */
       bolha.compacto = (r.compacto as string) ?? undefined;
@@ -414,6 +475,8 @@ async function bombeia(chave: string, memoria: string, tenant: string | undefine
     c.rodando = false;
     c.inicio = 0;
     c.vivo = "";
+    c.tarefaId = "";
+    c.parando = false;
     notifica(chave);
     if (c.fila.length) void bombeia(chave, memoria, tenant, transportar);
   }

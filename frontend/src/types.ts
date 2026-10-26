@@ -8,6 +8,10 @@ export type Gaveta = {
   chunks_arquivados: number;
   primeiro_ingress: string | null;
   ultimo_ingress: string | null;
+  /** v3.18: rotulo de exibicao (renomear T015 / auto T016); fixada no topo e arquivada fora (T019) */
+  titulo?: string | null;
+  fixada?: boolean;
+  arquivada?: boolean;
 };
 export type GavetasResp = {
   operador: boolean;
@@ -282,6 +286,9 @@ export type ChatHistorico = {
     /** v3.15: a trilha do turno, na ordem real */
     rastro?: RastroServidor[];
     quando: string;
+    /** v3.18 (T004/T018): de onde a resposta veio e quanto custou */
+    fontes?: string[];
+    custo?: { tok_in?: number; tok_out?: number } | null;
   }[];
 };
 

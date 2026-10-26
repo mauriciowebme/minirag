@@ -74,7 +74,7 @@ export default function App() {
   /* v3.16: o contexto da conversa (gaveta em uso + modelo) passou a morar na lateral.
      As buscas viviam dentro do Chat, na pílula do topo; com o bloco compartilhado,
      quem é dono da lateral (App) busca e o Chat recebe por props. */
-  const [gavetas, setGavetas] = useState<string[]>([""]);
+  const [gavetas, setGavetas] = useState<{ memoria: string; rotulo: string; fixada: boolean }[]>([{ memoria: "", rotulo: "padrão", fixada: false }]);
   const [provider, setProvider] = useState<ProviderResp | null>(null);
   useEffect(() => {
     if (!sessao.logado) return;
@@ -83,8 +83,17 @@ export default function App() {
     void (async () => {
       try {
         const g = await get<GavetasResp>("/gavetas" + (t ? "?" + qs({ tenant: t }) : ""));
-        const nomes = [...new Set(g.gavetas.map((x) => x.memoria))];
-        setGavetas(nomes.length ? nomes : [""]);
+        /* v3.18 (T015/T016/T019): rótulo (manual ou automático) na barra, fixada no topo,
+           arquivada FORA da barra — quem arquiva ainda vê e devolve pela página Gavetas. */
+        const porMemoria = new Map<string, { memoria: string; rotulo: string; fixada: boolean }>();
+        for (const x of g.gavetas) {
+          if (x.arquivada || porMemoria.has(x.memoria)) continue;
+          porMemoria.set(x.memoria, { memoria: x.memoria, rotulo: x.titulo || x.memoria || "padrão", fixada: Boolean(x.fixada) });
+        }
+        const lista = [...porMemoria.values()].sort(
+          (a, b) => Number(b.fixada) - Number(a.fixada) || a.rotulo.localeCompare(b.rotulo),
+        );
+        setGavetas(lista.length ? lista : [{ memoria: "", rotulo: "padrão", fixada: false }]);
       } catch {
         /* segue com a gaveta padrão */
       }
@@ -202,8 +211,9 @@ export default function App() {
             title={memoria || "padrão"}
           >
             {gavetas.map((g) => (
-              <option key={g} value={g}>
-                {g || "padrão"}
+              <option key={g.memoria} value={g.memoria}>
+                {g.fixada ? "📌 " : ""}
+                {g.rotulo}
               </option>
             ))}
           </select>
