@@ -22,6 +22,11 @@ parecidos com a pergunta, com uma nota de 0 a 1.
 
 ---
 ---
+## v3.21.2 (26/10) — O tipo de conexão ficou só com duas opções: OpenAI compatível e Ollama
+- **O que você vê:** no cadastro/edição de provider, o menu "tipo" agora tem só duas opções — **OpenAI compatível (llama.cpp, LiteLLM, vLLM...)** e **Ollama local**. A opção "LiteLLM" saiu: era a mesma conexão que "OpenAI", só com nome que confundia. A tabela de providers também passa a mostrar "openai" no lugar de "litellm" nas linhas já cadastradas.
+- **Por que:** o dono viu o menu e achou estranho/redundante — "LiteLLM" não descrevia a conexão (qualquer API no padrão OpenAI funciona ali), e o dono mandou manter só Ollama + OpenAI compatível (decisão de 26/10).
+- **Como é provado:** typecheck + build limpos; suíte e2e completa 24/24 (o contrato REST não mudou — só o rótulo do menu).
+
 ## v3.21.1 (26/10) — Provider virou uma seção só: tabela com o padrão da casa na linha 1
 - **O que você vê:** as abas "Provider do chat" e "Provedores nomeados" viraram **uma seção — Provider**: uma tabela onde a linha 1 é o **padrão da casa** (o ex-provider do chat, com o form completo dele: modelo, URL, chave, system prompt, memória, janela, silêncio...) e as linhas seguintes são os providers nomeados. Cada linha tem **editar** (o form abre embaixo da tabela, com **cancelar**), os nomeados ganham **apagar**, e o botão virou **+ novo provider**. No chat nada muda: a régua provider+modelo do rodapé (v3.19) já escolhia entre todos.
 - **Por que:** o dono viu os dois lugares lado a lado e achou melhor UMA visão — criar, editar e apagar provider num lugar só, com o padrão da casa como linha de primeira classe (decisão do preview estático aprovado em 26/10).
