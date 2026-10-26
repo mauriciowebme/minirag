@@ -56,13 +56,13 @@ export async function cancelarTarefa(u: Usuario, id: string, tenantArg?: string 
  *  (o projeto não tem handler global de unhandledRejection). */
 export async function criarTarefa(
   u: Usuario,
-  b: { pergunta: string; memoria: string; tenant?: string | null },
+  b: { pergunta: string; memoria: string; tenant?: string | null; provedor?: string; modelo?: string },
   rodar: (id: string, u: Usuario) => Promise<void>,
 ): Promise<string> {
   const id = randomUUID();
   await q(
-    `INSERT INTO chat_tarefas (id, tenant, memoria, pergunta) VALUES ($1, $2, $3, $4)`,
-    [id, tenantFor(u, b.tenant ?? null), b.memoria, b.pergunta],
+    `INSERT INTO chat_tarefas (id, tenant, memoria, pergunta, provedor, modelo) VALUES ($1, $2, $3, $4, $5, $6)`,
+    [id, tenantFor(u, b.tenant ?? null), b.memoria, b.pergunta, b.provedor ?? "", b.modelo ?? ""],
   );
   queueMicrotask(() => {
     void rodar(id, u).catch((e) => log(`tarefa ${id}: disparo falhou: ${String(e)}`));
@@ -116,7 +116,7 @@ export async function rodarTarefa(id: string, u: Usuario): Promise<void> {
     if (!t) return;
     const resp = await responderChat(
       u,
-      { pergunta: t.pergunta, memoria: t.memoria, tenant: t.tenant },
+      { pergunta: t.pergunta, memoria: t.memoria, tenant: t.tenant, provedor: String(t.provedor ?? ""), modelo: String(t.modelo ?? "") },
       (e) => {
         if (e.tipo === "delta") {
           parcial += String(e.texto ?? "");

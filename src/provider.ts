@@ -64,6 +64,8 @@ type Linha = {
 
 export type CfgResolvida = {
   escopo: string;
+  /** v3.19: nome do provedor escolhido (null = provider "padrão" da casa) */
+  provedor: string | null;
   tipo: TipoProvider;
   base_url: string;
   modelo: string;
@@ -153,10 +155,73 @@ function planoDeJanela(l: Linha | null | undefined): { janela: number; origem_ja
   return { janela: JANELA_PADRAO, origem_janela: "padrao" };
 }
 
-/** Config efetiva (ordem): linha própria completa › global › linha própria incompleta.
+/** v3.19: linha da tabela `provedores` → config pronta para o chat. */
+function cfgDeProvedorLinha(l: Record<string, any> | undefined): CfgResolvida | null {
+  if (!l || !l.ativo || !l.base_url || !l.modelo) return null;
+  const tipo = l.tipo === "openai" ? "openai" : l.tipo === "ollama" ? "ollama" : "litellm";
+  return {
+    escopo: String(l.escopo),
+    provedor: String(l.nome),
+    tipo,
+    base_url: String(l.base_url).replace(/\/+$/, ""),
+    modelo: String(l.modelo),
+    chave: String(l.chave ?? ""),
+    temperatura: Number(l.temperatura ?? 0.2),
+    system_prompt: String(l.system_prompt ?? ""),
+    mcp_interno: Boolean(l.mcp_interno),
+    max_rodadas: Number(l.max_rodadas ?? RODADAS_PADRAO),
+    memoria_turnos: Number(l.memoria_turnos ?? MEMORIA_PADRAO),
+    verbatim_turnos: Number(l.verbatim_turnos ?? VERBATIM_PADRAO),
+    reserva_tokens: Number(l.reserva_tokens ?? RESERVA_PADRAO),
+    silencio_s: Number(l.silencio_s ?? 0),
+    ...planoDeJanela(l as unknown as Linha),
+    ativo: true,
+  };
+}
+
+/** Config efetiva (ordem): provedor escolhido na hora › nomeado padrão › linha própria › global.
  *  Uma tela salva pela metade (sem modelo) não tapa mais o padrão de todos — defeito achado
  *  em 20/10 e corrigido aqui. Desligar a própria linha completa continua valendo. */
-export async function resolverProvider(tenant: string): Promise<CfgResolvida | null> {
+export async function resolverProvider(
+  tenant: string,
+  escolha?: { provedor?: string; modelo?: string },
+): Promise<CfgResolvida | null> {
+  const nome = String(escolha?.provedor ?? "").trim();
+  if (nome) {
+    const r = await q<Linha>(
+      `SELECT * FROM provedores WHERE escopo = ANY($1) AND (nome = $2 OR id::text = $2)
+       ORDER BY (escopo = $3) DESC LIMIT 1`,
+      [[tenant, GLOBAL], nome, tenant],
+    );
+    const l = r.rows[0];
+    if (!l) throw erro422(`provedor "${nome}" não está cadastrado`);
+    const cfg = cfgDeProvedorLinha(l);
+    if (!cfg) throw erro409(`provedor "${nome}" está incompleto ou desligado`);
+    const modelo = String(escolha?.modelo ?? "").trim();
+    if (modelo && modelo !== cfg.modelo) {
+      /* v3.19: com cache de modelos descoberto, só lista cadastrada ou cache — trocar
+         para um modelo que o serviço não anuncia é erro de tela, não passagem livre. */
+      const modelosLinha = (l as Record<string, any>).modelos;
+      const cache = Array.isArray(modelosLinha) ? (modelosLinha as unknown[]).map(String) : [];
+      if (cache.length && !cache.includes(modelo)) {
+        throw erro422(`o provedor "${nome}" não anuncia o modelo "${modelo}" — descubra os modelos em Configurações`);
+      }
+      cfg.modelo = modelo;
+    }
+    return cfg;
+  }
+  /* v3.19: um nomeado marcado como "padrão" do escopo manda no provider_config */
+  const pd = await q<Linha>(
+    `SELECT * FROM provedores WHERE escopo = ANY($1) AND padrao = true AND ativo = true
+     ORDER BY (escopo = $2) DESC LIMIT 1`,
+    [[tenant, GLOBAL], tenant],
+  );
+  const viaPadrao = cfgDeProvedorLinha(pd.rows[0]);
+  const modeloSolto = String(escolha?.modelo ?? "").trim();
+  if (viaPadrao) {
+    if (modeloSolto) viaPadrao.modelo = modeloSolto;
+    return viaPadrao;
+  }
   const r = await q<Linha>(
     `SELECT * FROM provider_config
      WHERE escopo IN ($1, $2)
@@ -170,6 +235,7 @@ export async function resolverProvider(tenant: string): Promise<CfgResolvida | n
   if (!l || !l.ativo || !l.base_url || !l.modelo) return null;
   return {
     escopo: l.escopo,
+    provedor: null,
     tipo: l.tipo,
     base_url: l.base_url.replace(/\/+$/, ""),
     modelo: l.modelo,
@@ -667,7 +733,7 @@ async function mensagensDoHistorico(tenant: string, memoria: string, turnos: num
 
 export async function responderChat(
   user: Usuario,
-  body: { pergunta: string; memoria?: string; tenant?: string | null },
+  body: { pergunta: string; memoria?: string; tenant?: string | null; provedor?: string; modelo?: string },
   emitir?: (e: EventoChat) => void,
   /** v3.18 (T001): sinal de cancelamento da tarefa (botão "parar") */
   opts: { sinal?: AbortSignal } = {},
@@ -675,7 +741,8 @@ export async function responderChat(
   const pergunta = body.pergunta.trim();
   const tenant = tenantFor(user, body.tenant ?? null);
   const memoria = (body.memoria ?? "").trim();
-  const cfg = await resolverProvider(tenant);
+  /* v3.19: o usuário pode escolher o provedor (e o modelo) na hora da conversa */
+  const cfg = await resolverProvider(tenant, { provedor: body.provedor, modelo: body.modelo });
   if (!cfg) {
     throw erro409(
       "chat desligado: configure um provider em Configurações (tipo, URL, modelo e chave). A Busca continua funcionando.",
@@ -754,6 +821,8 @@ export async function responderChat(
     rodadas,
     modelo: cfg.modelo,
     provider: cfg.escopo,
+    /* v3.19: qual provedor nomeado respondeu (null = padrão da casa) */
+    provedor: cfg.provedor,
     mcp_interno: cfg.mcp_interno,
     ferramentas_ligadas: pacote.specs.length,
     servidores: { interno: cfg.mcp_interno, externos: pacote.externos },
@@ -900,6 +969,7 @@ export async function responderChat(
     const parcial = emitido.trim();
     await gravarMensagens(
       tenant, memoria, pergunta, parcial, chamadas, falas, pensamento.trim(), rastro, [...fontes],
+      cfg.provedor, cfg.modelo,
     );
     return empacotar(parcial, "parada pelo usuário — o que chegou ficou gravado", true);
   }
@@ -916,7 +986,7 @@ export async function responderChat(
         : "nenhuma ferramenta está ligada em Configurações → Ferramentas (MCP)");
   }
 
-  await gravarMensagens(tenant, memoria, pergunta, texto, chamadas, falas, pensamento.trim(), rastro, [...fontes]);
+  await gravarMensagens(tenant, memoria, pergunta, texto, chamadas, falas, pensamento.trim(), rastro, [...fontes], cfg.provedor, cfg.modelo);
   return empacotar(texto, aviso, false);
 }
 
@@ -930,19 +1000,23 @@ async function gravarMensagens(
   raciocinio = "",
   rastro: SegmentoRastro[] = [],
   fontes: string[] = [],
+  provedor: string | null = null,
+  modelo = "",
 ): Promise<void> {
   await q(
     `INSERT INTO chat_mensagens (tenant, memoria, papel, texto, ferramentas) VALUES ($1, $2, 'user', $3, NULL)`,
     [tenant, memoria, pergunta],
   );
   await q(
-    `INSERT INTO chat_mensagens (tenant, memoria, papel, texto, ferramentas, falas, raciocinio, rastro, fontes, custo) VALUES ($1, $2, 'assistant', $3, $4::jsonb, $5::jsonb, $6, $7::jsonb, $8::jsonb, $9::jsonb)`,
+    `INSERT INTO chat_mensagens (tenant, memoria, papel, texto, ferramentas, falas, raciocinio, rastro, fontes, custo, provedor, modelo) VALUES ($1, $2, 'assistant', $3, $4::jsonb, $5::jsonb, $6, $7::jsonb, $8::jsonb, $9::jsonb, $10, $11)`,
     [
       tenant, memoria, resposta, JSON.stringify(chamadas), JSON.stringify(falas), raciocinio || null,
       JSON.stringify(rastro), JSON.stringify(fontes),
       /* v3.18 (T018): tok_out medido pela mesma régua do orçamento; tok_in fica por conta de quem
          chamou (a resposta pode ser parcial) — gravamos só o que temos aqui. */
       JSON.stringify({ tok_out: custoDoPayload([{ content: resposta }]) }),
+      /* v3.19: quem respondeu (nome do provedor escolhido; null = padrão da casa) */
+      provedor, modelo || "",
     ],
   );
 }
@@ -955,7 +1029,7 @@ export async function historicoChat(
   const memoria = (opts.memoria ?? "").trim();
   const limite = Math.min(Math.max(opts.limit ?? 40, 1), 200);
   const r = await q(
-    `SELECT id, papel, texto, ferramentas, falas, raciocinio, rastro, fontes, custo, criado_em FROM chat_mensagens
+    `SELECT id, papel, texto, ferramentas, falas, raciocinio, rastro, fontes, custo, provedor, modelo, criado_em FROM chat_mensagens
      WHERE tenant = $1 AND memoria = $2 ORDER BY id DESC LIMIT $3`,
     [tenant, memoria, limite],
   );
@@ -973,6 +1047,9 @@ export async function historicoChat(
       /* v3.18: fontes (T004) e custo (T018) voltam com a mensagem — a tela mostra ao reabrir */
       fontes: m.fontes ?? [],
       custo: m.custo ?? null,
+      /* v3.19: qual provedor respondeu esta mensagem (null = padrão da casa) */
+      provedor: m.provedor ?? "",
+      modelo: m.modelo ?? "",
       quando: m.criado_em,
     })),
   };

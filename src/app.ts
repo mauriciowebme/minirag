@@ -56,6 +56,13 @@ import {
   testarProvider,
   verProvider,
 } from "./provider";
+import {
+  listarProvedores,
+  salvarProvedor,
+  definirPadrao,
+  apagarProvedor,
+  provarModelos,
+} from "./provedores";
 import { assinarTarefa, criarTarefa, cancelarTarefa, listarTarefas, rodarTarefa, verTarefa } from "./tarefa";
 import multipart from "@fastify/multipart";
 import { LIMITE_BYTES } from "./conversor";
@@ -728,6 +735,48 @@ export function criarApp(): FastifyInstance {
     return testarProvider(u, corpo(req));
   });
 
+  /* ------------------------------------------- provedores nomeados (v3.19)
+   * O operador cadastra cada servico uma vez (nome + URL + chave); a lista de
+   * modelos vem do proprio servico (GET /models, com fallback /v1/models e
+   * /api/tags do Ollama). Qualquer usuario escolhe qual usar na conversa. */
+
+  app.get("/provedores", async (req) => {
+    const u = usuario(req);
+    const s = req.query as Record<string, string>;
+    return { provedores: await listarProvedores(u, s.tenant ?? null) };
+  });
+
+  app.put("/provedores", async (req) => {
+    const u = usuario(req);
+    exigirOperador(u);
+    const p = await salvarProvedor(u, corpo(req));
+    return { ok: true, provedor: p };
+  });
+
+  app.patch("/provedores/padrao", async (req) => {
+    const u = usuario(req);
+    exigirOperador(u);
+    const b = corpo(req);
+    const id = Number(b.id);
+    if (!Number.isFinite(id)) throw new HttpError(422, "id e obrigatorio");
+    return { ok: true, provedor: await definirPadrao(u, id, b.tenant ?? null) };
+  });
+
+  app.delete("/provedores/:id", async (req) => {
+    const u = usuario(req);
+    exigirOperador(u);
+    const id = Number((req.params as Record<string, string>).id);
+    if (!Number.isFinite(id)) throw new HttpError(422, "id invalido");
+    return await apagarProvedor(u, id);
+  });
+
+  /** AUTO-DESCOBERTA: pede a lista de modelos ao servico; com id, grava o cache. */
+  app.post("/provedores/modelos", async (req) => {
+    const u = usuario(req);
+    exigirOperador(u);
+    return await provarModelos(u, corpo(req));
+  });
+
   /* ------------------------------------------------------- servidores MCP */
 
   app.get("/config/mcp", async (req) => {
@@ -781,6 +830,9 @@ export function criarApp(): FastifyInstance {
       pergunta: vString(b.pergunta, "pergunta", { obrigatorio: true, min: 1, max: CONFIG.maxQueryChars }),
       memoria: vString(b.memoria, "memoria", { max: 128, def: "" }),
       tenant: b.tenant ?? null,
+      /* v3.19: escolha na hora da conversa ("" = padrão da casa) */
+      provedor: vString(b.provedor, "provedor", { max: 40, def: "" }),
+      modelo: vString(b.modelo, "modelo", { max: 100, def: "" }),
     });
     void contarUso("chats");
     return r;
@@ -794,7 +846,18 @@ export function criarApp(): FastifyInstance {
     const b = corpo(req);
     const pergunta = vString(b.pergunta, "pergunta", { obrigatorio: true, min: 1, max: CONFIG.maxQueryChars });
     const memoria = vString(b.memoria, "memoria", { max: 128, def: "" });
-    const id = await criarTarefa(u, { pergunta: pergunta.trim(), memoria: memoria.trim(), tenant: b.tenant ?? null }, rodarTarefa);
+    const id = await criarTarefa(
+      u,
+      {
+        pergunta: pergunta.trim(),
+        memoria: memoria.trim(),
+        tenant: b.tenant ?? null,
+        /* v3.19 */
+        provedor: vString(b.provedor, "provedor", { max: 40, def: "" }),
+        modelo: vString(b.modelo, "modelo", { max: 100, def: "" }),
+      },
+      rodarTarefa,
+    );
     void contarUso("chats"); // paridade de métrica com POST /chat
     reply.code(201).send({ id });
   });
@@ -815,7 +878,7 @@ export function criarApp(): FastifyInstance {
       reply.code(404).send({ detail: "tarefa não encontrada" });
       return;
     }
-    return { id: t.id, status: t.status, parcial: t.parcial, ferramentas: t.ferramentas, aviso: t.aviso };
+    return { id: t.id, status: t.status, parcial: t.parcial, ferramentas: t.ferramentas, aviso: t.aviso, provedor: t.provedor, modelo: t.modelo };
   });
 
   /** v3.3: SSE reanexável da tarefa — replay do parcial + deltas ao vivo + fim/erro.
@@ -915,6 +978,9 @@ export function criarApp(): FastifyInstance {
     const pergunta = vString(b.pergunta, "pergunta", { obrigatorio: true, min: 1, max: CONFIG.maxQueryChars });
     const memoria = vString(b.memoria, "memoria", { max: 128, def: "" });
     const tenant = b.tenant ?? null;
+    /* v3.19: provedor/modelo escolhidos na tela do chat */
+    const provedor = vString(b.provedor, "provedor", { max: 40, def: "" });
+    const modelo = vString(b.modelo, "modelo", { max: 100, def: "" });
 
     reply.hijack();
     const bruto = reply.raw;
@@ -949,7 +1015,7 @@ export function criarApp(): FastifyInstance {
       }
     }, 10_000);
     try {
-      const dados = await responderChat(u, { pergunta, memoria, tenant }, enviar);
+      const dados = await responderChat(u, { pergunta, memoria, tenant, provedor, modelo }, enviar);
       enviar({ tipo: "fim", dados });
       void contarUso("chats");
     } catch (e) {

@@ -12,6 +12,7 @@ import { initUsuarios } from "./usuarios";
 import { criarTabelaEsquecimento, lerEsquecimento } from "./esquecimento";
 import { iniciarFaxinaLoop, pararFaxinaLoop } from "./faxina";
 import { initProvider } from "./provider";
+import { initProvedores } from "./provedores";
 import { initFerramentas } from "./ferramentas";
 import { initMetricas } from "./dashboard";
 import { anexarHubMaquinas, initMaquinas } from "./maquinas";
@@ -77,6 +78,7 @@ async function main(): Promise<void> {
   await initUsuarios(); // v2.7: env semeia, banco manda
   await criarTabelaEsquecimento(); // v3.5: números do esquecimento graváveis na tela
   await initProvider();
+  await initProvedores(); // v3.19: provedores nomeados + colunas de escolha na tarefa
   await initFerramentas(); // v2.8: servidores MCP que dão ferramentas ao chat
   await initMetricas();
   await initMaquinas(); // v3.6: máquinas por usuário (túnel absorvido)
