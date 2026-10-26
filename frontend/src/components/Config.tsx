@@ -82,7 +82,7 @@ function Provider({ operador, tenant, onIrPainel }: { operador: boolean; tenant:
   const [lista, setLista] = useState<Provedor[]>([]);
   /* form da linha "padrão da casa" */
   const [formPadraoAberto, setFormPadraoAberto] = useState(false);
-  const [tipo, setTipo] = useState<"litellm" | "openai" | "ollama">("litellm");
+  const [tipo, setTipo] = useState<"openai" | "ollama">("openai");
   const [baseUrl, setBaseUrl] = useState("");
   const [modelo, setModelo] = useState("");
   const [chave, setChave] = useState("");
@@ -101,7 +101,7 @@ function Provider({ operador, tenant, onIrPainel }: { operador: boolean; tenant:
   const [teste, setTeste] = useState<{ ok: boolean; msg: string } | null>(null);
   const [ocupado, setOcupado] = useState(false);
   /* form dos providers nomeados (novo ou edição) */
-  const [novo, setNovo] = useState({ nome: "", tipo: "litellm", base_url: "", chave: "", modelo: "", paraTodos: true, escopoOrig: "global" });
+  const [novo, setNovo] = useState({ nome: "", tipo: "openai", base_url: "", chave: "", modelo: "", paraTodos: true, escopoOrig: "global" });
   const [editando, setEditando] = useState<string | null>(null);
   const [formNomeadoAberto, setFormNomeadoAberto] = useState(false);
   const [rodando, setRodando] = useState<string | null>(null);
@@ -116,7 +116,7 @@ function Provider({ operador, tenant, onIrPainel }: { operador: boolean; tenant:
       setP(r);
       /* se o form do padrão estiver aberto, sincroniza com o que voltou do servidor */
       if (formPadraoAberto) {
-        setTipo(r.tipo);
+        setTipo(r.tipo === "ollama" ? "ollama" : "openai");
         setBaseUrl(r.base_url);
         setModelo(r.modelo);
         setTemperatura(String(r.temperatura));
@@ -143,7 +143,7 @@ function Provider({ operador, tenant, onIrPainel }: { operador: boolean; tenant:
 
   function preencherPadrao() {
     if (!p) return;
-    setTipo(p.tipo);
+    setTipo(p.tipo === "ollama" ? "ollama" : "openai");
     setBaseUrl(p.base_url);
     setModelo(p.modelo);
     setTemperatura(String(p.temperatura));
@@ -221,7 +221,7 @@ function Provider({ operador, tenant, onIrPainel }: { operador: boolean; tenant:
 
   function preencherNomeado(pr: Provedor) {
     setEditando(pr.nome);
-    setNovo({ nome: pr.nome, tipo: pr.tipo, base_url: pr.base_url, chave: "", modelo: pr.modelo, paraTodos: pr.escopo === "*", escopoOrig: pr.escopo === "*" ? "global" : pr.escopo });
+    setNovo({ nome: pr.nome, tipo: pr.tipo === "ollama" ? "ollama" : "openai", base_url: pr.base_url, chave: "", modelo: pr.modelo, paraTodos: pr.escopo === "*", escopoOrig: pr.escopo === "*" ? "global" : pr.escopo });
     setFormNomeadoAberto(true);
   }
 
@@ -239,7 +239,7 @@ function Provider({ operador, tenant, onIrPainel }: { operador: boolean; tenant:
         ...(novo.chave ? { chave: novo.chave } : {}),
       });
       toast(editando ? "provedor atualizado" : "provedor cadastrado — descubra os modelos para o chat escolher");
-      setNovo({ nome: "", tipo: "litellm", base_url: "", chave: "", modelo: "", paraTodos: true, escopoOrig: "global" });
+      setNovo({ nome: "", tipo: "openai", base_url: "", chave: "", modelo: "", paraTodos: true, escopoOrig: "global" });
       setEditando(null);
       setFormNomeadoAberto(false);
       await carregar();
@@ -348,7 +348,7 @@ function Provider({ operador, tenant, onIrPainel }: { operador: boolean; tenant:
                   : "ainda não configurado — sem ele o Chat fica desligado"}
               </span>
             </td>
-            <td className="mono break-all">{p ? `${p.tipo} · ${p.base_url}` : "—"}</td>
+            <td className="mono break-all">{p ? `${p.tipo === "ollama" ? "ollama" : "openai"} · ${p.base_url}` : "—"}</td>
             <td className="mono break-all">{p?.modelo || "—"}</td>
             <td>
               {p?.configurado ? (
@@ -378,7 +378,7 @@ function Provider({ operador, tenant, onIrPainel }: { operador: boolean; tenant:
                 <span className="sub2 block">{pr.escopo === "*" ? "serve para todos" : `escopo: ${pr.escopo}`}</span>
               </td>
               <td className="mono break-all">
-                {pr.tipo} · {pr.base_url}
+                {pr.tipo === "ollama" ? "ollama" : "openai"} · {pr.base_url}
               </td>
               <td className="mono break-all">
                 {pr.modelos.length ? pr.modelos.join(" · ") : pr.modelo || "—"}
@@ -438,8 +438,7 @@ function Provider({ operador, tenant, onIrPainel }: { operador: boolean; tenant:
           <label className="rotulo m-0">
             tipo
             <select className="campo mt-1" value={tipo} onChange={(e) => setTipo(e.target.value as typeof tipo)}>
-              <option value="litellm">LiteLLM (OpenAI compatível)</option>
-              <option value="openai">OpenAI</option>
+              <option value="openai">OpenAI compatível (llama.cpp, LiteLLM, vLLM...)</option>
               <option value="ollama">Ollama local</option>
             </select>
           </label>
@@ -574,9 +573,8 @@ function Provider({ operador, tenant, onIrPainel }: { operador: boolean; tenant:
           <label className="rotulo m-0">
             tipo
             <select id="provTipo" className="campo mt-1" value={novo.tipo} onChange={(e) => setNovo({ ...novo, tipo: e.target.value })}>
-              <option value="litellm">litellm / OpenAI-compatível</option>
-              <option value="openai">openai</option>
-              <option value="ollama">ollama</option>
+              <option value="openai">OpenAI compatível (llama.cpp, LiteLLM, vLLM...)</option>
+              <option value="ollama">Ollama local</option>
             </select>
           </label>
           <label className="rotulo m-0">
@@ -603,7 +601,7 @@ function Provider({ operador, tenant, onIrPainel }: { operador: boolean; tenant:
             <button id="btnSalvarProvedor" className="btn" disabled={rodando === "form"} onClick={() => void salvarNomeado()}>
               {editando ? "salvar mudanças" : "cadastrar"}
             </button>
-            <button className="btn btn-mini ml-2" onClick={() => { setFormNomeadoAberto(false); setEditando(null); setNovo({ nome: "", tipo: "litellm", base_url: "", chave: "", modelo: "", paraTodos: true, escopoOrig: "global" }); }}>
+            <button className="btn btn-mini ml-2" onClick={() => { setFormNomeadoAberto(false); setEditando(null); setNovo({ nome: "", tipo: "openai", base_url: "", chave: "", modelo: "", paraTodos: true, escopoOrig: "global" }); }}>
               fechar
             </button>
           </div>
