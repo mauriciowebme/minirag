@@ -1499,7 +1499,8 @@ test("minirag v2 — suíte completa", async (t) => {
     f.check("markdown: citação", md("> citado") === "<blockquote>citado</blockquote>", md("> citado"));
     f.check("markdown: link só para http", /<a href="https:\/\/a\.b"/.test(md("[x](https://a.b)")) && !md("[x](javascript:alert(1))").includes("<a"), md("[x](javascript:alert(1))"));
     f.check("markdown: HTML escrito vira texto, nunca tag", !md("<script>alert(1)</script>").includes("<script>"), md("<script>alert(1)</script>"));
-    f.check("markdown: dentro do bloco de código nada é marca", md("```\nconst a = **b**;\n```") === "<pre>const a = **b**;</pre>", md("```\nconst a = **b**;\n```"));
+    // v3.18 emoldurou o bloco (barra + botão); a raiz do contrato continua: dentro do pre nada é marca
+    f.check("markdown: dentro do bloco de código nada é marca", md("\n```\nconst a = **b**;\n```\n").includes("<pre>const a = **b**;</pre>"), md("\n```\nconst a = **b**;\n```\n"));
     f.check("markdown: parágrafo com quebra simples", md("linha um\nlinha dois") === "<p>linha um<br>linha dois</p>", md("linha um\nlinha dois"));
     f.check("markdown: texto vazio não quebra", md("") === "" && md("   ") === "", [md(""), md("   ")]);
 
@@ -2876,6 +2877,164 @@ await bloco(t, "v3.6: máquinas por usuário — hub WS, pareamento, run, escopo
     await call("PUT", "/config/provider", { key: OPKEY, corpo: { ativo: false, global: true } });
     if (CONTAINER) execFileSync("docker", ["exec", CONTAINER, "sh", "-c", "pkill -f maqfake8 || pkill -f 9912 || true; pkill -f 9912 || true"]);
     f.fechar("v3.8 vocab e falas");
+  });
+
+  await bloco(t, "v3.18: básico de chat — parar, fontes, custo, regenerar, recorte, título, rótulo, busca, meta", async () => {
+    const f = fiscal();
+    const CONTAINER = process.env.CONTAINER ?? "";
+    const DB = process.env.DBCONTAINER ?? "";
+    const GAV = "suite-v318";
+    const GAV2 = "suite-v318-t";
+    if (!CONTAINER || !DB) {
+      f.check("v3.18 precisa de CONTAINER+DBCONTAINER", false, "sem containers: bloco não executável");
+      f.fechar("v3.18 básico de chat");
+      return;
+    }
+    const psql = (sql: string) =>
+      execFileSync("docker", ["exec", DB, "sh", "-c", `psql -U "$POSTGRES_USER" -d "$POSTGRES_DB" -tAc "${sql}"`], { encoding: "utf8" }).trim();
+
+    // porta ROTATIVA (19000+seg%900): fakes de rodadas anteriores nunca colidem; kill é só faxina
+    const PORTF = 19000 + (Math.floor(Date.now() / 1000) % 900);
+    console.log(`-- provedor falso ${PORTF}: stream 12 pecas ~200ms (longo devagar-lento); sem stream responde direto`);
+    const cod = [
+      "const http=require('http');",
+      "http.createServer((req,res)=>{let b='';req.on('data',c=>b+=c);req.on('end',()=>{",
+      "let j={};try{j=JSON.parse(b||'{}');}catch(e){}",
+      "const m=j.messages||[];const comTool=m.filter(x=>x.role==='tool').length>0;",
+      "if(j.stream){res.setHeader('content-type','text/event-stream');const base=['A ','nota ','5512 ','da ','Beta ','somou ','R$9.876,54 ','e ','fechou ','o ','teste ','parar. '];const longo=(j.messages||[]).some(x=>String(x.content||'').includes('devagar-lento'));const pecas=longo?base.concat(Array.from({length:200},()=>'devagar ')):base;let k=0;",
+      "const t=setInterval(()=>{if(k<pecas.length){res.write('data: '+JSON.stringify({choices:[{delta:{content:pecas[k]}}]})+'\\n\\n');k++;return;}clearInterval(t);res.write('data: [DONE]\\n\\n');res.end();},240);return;}",
+      "res.setHeader('content-type','application/json');",
+      "if(JSON.stringify(m).includes('apenas o titulo'))return res.end(JSON.stringify({choices:[{message:{role:'assistant',content:'conta da nota 5512'}}]}));",
+      "if(!comTool)return res.end(JSON.stringify({choices:[{message:{role:'assistant',content:'',tool_calls:[{id:'f1',type:'function',function:{name:'search',arguments:JSON.stringify({query:'nota 5512',k:3,min_score:0,memoria:'suite-v318'})}}]}}]}));",
+      "res.end(JSON.stringify({choices:[{message:{role:'assistant',content:'A nota 5512 da Beta soma R$ 9.876,54 [tarefa 18].'}}]}));",
+      "});}).listen(" + PORTF + ",'127.0.0.1');setTimeout(()=>process.exit(0),240000);",
+    ].join("");
+    // o container NAO tem `ps`: varre /proc em node e mata o fake anterior da 9921
+    execFileSync("docker", ["exec", CONTAINER, "node", "-e",
+      "const fs=require('fs');for(const d of fs.readdirSync('/proc')){if(!/^[0-9]+$/.test(d))continue;try{const c=fs.readFileSync('/proc/'+d+'/cmdline','utf8').split('\\0').join(' ');if(c.includes('" + PORTF + "')&&+d!==process.pid)process.kill(+d);}catch(e){}}"]);
+    await dormir(900); // aguarda a porta ser liberada ANTES do bind (kill -> EADDRINUSE se ligar cedo)
+    execFileSync("docker", ["exec", "-d", CONTAINER, "node", "-e", cod]);
+    // registra o provider UMA vez e sonda o fake com UM chat por passo (spam de requests trava no freio)
+    let rp = await call("PUT", "/config/provider", {
+      key: OPKEY,
+      corpo: { tipo: "litellm", base_url: `http://127.0.0.1:${PORTF}/v1`, modelo: "basico18", temperatura: 0, system_prompt: "", mcp_interno: true, max_rodadas: 3, ativo: true, global: true },
+    });
+    f.check("provider falso salvo", rp.status === 200, rp.texto.slice(0, 140));
+    let fakeVivo = false;
+    for (let k = 0; k < 15 && !fakeVivo; k++) {
+      await dormir(500);
+      if (!fakeVivo) {
+        const probe = await call("POST", "/chat", { key: TESTKEY, corpo: { pergunta: "sonda fake vivo", memoria: "suite-v318" } });
+        fakeVivo = probe.status === 200 && String(probe.texto).includes("9.876,54");
+      }
+    }
+    f.check("provedor falso no ar (sonda unica)", fakeVivo, "sonda de vida");
+
+    /* bloco idempotente: apaga restos de rodadas anteriores (o banco de teste sobrevive entre runs) */
+    psql(`DELETE FROM chat_mensagens WHERE tenant='teste' AND memoria IN ('${GAV}','${GAV2}')`);
+    psql(`DELETE FROM chat_tarefas WHERE tenant='teste' AND memoria IN ('${GAV}','${GAV2}')`);
+    psql(`DELETE FROM gavetas WHERE tenant='teste' AND memoria IN ('${GAV}','${GAV2}')`);
+
+    const rg = await call("POST", "/ingest", {
+      key: TESTKEY,
+      corpo: { doc_id: "suite18-doc", content: "Nota fiscal suite18-doc 5512 da empresa Beta. Total R$ 9.876,54 vencendo em 05/12/2026.", memoria: GAV },
+    });
+    const job = await esperarJob(TESTKEY, rg.json?.job_id);
+    f.check("doc da v3.18 indexado", job.status === "concluido", job);
+    /* o search interno usa a MEMORIA do chat — a GAV2 da tarefa também precisa do doc */
+    const rg2 = await call("POST", "/ingest", {
+      key: TESTKEY,
+      corpo: { doc_id: "suite18-doc", content: "Nota fiscal suite18-doc 5512 da empresa Beta. Total R$ 9.876,54 vencendo em 05/12/2026.", memoria: GAV2 },
+    });
+    const job2 = await esperarJob(TESTKEY, rg2.json?.job_id);
+    f.check("doc também na gaveta da tarefa", job2.status === "concluido", job2);
+
+    console.log("-- POST /chat (sync): fontes reais + custo na resposta");
+    const rs = await call("POST", "/chat", { key: TESTKEY, corpo: { pergunta: "quanto é a nota 5512 da Beta?", memoria: GAV } });
+    f.check("resposta chegou com ferramentas", rs.status === 200 && String(rs.json?.resposta ?? "").includes("9.876,54"), rs.texto.slice(0, 160));
+    f.check("T004 fontes: search devolveu o doc e a resposta anotou a fonte", Array.isArray(rs.json?.fontes) && rs.json.fontes.includes("suite18-doc"), JSON.stringify(rs.json?.fontes ?? null));
+    f.check("T018 custo: tok_out medido (número)", typeof rs.json?.custo?.tok_out === "number" && rs.json.custo.tok_out > 0, JSON.stringify(rs.json?.custo ?? null));
+    f.check("T004 coluna fontes deixou de ser morta no banco", psql(`SELECT fontes::text FROM chat_mensagens WHERE memoria='${GAV}' AND papel='assistant' ORDER BY id DESC LIMIT 1`).includes("suite18-doc"), "psql fontes");
+
+    console.log("-- T001: criar tarefa, parar no meio, parcial preservado");
+    const rt = await call("POST", "/chat/tarefa", { key: TESTKEY, corpo: { pergunta: "palavra-união-zzz 123 conta devagar-lento", memoria: GAV2 } });
+    const idT = String(rt.json?.id ?? "");
+    f.check("tarefa criada p/ cancelamento", rt.status === 201 && idT.length >= 8, rt.texto.slice(0, 100));
+    // espera o stream COMEÇAR (parcial visível pela API, sem bloquear o loop) — o cancelar cai sempre dentro dele
+    for (let k = 0; k < 50; k++) {
+      const gg = await call("GET", `/chat/tarefa/${idT}`, { key: TESTKEY });
+      if (String(gg.json?.parcial ?? "").length > 0 || gg.json?.status !== "rodando") break;
+      await dormir(200);
+    }
+    const rc = await call("POST", `/chat/tarefa/${idT}/cancelar`, { key: TESTKEY, corpo: {} });
+    f.check("cancelar: 200 + vivia true", rc.status === 200 && rc.json?.ok === true && rc.json?.vivia === true, rc.texto.slice(0, 120));
+    let fin = null;
+    for (let k = 0; k < 40; k++) {
+      await dormir(400);
+      const g = await call("GET", `/chat/tarefa/${idT}`, { key: TESTKEY });
+      if (g.json?.status !== "rodando") { fin = g.json; break; }
+    }
+    f.check("tarefa fechou após parar", Boolean(fin) && fin.status !== "rodando", JSON.stringify(fin ?? {}).slice(0, 140));
+    f.check("aviso diz parada (não falha)", String(fin?.aviso ?? "").includes("parada"), String(fin?.aviso ?? ""));
+    f.check("parcial chegou na tela de quem reanexar", String(fin?.parcial ?? "").length > 0, String(fin?.parcial ?? "").slice(0, 60));
+    f.check("histórico gravou a pergunta + resposta parcial", psql(`SELECT count(*) FROM chat_mensagens WHERE memoria='${GAV2}'`) === "2", psql(`SELECT count(*) FROM chat_mensagens WHERE memoria='${GAV2}'`));
+    const rc2 = await call("POST", `/chat/tarefa/${idT}/cancelar`, { key: TESTKEY, corpo: {} });
+    f.check("cancelar de coisa acabada: ok + vivia false (sem fantasma)", rc2.status === 200 && rc2.json?.vivia === false, rc2.texto.slice(0, 100));
+    const rc4 = await call("POST", "/chat/tarefa/nao-existe-318/cancelar", { key: TESTKEY, corpo: {} });
+    f.check("cancelar id inexistente: 404", rc4.status === 404, rc4.texto.slice(0, 80));
+
+    console.log("-- T021 busca no histórico + T002 regenerar + T003 recorte");
+    const rb = await call("GET", `/chat/mensagens?q=${encodeURIComponent("união-zzz")}`, { key: TESTKEY });
+    f.check("buscar acha a pergunta dentro da conversa", rb.status === 200 && (rb.json?.resultados ?? []).length >= 1 && rb.json.resultados.some((x: any) => x.memoria === GAV2), rb.texto.slice(0, 180));
+    const rb2 = await call("GET", "/chat/mensagens?q=a", { key: TESTKEY });
+    f.check("termo curto: 422 (não varre a mesa toda)", rb2.status === 422, rb2.texto.slice(0, 80));
+    const rr = await call("POST", "/chat/regenerar", { key: TESTKEY, corpo: { memoria: GAV2 } });
+    f.check("regenerar devolve a pergunta cortada", rr.status === 200 && String(rr.json?.pergunta ?? "").includes("palavra-união-zzz") && rr.json?.removidas === 2, rr.texto.slice(0, 160));
+    f.check("mesa zerada depois do corte", psql(`SELECT count(*) FROM chat_mensagens WHERE memoria='${GAV2}'`) === "0", psql(`SELECT count(*) FROM chat_mensagens WHERE memoria='${GAV2}'`));
+    const rr2 = await call("POST", "/chat/regenerar", { key: TESTKEY, corpo: { memoria: GAV2 } });
+    f.check("regenerar em mesa vazia: 422", rr2.status === 422, rr2.texto.slice(0, 80));
+    const rj = await call("POST", "/chat", { key: TESTKEY, corpo: { pergunta: "corte aqui 77", memoria: GAV2 } });
+    f.check("sync p/ recorte respondeu", rj.status === 200, rj.texto.slice(0, 80));
+    const idMsg = psql(`SELECT id FROM chat_mensagens WHERE memoria='${GAV2}' AND papel='user' ORDER BY id DESC LIMIT 1`);
+    const re = await call("POST", "/chat/reenviar-corte", { key: TESTKEY, corpo: { memoria: GAV2, id: Number(idMsg) } });
+    f.check("recorte do editar: cortou da pergunta para frente", re.status === 200 && (re.json?.cortadas ?? 0) >= 2, re.texto.slice(0, 100));
+    f.check("recorte de id inexistente: 422", (await call("POST", "/chat/reenviar-corte", { key: TESTKEY, corpo: { memoria: GAV2, id: 999999999 } })).status === 422, "id falso");
+    f.check("recorte exige id numérico", (await call("POST", "/chat/reenviar-corte", { key: TESTKEY, corpo: { memoria: GAV2, id: "abc" } })).status === 422, "id abc");
+
+    console.log("-- T016 título automático: tarefa que termina bem batiza a gaveta");
+    const rn = await call("POST", "/chat/tarefa", { key: TESTKEY, corpo: { pergunta: "qual o total da nota?", memoria: GAV2 } });
+    const idN = String(rn.json?.id ?? "");
+    for (let k = 0; k < 50 && !/terminou|falhou|cancelada/.test(psql(`SELECT status FROM chat_tarefas WHERE id='${idN}'`)); k++) await dormir(400);
+    f.check("tarefa normal terminou", psql(`SELECT status FROM chat_tarefas WHERE id='${idN}'`) === "terminou", psql(`SELECT status FROM chat_tarefas WHERE id='${idN}'`));
+    let tit = "";
+    for (let k = 0; k < 30; k++) {
+      tit = psql(`SELECT COALESCE(titulo,'') FROM gavetas WHERE tenant='teste' AND memoria='${GAV2}'`);
+      if (tit) break;
+      await dormir(400);
+    }
+    f.check("gaveta nomeada ganhou título automático", tit.length > 0 && tit.length <= 80, tit);
+
+    console.log("-- T015/T019 metadados da gaveta");
+    const rm = await call("PUT", "/gavetas/meta", { key: TESTKEY, corpo: { memoria: GAV2, titulo: "painel 18", fixada: true } });
+    f.check("meta: título + fixada salvos", rm.status === 200, rm.texto.slice(0, 120));
+    const rlv = await call("GET", "/gavetas", { key: TESTKEY });
+    const linha = (rlv.json?.gavetas ?? []).find((x: any) => x.tenant === "teste" && x.memoria === GAV2);
+    f.check("lista devolve título e fixada", linha?.titulo === "painel 18" && linha?.fixada === true, JSON.stringify(linha ?? null).slice(0, 160));
+    const rla = await call("GET", `/gavetas?tenant=teste`, { key: OPKEY });
+    f.check("fixada aparece na lista do operador", (rla.json?.gavetas ?? []).some((x: any) => x.tenant === "teste" && x.memoria === GAV2 && x.fixada === true), "linha conferida pelo servidor");
+    f.check("título manual venceu o automático", psql(`SELECT titulo FROM gavetas WHERE tenant='teste' AND memoria='${GAV2}'`) === "painel 18", psql(`SELECT titulo FROM gavetas WHERE tenant='teste' AND memoria='${GAV2}'`));
+    const rar = await call("PUT", "/gavetas/meta", { key: TESTKEY, corpo: { memoria: GAV2, arquivada: true } });
+    f.check("arquivar aceita", rar.status === 200, rar.texto.slice(0, 80));
+    f.check("linha ficou arquivada no banco", psql(`SELECT arquivada::text FROM gavetas WHERE tenant='teste' AND memoria='${GAV2}'`) === "true", "arquivada true");
+    await call("PUT", "/gavetas/meta", { key: TESTKEY, corpo: { memoria: GAV2, arquivada: false } });
+    const rpv = await call("PUT", "/gavetas/meta", { key: TESTKEY, corpo: { memoria: "", titulo: "x" } });
+    f.check("gaveta padrão não ganha rótulo: 422", rpv.status === 422, rpv.texto.slice(0, 80));
+    const rvz = await call("PUT", "/gavetas/meta", { key: TESTKEY, corpo: { memoria: GAV } });
+    f.check("meta sem nada: 422", rvz.status === 422, rvz.texto.slice(0, 80));
+
+    const rh12 = await call("GET", `/chat?memoria=${GAV2}`, { key: TESTKEY });
+    f.check("T012: histórico devolve `quando` em cada linha (a tela desenha a hora)", (rh12.json?.mensagens ?? []).length > 0 && rh12.json.mensagens.every((x: any) => typeof x.quando === "string"), rh12.texto.slice(0, 120));
+    f.fechar("v3.18 básico de chat");
   });
 
   await bloco(t, "freio de força bruta (último: bloqueia o IP)", async () => {
