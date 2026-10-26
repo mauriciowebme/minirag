@@ -11,7 +11,7 @@
  *   - a chave do provider é guardada no servidor e devolvida SEMPRE mascarada;
  *   - cada usuário pode ter a sua configuração; o operador grava o padrão global (escopo '*').
  */
-import { Usuario, tenantFor } from "./config";
+import { Usuario, log, tenantFor } from "./config";
 import { erro409, erro422 } from "./errors";
 import { q } from "./db";
 import { apertarRodada, custoDoPayload, type MsgChat, montarPayload } from "./compactar";
@@ -138,6 +138,9 @@ export async function initProvider(): Promise<void> {
      fala de caminho e ferramenta com o tempo dela. Gravado para a trilha sobreviver a
      reabrir a conversa — a string única de `raciocinio` não guarda essa ordem. */
   await q(`ALTER TABLE chat_mensagens ADD COLUMN IF NOT EXISTS rastro JSONB`);
+  /* v3.18 (T018): quanto custou cada resposta — {tok_in, tok_out, ms, modelo}. A coluna
+     `fontes` nasceu em 2.0 e nunca foi escrita: passa a viver na T004. */
+  await q(`ALTER TABLE chat_mensagens ADD COLUMN IF NOT EXISTS custo JSONB`);
   await q(`CREATE INDEX IF NOT EXISTS chat_tenant_idx ON chat_mensagens (tenant, memoria, id)`);
 }
 
@@ -368,6 +371,12 @@ function vigiaSilencio(silencioMs: number, tetoMs: number) {
     },
     /** motivo do meu próprio abort ("" quando quem abortou foi outra coisa) */
     porque: (): string => porque,
+    /** v3.18 (T001): cancelamento humano — aborta e marca o motivo como "cancelado",
+       distinguindo "usuário parou" de "rede caiu" nos três pontos de queda do stream */
+    cancelar: (): void => {
+      porque = "cancelado";
+      ctrl.abort();
+    },
     silencioMs,
   };
 }
@@ -392,6 +401,7 @@ async function lerPedaco<T>(
     vigia.renovar();
     return p;
   } catch (e) {
+    if (vigia.porque() === "cancelado") throw new Error("cancelado-pelo-usuario");
     throw erro422(`a resposta do provider parou: ${etiquetaQueda(e, vigia, "a conexão caiu no meio")}`);
   }
 }
@@ -408,6 +418,9 @@ export async function chamarModelo(
     onDelta?: (t: string) => void;
     /** pedaços do raciocínio do modelo (reasoning_content/thinking) — o chat mostra ao vivo */
     onRaciocinio?: (t: string) => void;
+    /** v3.18 (T001): sinal externo ("parar" do usuário). Abortado: o erro lançado é
+       exatamente "cancelado-pelo-usuario" — quem chama preserva o parcial e não grava falha. */
+    sinal?: AbortSignal;
   } = {},
 ): Promise<{
   message: { role: "assistant"; content: string; tool_calls?: ChamadaTool[] };
@@ -421,6 +434,10 @@ export async function chamarModelo(
   const silencioMs =
     Number(cfg.silencio_s) > 0 ? Number(cfg.silencio_s) * 1000 : opts.timeoutMs ?? SILENCIO_PADRAO_S * 1000;
   const vigia = vigiaSilencio(silencioMs, opts.tetoMs ?? TETO_TOTAL_MS);
+  if (opts.sinal) {
+    if (opts.sinal.aborted) throw new Error("cancelado-pelo-usuario");
+    opts.sinal.addEventListener("abort", () => vigia.cancelar(), { once: true });
+  }
   const inicio = Date.now();
   const headers: Record<string, string> = { "content-type": "application/json" };
   if (cfg.chave) headers.authorization = "B" + "earer " + cfg.chave;
@@ -440,6 +457,7 @@ export async function chamarModelo(
       signal: vigia.signal,
     });
   } catch (e) {
+    if (vigia.porque() === "cancelado") throw new Error("cancelado-pelo-usuario");
     throw erro422(`nao consegui falar com o provider: ${etiquetaQueda(e, vigia, "sem conexão com o provider")}`);
   }
   if (!r.ok) {
@@ -514,6 +532,7 @@ export async function chamarModelo(
   try {
     texto = await r.text();
   } catch (e) {
+    if (vigia.porque() === "cancelado") throw new Error("cancelado-pelo-usuario");
     throw erro422(`a resposta do provider parou: ${etiquetaQueda(e, vigia, "o corpo da resposta não chegou")}`);
   } finally {
     vigia.fechar();
@@ -650,6 +669,8 @@ export async function responderChat(
   user: Usuario,
   body: { pergunta: string; memoria?: string; tenant?: string | null },
   emitir?: (e: EventoChat) => void,
+  /** v3.18 (T001): sinal de cancelamento da tarefa (botão "parar") */
+  opts: { sinal?: AbortSignal } = {},
 ) {
   const pergunta = body.pergunta.trim();
   const tenant = tenantFor(user, body.tenant ?? null);
@@ -715,8 +736,39 @@ export async function responderChat(
   let texto = "";
   let rodadas = 0;
   let aviso: string | null = null;
+  /* v3.18: `emitido` é o texto JÁ MOSTRADO da rodada em curso (zera a cada rodada com
+     ferramenta, porque rascunho de rodada não é resposta) — é o que sobrevive ao "parar".
+     `fontes` (T004): nomes de documento que a ferramenta de busca devolveu nesta resposta. */
+  let emitido = "";
+  const fontes = new Set<string>();
+  /* embrulho único da saída: caminho normal e caminho cancelado dizem a mesma coisa */
+  const empacotar = (respostaTexto: string, avisoTexto: string | null, cancelada: boolean) => ({
+    resposta: respostaTexto,
+    cancelada,
+    fontes: [...fontes],
+    ferramentas: chamadas,
+    falas,
+    rastro,
+    /** v3.13: raciocínio do modelo, para a tela recolher "Pensou por Ns" ao reabrir a conversa */
+    raciocinio: pensamento.trim(),
+    rodadas,
+    modelo: cfg.modelo,
+    provider: cfg.escopo,
+    mcp_interno: cfg.mcp_interno,
+    ferramentas_ligadas: pacote.specs.length,
+    servidores: { interno: cfg.mcp_interno, externos: pacote.externos },
+    tem_system_prompt: Boolean(cfg.system_prompt.trim()),
+    compactacao,
+    ms: Date.now() - inicio,
+    /** v3.18 (T018): tokens de entrada (conta do plano de contexto) e de saída (resposta) */
+    custo: { tok_in: compactacao.tokens, tok_out: custoDoPayload([{ content: respostaTexto }]) },
+    aviso: avisoTexto,
+  });
 
+  try {
   for (;;) {
+    if (opts.sinal?.aborted) throw new Error("cancelado-pelo-usuario");
+    emitido = "";
     rodadas++;
     const usaFerramentas = pacote.specs.length > 0 && cfg.max_rodadas > 0;
     let saiuTexto = false;
@@ -742,6 +794,7 @@ export async function responderChat(
       onDelta: emitir
         ? (t) => {
             saiuTexto = true;
+            emitido += t;
             emitir({ tipo: "delta", texto: t });
           }
         : undefined,
@@ -752,6 +805,8 @@ export async function responderChat(
         else bloco.texto += t;
         emitir?.({ tipo: "raciocinio", texto: t });
       },
+      /* v3.18 (T001): o sinal da tarefa chega até aqui — "parar" aborta a chamada em curso */
+      sinal: opts.sinal,
     });
     const pedidas = r.message.tool_calls ?? [];
     if (!emitir && r.pensamento) {
@@ -811,6 +866,25 @@ export async function responderChat(
       emitir?.({ tipo: "ferramenta", servidor: exec.servidor, nome: exec.nome, ok: exec.ok, ms: exec.ms });
       /* o resultado entra já aparado: ferramenta gulosamente verbosa não pode estourar a janela */
       const brutoTool = paraTexto(exec.saida);
+      /* v3.18 (T004): documentos que a BUSCA devolveu são as fontes da resposta. A coluna
+         `fontes` existia desde o 2.0 e nunca recebeu uma letra — passa a viver. Só ferramentas
+         de busca: saída de outra ferramenta com campo "nome" não contamina. */
+      if (exec.ok && (nome === "search" || /buscar|busca/i.test(nome))) {
+        /* forma real da busca: {items:[{doc_id,title,...}]} — título quando existe, senão doc_id */
+        let achou = false;
+        try {
+          const j = JSON.parse(brutoTool);
+          for (const d of Array.isArray(j?.items) ? j.items : []) {
+            const nomeDoc = String(d?.title || d?.doc_id || "").trim();
+            if (nomeDoc && fontes.size < 12) { fontes.add(nomeDoc); achou = true; }
+          }
+        } catch { /* saída não-JSON: cai no regex */ }
+        if (!achou) {
+          for (const mm of brutoTool.matchAll(/"(?:title|doc_id|nome)"\s*:\s*"([^"]{1,140})"/g)) {
+            if (mm[1] && fontes.size < 12) fontes.add(mm[1]);
+          }
+        }
+      }
       mensagens.push({
         role: "tool",
         tool_call_id: c.id,
@@ -818,6 +892,16 @@ export async function responderChat(
       });
       if (brutoTool.length > TETO_FERRAMENTA) compactacao.aparadas++;
     }
+  }
+  } catch (e) {
+    /* v3.18 (T001): "parar" não é falha — o que chegou ao usuário fica gravado como resposta
+       parcial, a tarefa fecha como cancelada e nenhuma frase de erro aparece. */
+    if (String((e as Error)?.message ?? e) !== "cancelado-pelo-usuario") throw e;
+    const parcial = emitido.trim();
+    await gravarMensagens(
+      tenant, memoria, pergunta, parcial, chamadas, falas, pensamento.trim(), rastro, [...fontes],
+    );
+    return empacotar(parcial, "parada pelo usuário — o que chegou ficou gravado", true);
   }
 
   if (!texto) {
@@ -832,25 +916,8 @@ export async function responderChat(
         : "nenhuma ferramenta está ligada em Configurações → Ferramentas (MCP)");
   }
 
-  await gravarMensagens(tenant, memoria, pergunta, texto, chamadas, falas, pensamento.trim(), rastro);
-  return {
-    resposta: texto,
-    ferramentas: chamadas,
-    falas,
-    rastro,
-    /** v3.13: raciocínio do modelo, para a tela recolher "Pensou por Ns" ao reabrir a conversa */
-    raciocinio: pensamento.trim(),
-    rodadas,
-    modelo: cfg.modelo,
-    provider: cfg.escopo,
-    mcp_interno: cfg.mcp_interno,
-    ferramentas_ligadas: pacote.specs.length,
-    servidores: { interno: cfg.mcp_interno, externos: pacote.externos },
-    tem_system_prompt: Boolean(cfg.system_prompt.trim()),
-    compactacao,
-    ms: Date.now() - inicio,
-    aviso,
-  };
+  await gravarMensagens(tenant, memoria, pergunta, texto, chamadas, falas, pensamento.trim(), rastro, [...fontes]);
+  return empacotar(texto, aviso, false);
 }
 
 async function gravarMensagens(
@@ -862,14 +929,21 @@ async function gravarMensagens(
   falas: string[] = [],
   raciocinio = "",
   rastro: SegmentoRastro[] = [],
+  fontes: string[] = [],
 ): Promise<void> {
   await q(
     `INSERT INTO chat_mensagens (tenant, memoria, papel, texto, ferramentas) VALUES ($1, $2, 'user', $3, NULL)`,
     [tenant, memoria, pergunta],
   );
   await q(
-    `INSERT INTO chat_mensagens (tenant, memoria, papel, texto, ferramentas, falas, raciocinio, rastro) VALUES ($1, $2, 'assistant', $3, $4::jsonb, $5::jsonb, $6, $7::jsonb)`,
-    [tenant, memoria, resposta, JSON.stringify(chamadas), JSON.stringify(falas), raciocinio || null, JSON.stringify(rastro)],
+    `INSERT INTO chat_mensagens (tenant, memoria, papel, texto, ferramentas, falas, raciocinio, rastro, fontes, custo) VALUES ($1, $2, 'assistant', $3, $4::jsonb, $5::jsonb, $6, $7::jsonb, $8::jsonb, $9::jsonb)`,
+    [
+      tenant, memoria, resposta, JSON.stringify(chamadas), JSON.stringify(falas), raciocinio || null,
+      JSON.stringify(rastro), JSON.stringify(fontes),
+      /* v3.18 (T018): tok_out medido pela mesma régua do orçamento; tok_in fica por conta de quem
+         chamou (a resposta pode ser parcial) — gravamos só o que temos aqui. */
+      JSON.stringify({ tok_out: custoDoPayload([{ content: resposta }]) }),
+    ],
   );
 }
 
@@ -881,7 +955,7 @@ export async function historicoChat(
   const memoria = (opts.memoria ?? "").trim();
   const limite = Math.min(Math.max(opts.limit ?? 40, 1), 200);
   const r = await q(
-    `SELECT id, papel, texto, ferramentas, falas, raciocinio, rastro, criado_em FROM chat_mensagens
+    `SELECT id, papel, texto, ferramentas, falas, raciocinio, rastro, fontes, custo, criado_em FROM chat_mensagens
      WHERE tenant = $1 AND memoria = $2 ORDER BY id DESC LIMIT $3`,
     [tenant, memoria, limite],
   );
@@ -896,6 +970,9 @@ export async function historicoChat(
       falas: m.falas ?? [],
       raciocinio: m.raciocinio ?? "",
       rastro: m.rastro ?? [],
+      /* v3.18: fontes (T004) e custo (T018) voltam com a mensagem — a tela mostra ao reabrir */
+      fontes: m.fontes ?? [],
+      custo: m.custo ?? null,
       quando: m.criado_em,
     })),
   };
@@ -910,3 +987,118 @@ export async function limparChat(
   const r = await q(`DELETE FROM chat_mensagens WHERE tenant = $1 AND memoria = $2`, [tenant, memoria]);
   return { tenant, memoria, apagadas: r.rowCount ?? 0 };
 }
+
+/* ============================ v3.18 — básico de chat ============================ */
+
+/** T002 (regenerar): corta o ÚLTIMO par pergunta+resposta e devolve a pergunta para a tela
+ *  reenviar pelo caminho normal (tarefa, fila, streaming — não criamos segunda via).
+ *  Termina com pergunta solta (resposta falhou): corta só ela e devolve o texto. */
+export async function truncarParaRegenerar(
+  user: Usuario,
+  o: { memoria?: string; tenant?: string | null },
+) {
+  const tenant = tenantFor(user, o.tenant ?? null);
+  const memoria = (o.memoria ?? "").trim();
+  const r = await q<{ id: string; papel: string; texto: string }>(
+    `SELECT id, papel, texto FROM chat_mensagens WHERE tenant = $1 AND memoria = $2 ORDER BY id DESC LIMIT 2`,
+    [tenant, memoria],
+  );
+  if (!r.rows.length) throw erro422("não há nada aqui para regenerar");
+  if (r.rows[0].papel === "assistant") {
+    if (r.rows.length < 2 || r.rows[1].papel !== "user") throw erro422("o histórico terminou de um jeito estranho — digite a pergunta de novo");
+    await q(`DELETE FROM chat_mensagens WHERE tenant = $1 AND memoria = $2 AND id >= $3`, [tenant, memoria, r.rows[1].id]);
+    return { pergunta: r.rows[1].texto, removidas: 2 };
+  }
+  await q(`DELETE FROM chat_mensagens WHERE tenant = $1 AND memoria = $2 AND id = $3`, [tenant, memoria, r.rows[0].id]);
+  return { pergunta: r.rows[0].texto, removidas: 1 };
+}
+
+/** T003 (editar e reenviar): corta do histórico a pergunta apontada (inclusive) e tudo depois
+ *  dela. A tela reenvia o texto editado pelo caminho normal. A mensagem precisa ser do dono. */
+export async function cortarParaReenviar(
+  user: Usuario,
+  o: { memoria?: string; tenant?: string | null; id: number },
+) {
+  const tenant = tenantFor(user, o.tenant ?? null);
+  const memoria = (o.memoria ?? "").trim();
+  if (!Number.isInteger(o.id) || o.id <= 0) throw erro422("id de mensagem inválido");
+  const m = await q<{ papel: string }>(
+    `SELECT papel FROM chat_mensagens WHERE id = $1 AND tenant = $2 AND memoria = $3`,
+    [o.id, tenant, memoria],
+  );
+  if (!m.rows.length) throw erro422("essa pergunta não está mais nesta gaveta");
+  if (m.rows[0].papel !== "user") throw erro422("só pergunta pode ser reenviada");
+  const d = await q(`DELETE FROM chat_mensagens WHERE tenant = $1 AND memoria = $2 AND id >= $3`, [tenant, memoria, o.id]);
+  return { cortadas: d.rowCount ?? 0 };
+}
+
+/** T021 (buscar no histórico): ILIKE simples, 50 resultados, trecho ao redor do achado.
+ *  Só o tenant do usuário (operador continua preso ao tenant corrente como no resto do chat). */
+export async function buscarMensagensChat(user: Usuario, termo: string, limite = 50, tenantArg?: string | null) {
+  const tenant = tenantFor(user, tenantArg ?? null);
+  const t = termo.trim().slice(0, 120);
+  if (t.length < 2) throw erro422("digite pelo menos 2 caracteres para buscar");
+  const r = await q(
+    `SELECT id, memoria, papel, texto, criado_em FROM chat_mensagens
+     WHERE tenant = $1 AND texto ILIKE $2 ORDER BY id DESC LIMIT $3`,
+    [tenant, `%${t}%`, Math.min(Math.max(limite, 1), 100)],
+  );
+  const agulha = t.toLowerCase();
+  return {
+    termo: t,
+    resultados: r.rows.map((m: any) => {
+      const txt = String(m.texto);
+      const i = Math.max(0, txt.toLowerCase().indexOf(agulha) - 70);
+      return {
+        id: Number(m.id),
+        memoria: String(m.memoria ?? ""),
+        papel: m.papel,
+        trecho: `${i > 0 ? "…" : ""}${txt.slice(i, i + 180).replace(/\n/g, " ")}`,
+        quando: m.criado_em,
+      };
+    }),
+  };
+}
+
+/** T016 (título automático): depois da primeira troca de uma gaveta nomeada sem título.
+ *  Um chamarModelo pequeno, sem stream nem ferramentas. Engole os próprios erros — título
+ *  nenhum vale derrubar uma resposta entregue. Título manual (T015) sempre vence: só escrevemos
+ *  onde COALESCE acha NULL. */
+export async function gerarTituloAutomatico(
+  user: Usuario,
+  o: { tenant: string; memoria: string; pergunta: string; resposta: string },
+): Promise<void> {
+  const memoria = o.memoria.trim();
+  if (!memoria) return; // a gaveta padrão não ganha título
+  try {
+    const ja = await q<{ titulo: string | null }>(
+      `SELECT titulo FROM gavetas WHERE tenant = $1 AND memoria = $2`,
+      [o.tenant, memoria],
+    );
+    if (ja.rows.length && ja.rows[0].titulo) return;
+    const cfg = await resolverProvider(o.tenant);
+    if (!cfg) return;
+    const r = await chamarModelo(
+      cfg,
+      [
+        { role: "system", content: "Dê a esta conversa um titulo de no maximo 5 palavras, em minusculas, sem pontuacao no fim. Responda apenas o titulo." },
+        { role: "user", content: `${o.pergunta.slice(0, 400)}\n\nresposta: ${o.resposta.slice(0, 400)}` },
+      ],
+      { tetoMs: 30000 },
+    );
+    const titulo = String(r.texto ?? "")
+      .trim()
+      .split("\n")[0]
+      .replace(/^["'\s]+|["'.\s]+$/g, "")
+      .slice(0, 60);
+    if (!titulo) return;
+    await q(
+      `INSERT INTO gavetas (tenant, memoria, titulo) VALUES ($1, $2, $3)
+       ON CONFLICT (tenant, memoria) DO UPDATE SET titulo = COALESCE(gavetas.titulo, EXCLUDED.titulo)`,
+      [o.tenant, memoria, titulo],
+    );
+  } catch (e) {
+    log(`titulo automatico ${o.tenant}/${memoria}: ${String((e as Error).message ?? e)}`);
+  }
+}
+

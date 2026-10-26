@@ -146,6 +146,11 @@ export async function initDb(dim: number): Promise<void> {
       criado_em TIMESTAMPTZ NOT NULL DEFAULT now(),
       PRIMARY KEY (tenant, memoria))`,
   );
+  /* v3.18: metadados da gaveta — titulo de exibição (renomear/T015, auto T016),
+     fixada no topo (T019) e arquivada fora da lista (T019). */
+  await q(`ALTER TABLE gavetas ADD COLUMN IF NOT EXISTS titulo TEXT`);
+  await q(`ALTER TABLE gavetas ADD COLUMN IF NOT EXISTS fixada BOOLEAN NOT NULL DEFAULT false`);
+  await q(`ALTER TABLE gavetas ADD COLUMN IF NOT EXISTS arquivada BOOLEAN NOT NULL DEFAULT false`);
 
   /* v3.3: estado do em-andamento do chat (tarefa no servidor + reanexar). */
   await q(

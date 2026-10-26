@@ -46,14 +46,17 @@ import {
   removerUsuario,
 } from "./usuarios";
 import {
+  buscarMensagensChat,
+  cortarParaReenviar,
   historicoChat,
   limparChat,
   responderChat,
+  truncarParaRegenerar,
   salvarProvider,
   testarProvider,
   verProvider,
 } from "./provider";
-import { assinarTarefa, criarTarefa, listarTarefas, rodarTarefa, verTarefa } from "./tarefa";
+import { assinarTarefa, criarTarefa, cancelarTarefa, listarTarefas, rodarTarefa, verTarefa } from "./tarefa";
 import multipart from "@fastify/multipart";
 import { LIMITE_BYTES } from "./conversor";
 import {
@@ -66,6 +69,7 @@ import {
   jobParaUsuario,
   listDocs,
   criarGaveta,
+  atualizarGavetaMeta,
   listGavetas,
   listJobs,
   nomeArquivo,
@@ -331,6 +335,19 @@ export function criarApp(): FastifyInstance {
     const u = usuario(req);
     const s = req.query as Record<string, string>;
     return listGavetas(u, s.tenant ?? "");
+  });
+
+  /** v3.18 (T015/T019): metadados da gaveta — renomear, fixar, arquivar. */
+  app.put("/gavetas/meta", async (req) => {
+    const u = usuario(req);
+    const b = corpo(req);
+    return atualizarGavetaMeta(u, {
+      memoria: vString(b.memoria, "memoria", { obrigatorio: true, max: 128 }),
+      tenant: b.tenant ?? null,
+      titulo: typeof b.titulo === "string" ? b.titulo : undefined,
+      fixada: typeof b.fixada === "boolean" ? b.fixada : undefined,
+      arquivada: typeof b.arquivada === "boolean" ? b.arquivada : undefined,
+    });
   });
 
   app.get("/jobs", async (req) => {
@@ -963,6 +980,48 @@ export function criarApp(): FastifyInstance {
     const u = usuario(req);
     const s = req.query as Record<string, string>;
     return limparChat(u, { memoria: s.memoria ?? "", tenant: s.tenant ?? "" });
+  });
+
+  /* ------------------------------------------- v3.18: básico que faltava no chat */
+
+  /** T001: "parar" — aborta a chamada do provider; o parcial já está gravado no fim da tarefa. */
+  app.post("/chat/tarefa/:id/cancelar", async (req, reply) => {
+    const u = usuario(req);
+    const s = req.query as Record<string, string>;
+    const r = await cancelarTarefa(u, String((req.params as Record<string, string>).id), s.tenant ?? null);
+    if (!r.achou) {
+      reply.code(404).send({ detail: "tarefa não encontrada" });
+      return;
+    }
+    return { ok: true, vivia: r.vivia };
+  });
+
+  /** T002: regenerar — corta o último par e devolve a pergunta; a tela reenvia pelo caminho normal. */
+  app.post("/chat/regenerar", async (req) => {
+    const u = usuario(req);
+    const b = corpo(req);
+    return truncarParaRegenerar(u, {
+      memoria: vString(b.memoria, "memoria", { max: 128, def: "" }),
+      tenant: b.tenant ?? null,
+    });
+  });
+
+  /** T003: editar e reenviar — corta da pergunta escolhida para frente (a tela reenvia depois). */
+  app.post("/chat/reenviar-corte", async (req) => {
+    const u = usuario(req);
+    const b = corpo(req);
+    return cortarParaReenviar(u, {
+      memoria: vString(b.memoria, "memoria", { max: 128, def: "" }),
+      tenant: b.tenant ?? null,
+      id: Number(b.id),
+    });
+  });
+
+  /** T021: buscar dentro do histórico do tenant (trechos, mais novas primeiro). */
+  app.get("/chat/mensagens", async (req) => {
+    const u = usuario(req);
+    const s = req.query as Record<string, string>;
+    return buscarMensagensChat(u, s.q ?? "", s.limit ? Number(s.limit) : 50, s.tenant ?? null);
   });
 
   /* ----------------------------------------------------------------- MCP */

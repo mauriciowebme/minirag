@@ -162,8 +162,8 @@ export async function listGavetas(user: Usuario, tenantArg?: string) {
      GROUP BY tenant, memoria ORDER BY tenant, memoria`,
     params,
   );
-  const reg = await q<{ tenant: string; memoria: string }>(
-    `SELECT tenant, memoria FROM gavetas ${where}`,
+  const reg = await q<{ tenant: string; memoria: string; titulo: string | null; fixada: boolean; arquivada: boolean }>(
+    `SELECT tenant, memoria, titulo, fixada, arquivada FROM gavetas ${where}`,
     params,
   );
   const nd = await q<{ n: string }>(
@@ -196,6 +196,10 @@ export async function listGavetas(user: Usuario, tenantArg?: string) {
     chunks_arquivados: number;
     primeiro_ingress: string | null;
     ultimo_ingress: string | null;
+    /** v3.18 (T015/T019): titulo de exibicao (fallback = memoria), fixada no topo, arquivada fora */
+    titulo?: string | null;
+    fixada?: boolean;
+    arquivada?: boolean;
   };
   const mapa = new Map<string, Linha>();
   const chave = (t: string, m: string) => `${t}\u0000${m}`;
@@ -210,6 +214,9 @@ export async function listGavetas(user: Usuario, tenantArg?: string) {
       chunks_arquivados: 0,
       primeiro_ingress: null,
       ultimo_ingress: null,
+      titulo: g.titulo ?? null,
+      fixada: Boolean(g.fixada),
+      arquivada: Boolean(g.arquivada),
     });
   }
   /* a gaveta padrão (memoria vazia) sempre aparece para cada usuário visível */
@@ -228,6 +235,7 @@ export async function listGavetas(user: Usuario, tenantArg?: string) {
     }
   }
   for (const g of r.rows) {
+    const antiga = mapa.get(chave(g.tenant, g.memoria));
     mapa.set(chave(g.tenant, g.memoria), {
       tenant: g.tenant,
       memoria: g.memoria,
@@ -236,6 +244,10 @@ export async function listGavetas(user: Usuario, tenantArg?: string) {
       chunks_arquivados: Number(g.arq),
       primeiro_ingress: iso(g.primeiro),
       ultimo_ingress: iso(g.ultimo),
+      // v3.18 (T019): linha dos chunks herda o metadado do registro
+      titulo: antiga?.titulo ?? null,
+      fixada: antiga?.fixada ?? false,
+      arquivada: antiga?.arquivada ?? false,
     });
   }
 
@@ -244,9 +256,49 @@ export async function listGavetas(user: Usuario, tenantArg?: string) {
     usuarios,
     gavetas: [...mapa.values()]
       .filter((g) => usuarios.includes(g.tenant))
-      .sort((a, b) => a.tenant.localeCompare(b.tenant) || a.memoria.localeCompare(b.memoria)),
+      .sort(
+        (a, b) =>
+          /* fixadas primeiro (T019), depois a ordem histórica por tenant/memoria */
+          Number(Boolean(b.fixada)) - Number(Boolean(a.fixada)) ||
+          a.tenant.localeCompare(b.tenant) ||
+          a.memoria.localeCompare(b.memoria),
+      ),
     documentos_fonte: Number(nd.rows[0]?.n ?? 0),
   };
+}
+
+/** v3.18 (T015/T019): metadados da gaveta — renomear (titulo de exibicao), fixar, arquivar.
+   A memoria em si NUNCA muda (ela e a chave em chunks/documents/chat); renomear e so rotulo.
+   Gaveta padrao (memoria vazia) nao tem linha nem titulo. Upsert: gaveta nascida so no chat
+   pode ser renomeada antes de ter documento. */
+export async function atualizarGavetaMeta(
+  user: Usuario,
+  o: { memoria: string; tenant?: string | null; titulo?: string; fixada?: boolean; arquivada?: boolean },
+) {
+  const tenant = tenantFor(user, o.tenant ?? null);
+  const memoria = (o.memoria ?? "").trim().replace(/\s+/g, " ");
+  if (!memoria) throw erro422("a gaveta padrao nao e renomeavel");
+  if (o.titulo === undefined && o.fixada === undefined && o.arquivada === undefined) {
+    throw erro422("nada para atualizar (titulo, fixada ou arquivada)");
+  }
+  await q(`INSERT INTO gavetas (tenant, memoria) VALUES ($1, $2) ON CONFLICT (tenant, memoria) DO NOTHING`, [tenant, memoria]);
+  const sets: string[] = [];
+  const args: unknown[] = [tenant, memoria];
+  if (o.titulo !== undefined) {
+    const t = o.titulo.trim().slice(0, 80);
+    args.push(t || null);
+    sets.push(`titulo = $${args.length}`);
+  }
+  if (o.fixada !== undefined) {
+    args.push(Boolean(o.fixada));
+    sets.push(`fixada = $${args.length}`);
+  }
+  if (o.arquivada !== undefined) {
+    args.push(Boolean(o.arquivada));
+    sets.push(`arquivada = $${args.length}`);
+  }
+  await q(`UPDATE gavetas SET ${sets.join(", ")} WHERE tenant = $1 AND memoria = $2`, args);
+  return { tenant, memoria, titulo: o.titulo?.trim() || null, fixada: o.fixada, arquivada: o.arquivada };
 }
 
 /** Cria uma gaveta vazia (aparece no mapa antes do primeiro documento). */

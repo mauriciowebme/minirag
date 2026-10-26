@@ -2,7 +2,7 @@
  *  a cada delta, reanexar pelo barril de eventos. Criado por POST /chat/tarefa (app.ts). */
 import { randomUUID } from "node:crypto";
 import { q } from "./db";
-import { responderChat } from "./provider";
+import { responderChat, gerarTituloAutomatico } from "./provider";
 import { tenantFor, type Usuario, log } from "./config";
 
 /* ---- barril de eventos (nasce aqui; Task 4 consome no SSE reanexável) ----
@@ -33,6 +33,21 @@ export function notificarTarefa(id: string, e: unknown): void {
       /* ouvinte morto não derruba a tarefa */
     }
   });
+}
+
+/* v3.18 (T001): registro vivo do "parar" — o AbortController da chamada em curso, por tarefa.
+   morre junto com o processamento; cancelarTarefa aborta, responderChat preserva o parcial. */
+const controles = new Map<string, AbortController>();
+
+/** v3.18 (T001): parar uma tarefa. A regra de dono é a mesma do reanexar (verTarefa:
+   id + tenant; operador via tenantFor). Tarefa que já acabou: ok=true, vivia=false —
+   não se cancela fantasma, e a tela limpa o estado dela pelo `fim` que já viu. */
+export async function cancelarTarefa(u: Usuario, id: string, tenantArg?: string | null): Promise<{ achou: boolean; vivia: boolean }> {
+  const t = await verTarefa(u, id, tenantArg ?? null);
+  if (!t) return { achou: false, vivia: false };
+  const vivia = String(t.status) === "rodando";
+  controles.get(id)?.abort();
+  return { achou: true, vivia };
 }
 
 /** Cria a tarefa no banco e dispara o processamento sem bloquear o request.
@@ -94,6 +109,8 @@ export async function rodarTarefa(id: string, u: Usuario): Promise<void> {
       })
       .catch((e) => log(`tarefa ${id}: espelho parcial falhou: ${e.message}`));
   };
+  const ctrl = new AbortController();
+  controles.set(id, ctrl);
   try {
     const t = (await q(`SELECT * FROM chat_tarefas WHERE id = $1`, [id])).rows[0];
     if (!t) return;
@@ -112,6 +129,8 @@ export async function rodarTarefa(id: string, u: Usuario): Promise<void> {
         }
         notificarTarefa(id, e); // barril (Task 4) — ao vivo, independente do banco
       },
+      /* v3.18 (T001): o "parar" derruba a chamada do provider em curso */
+      { sinal: ctrl.signal },
     );
     await grava; // drena a fila ANTES do UPDATE final (ver nota acima)
     await q(
@@ -119,6 +138,12 @@ export async function rodarTarefa(id: string, u: Usuario): Promise<void> {
       [resp.resposta, JSON.stringify(resp.ferramentas ?? []), resp.aviso ?? null, id],
     );
     notificarTarefa(id, { tipo: "fim", dados: resp });
+    /* v3.18 (T016): primeira troca de uma gaveta nomeada ganha título automático —
+       nunca bloqueia nem derruba a resposta (gerarTituloAutomatico engole os próprios erros). */
+    if (!resp.cancelada) {
+      void gerarTituloAutomatico(u, { tenant: t.tenant, memoria: t.memoria, pergunta: t.pergunta, resposta: String(resp.resposta ?? "") })
+        .catch((e) => log(`tarefa ${id}: titulo automatico falhou: ${String(e)}`));
+    }
   } catch (e) {
     await grava;
     await q(
@@ -126,5 +151,7 @@ export async function rodarTarefa(id: string, u: Usuario): Promise<void> {
       [String((e as Error).message ?? "a tarefa falhou"), id],
     ).catch(() => {});
     notificarTarefa(id, { tipo: "erro", detalhe: String((e as Error).message ?? "a tarefa falhou") });
+  } finally {
+    controles.delete(id);
   }
 }
