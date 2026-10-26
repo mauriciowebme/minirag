@@ -33,6 +33,7 @@
 | T020 | Copiar pergunta própria | chat-ui | 🟢 Baixa | ✅ v3.18 | [#t020](#t020) |
 | T021 | Buscar dentro do histórico | chat-srv + chat-ui | 🟡 Média | ✅ v3.18 | [#t021](#t021) |
 | T022 | Entrada por voz (microfone) | chat-ui | 🟢 Baixa | ✅ v3.18 | [#t022](#t022) |
+| T023 | Provedor escolhido na conversa + auto-descoberta de modelos | chat-srv + chat-ui | 🟡 Média | ✅ v3.19 | [#t023](#t023) |
 
 ---
 
@@ -293,6 +294,17 @@
 | **Escopo** | Botão de mic que detona texto no campo (não envia sozinho); fallback de mensagem quando o navegador não suporta. |
 | **Riscos** | Web Speech no Edge pode exigir conexão; STT local (whisper na Noot) é caminho alternativo — decisão do dono. |
 
+<a id="t023"></a>
+### T023 — Provedor escolhido na conversa + auto-descoberta de modelos
+| Campo | Conteúdo |
+|---|---|
+| **Módulo** | chat-srv + chat-ui |
+| **Prioridade** | 🟡 Média |
+| **Status** | ✅ v3.19 (pedido pelo dono em 26/10) |
+| **Descrição** | Cadastro de N provedores nomeados (tabela `provedores`, escopo próprio/global) com chave mascarada; a lista de modelos vem do próprio serviço (`GET /models`, fallback `/v1/models` e `/api/tags` do Ollama — padrão medido no Open WebUI e no Hermes), cacheada na linha com data. No chat, régua acima do composer escolhe provedor+modelo POR CONVERSA (memória do transporte); a resposta carrega selo "via X" gravado em `chat_mensagens`. Guarda: com cache descoberto, modelo fora da lista é 422. |
+| **Escopo** | Feito: serviço (`src/provedores.ts`), resolução no `resolverProvider`, colunas em `chat_tarefas`/`chat_mensagens`, rotas `/provedores`, tela em Configurações, régua no chat, bloco v3.19 na suíte (17 checagens). |
+| **Riscos** | Costeamento por provedor ainda não existe (o "tok" medido é do que saiu); lista de modelos de gateway com paginação pode cortar em 500. |
+
 ---
 
 ## Lotes recomendados (executados — saíram na v3.18)
@@ -300,4 +312,4 @@
 - **Lote 1 — celular e erros bobos (quase tudo barato)**: T005, T001, T006, T007, T009, T011, T012, T013, T014, T020
 - **Lote 2 — osso de servidor**: T002 + T003 juntos (corte de histórico único), T004, T018
 - **Lote 3 — superfície de gaveta**: T015, T016, T019, T017, T010
-- **Depois / a decidir**: T008 (teste em aparelho), T021, T022
+- **Depois / a decidir**: T008 (validar no aparelho físico — emulador já passou); T021 e T022 saíram na v3.18 (linha corrigida em 26/10)
