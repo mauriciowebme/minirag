@@ -22,6 +22,11 @@ parecidos com a pergunta, com uma nota de 0 a 1.
 
 ---
 ---
+## v3.21.0 (26/10) — As seções de Configurações moraram no menu lateral
+- **O que você vê:** ⚙ Configurações no menu lateral agora **abre as seções logo abaixo** (Provider do chat, Limites, etc.) — um toque e você está na seção que precisa, com a seção aberta destacada no menu. A tela de Configurações ficou mais limpa: a faixa de botões que trocava de seção no topo saiu, e o subtítulo do título mostra em qual seção você está.
+- **Por que:** as seções eram alcançadas por botões dentro da própria tela — o menu lateral virou a navegação única, como a política de 26/10 já previa para seção de uso direto.
+- **Como é provado:** suíte completa 24/24 verde no ambiente limpo; cliques reais em desktop 1440 (abrir/fechar o submenu, destaque da seção ativa) e no celular 390 (submenu dentro da gaveta, Esc fecha a gaveta).
+
 ## v3.20.0 (26/10) — A página inteira olhada com olhos de 1920
 - **O que você vê:** no desktop largo, Configurações parou de ter "títulos órfãos" — a coluna de seções é uma lista com superfície própria; os campos do formulário ficaram em grade honesta (pares com a mesma largura, linha tripla de tokens com três colunas iguais, campo solo ocupa a largura toda); o menu lateral mostra **um verde por vez** (ou o pai, ou o filho marcado) e os filhos ganharam a linha-guia da árvore sem sair do alinhamento.
 - **O que acontecia:** o dono mandou um print em 1920×1080 e viu o que minhas medições não viam — eu media o componente isolado em janela padrão; composição de página inteira, no estado rolado, não estava no meu ciclo.
