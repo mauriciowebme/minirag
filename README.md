@@ -22,6 +22,11 @@ parecidos com a pergunta, com uma nota de 0 a 1.
 
 ---
 ---
+## v3.21.1 (26/10) — Provider virou uma seção só: tabela com o padrão da casa na linha 1
+- **O que você vê:** as abas "Provider do chat" e "Provedores nomeados" viraram **uma seção — Provider**: uma tabela onde a linha 1 é o **padrão da casa** (o ex-provider do chat, com o form completo dele: modelo, URL, chave, system prompt, memória, janela, silêncio...) e as linhas seguintes são os providers nomeados. Cada linha tem **editar** (o form abre embaixo da tabela, com **cancelar**), os nomeados ganham **apagar**, e o botão virou **+ novo provider**. No chat nada muda: a régua provider+modelo do rodapé (v3.19) já escolhia entre todos.
+- **Por que:** o dono viu os dois lugares lado a lado e achou melhor UMA visão — criar, editar e apagar provider num lugar só, com o padrão da casa como linha de primeira classe (decisão do preview estático aprovado em 26/10).
+- **Como é provado:** typecheck + build limpos; suíte e2e na sequência (o contrato REST não mudou — só o front foi unificado).
+
 ## v3.21.0 (26/10) — As seções de Configurações moraram no menu lateral
 - **O que você vê:** ⚙ Configurações no menu lateral agora **abre as seções logo abaixo** (Provider do chat, Limites, etc.) — um toque e você está na seção que precisa, com a seção aberta destacada no menu. A tela de Configurações ficou mais limpa: a faixa de botões que trocava de seção no topo saiu, e o subtítulo do título mostra em qual seção você está.
 - **Por que:** as seções eram alcançadas por botões dentro da própria tela — o menu lateral virou a navegação única, como a política de 26/10 já previa para seção de uso direto.
