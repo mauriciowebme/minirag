@@ -22,6 +22,10 @@ parecidos com a pergunta, com uma nota de 0 a 1.
 
 ---
 ---
+## v3.19.2 (26/10) — Lateral calibrada no pixel
+- **O que você vê:** o menu ficou uma coisa só — o texto dos itens do submenu começa exatamente na mesma linha do texto dos itens de cima (antes: 6px de desvio), pais e filhos têm a mesma altura de toque (44px; antes: o filho era mais alto que o pai), o submenu deixou de ser cinza "fantasma" e usou a mesma cor dos itens do topo, e a seta de expandir virou um chevron que gira ao abrir. As legendas do cartão de gaveta/modelo subiram de tamanho (eram quase ilegíveis no escuro).
+- **Por que:** o dono olhou o print e chamou de "menu horroroso" — nenhum teste numérico antigo capturia desalinhamento óptico; a medição agora é x por x, altura por altura, antes de publicar.
+
 ## v3.19.1 (26/10) — Configurações ganhou submenu no menu principal
 - **O que você vê:** o item ⚙ Configurações do menu principal agora tem seta e **abre as seções como filhas indentadas** (Provedores, Ferramentas, Conta, Limites...); cada filho leva direto à seção, com a marca de qual está aberta. O acordeon dentro da tela continua e fica sincronizado com o menu.
 - **Por que:** o serviço novo de provedores tinha entrado só como aba interna — a política do dono (26/10) é seção de uso direto nascer no menu, não escondida. Alvos de toque medidos: 44px no desktop e no celular, sem estouro horizontal na gaveta.
