@@ -3037,6 +3037,102 @@ await bloco(t, "v3.6: máquinas por usuário — hub WS, pareamento, run, escopo
     f.fechar("v3.18 básico de chat");
   });
 
+  /* ------------------------------------------------------------------ v3.19 */
+
+  await bloco(t, "v3.19: provedores nomeados — escolha na conversa e auto-descoberta de modelos", async () => {
+    const f = fiscal();
+    const CONTAINER = process.env.CONTAINER ?? "";
+    const GAV = "suite-v319";
+    if (!CONTAINER) {
+      f.check("v3.19 precisa de CONTAINER (sonda dentro dele)", false, "sem container: bloco não executável");
+      f.fechar("v3.19 provedores");
+      return;
+    }
+
+    const PORTA = 19000 + ((Math.floor(Date.now() / 1000) % 900) + 41) % 900;
+    console.log(`-- sonda ${PORTA}: GET /models devolve 2 ids; chat responde "sonda:<modelo>|q<n>"`);
+    const cod = [
+      "const http=require('http');",
+      "const s=http.createServer((req,res)=>{let b='';req.on('data',c=>b+=c);req.on('end',()=>{",
+      "const u=req.url||'';",
+      "if(u.indexOf('models')>=0){res.setHeader('content-type','application/json');return res.end(JSON.stringify({data:[{id:'sonda-a'},{id:'sonda-b'}]}));}",
+      "let j={};try{j=JSON.parse(b||'{}')}catch(e){}",
+      "const m=j.messages||[];",
+      "res.setHeader('content-type','application/json');",
+      "res.end(JSON.stringify({choices:[{message:{role:'assistant',content:'sonda:'+String(j.model||'?')+'|q'+m.length}}]}));",
+      "});});",
+      `s.listen(${PORTA},'127.0.0.1');setTimeout(()=>process.exit(0),200000);`,
+    ].join("");
+    execFileSync("docker", ["exec", "-d", CONTAINER, "node", "-e", cod]);
+    await dormir(1000);
+
+    let r = await call("GET", "/provedores", { key: TESTKEY });
+    f.check("usuário comum LÊ a lista de provedores", r.status === 200 && Array.isArray(r.json?.provedores), r.texto.slice(0, 120));
+
+    r = await call("PUT", "/provedores", { key: TESTKEY, corpo: { nome: "proibido", base_url: "http://127.0.0.1:1/v1", modelo: "x" } });
+    f.check("comum NÃO cadastra provedor", r.status === 403 || r.status === 409, r.texto.slice(0, 120));
+
+    r = await call("PUT", "/provedores", { key: OPKEY, corpo: { nome: "ruim", base_url: "ftp://127.0.0.1", modelo: "x" } });
+    f.check("base_url sem http/https é recusada", r.status === 422, r.texto.slice(0, 140));
+
+    r = await call("PUT", "/provedores", {
+      key: OPKEY,
+      corpo: { nome: "sonda319", tipo: "litellm", base_url: `http://127.0.0.1:${PORTA}/v1`, modelo: "sonda-a", chave: "chave-secreta-319", mcp_interno: false, max_rodadas: 1, tenant: "global" },
+    });
+    const pid = Number(r.json?.provedor?.id ?? 0);
+    f.check("operador cadastra provedor nomeado", r.status === 200 && pid > 0 && r.json?.provedor?.nome === "sonda319", r.texto.slice(0, 200));
+    f.check("a chave nunca volta em claro na resposta", r.status === 200 && !r.texto.includes("chave-secreta-319"), r.texto.slice(0, 200));
+
+    r = await call("POST", "/provedores/modelos", { key: OPKEY, corpo: { id: pid } });
+    f.check("AUTO-DESCOBERTA: o serviço devolve seus modelos", r.status === 200 && (r.json?.modelos ?? []).join(",") === "sonda-a,sonda-b" && typeof r.json?.em === "string", r.texto.slice(0, 200));
+
+    r = await call("GET", "/provedores", { key: TESTKEY });
+    const pv = (r.json?.provedores ?? []).find((x: any) => x.nome === "sonda319") ?? {};
+    f.check("cache de modelos grava na linha (com data)", (pv.modelos ?? []).length === 2 && typeof pv.modelos_em === "string", JSON.stringify(pv).slice(0, 220));
+
+    r = await call("POST", "/chat", { key: TESTKEY, corpo: { pergunta: "oi sonda", memoria: GAV, provedor: "sonda319", modelo: "sonda-b" } });
+    f.check("resposta VEIO do provedor escolhido (modelo pedido no lugar do cadastrado)", r.status === 200 && String(r.json?.resposta).includes("sonda:sonda-b"), r.texto.slice(0, 200));
+    f.check("o fim diz quem respondeu", r.json?.provedor === "sonda319", r.texto.slice(0, 200));
+
+    r = await call("GET", `/chat?memoria=${GAV}`, { key: TESTKEY });
+    const ult = (r.json?.mensagens ?? []).filter((x: any) => x.papel === "assistant").pop() ?? {};
+    f.check("histórico guarda provedor+modelo da resposta (o 'via X' ao reabrir)", ult.provedor === "sonda319" && ult.modelo === "sonda-b", JSON.stringify(ult).slice(0, 220));
+
+    r = await call("POST", "/chat", { key: TESTKEY, corpo: { pergunta: "oi", memoria: GAV, provedor: "nao-existe-319" } });
+    f.check("provedor inexistente: recusa na hora (422)", r.status === 422, r.texto.slice(0, 160));
+
+    r = await call("POST", "/chat", { key: TESTKEY, corpo: { pergunta: "oi", memoria: GAV, provedor: "sonda319", modelo: "sonda-injetado; DROP" } });
+    f.check("modelo fora da lista descoberta: recusa (422)", r.status === 422, r.texto.slice(0, 160));
+
+    r = await call("POST", "/chat/tarefa", { key: TESTKEY, corpo: { pergunta: "tarefa sondada", memoria: GAV, provedor: "sonda319", modelo: "sonda-a" } });
+    const idT = String(r.json?.id ?? "");
+    f.check("tarefa aceita a escolha (colunas provadas no INSERT)", r.status === 201 && idT.length >= 8, r.texto.slice(0, 120));
+    let fin: any = null;
+    for (let k = 0; k < 60; k++) {
+      fin = await call("GET", `/chat/tarefa/${idT}`, { key: TESTKEY });
+      if (fin.json?.status !== "rodando") break;
+      await dormir(300);
+    }
+    f.check("tarefa terminou carregando a escolha", String(fin.json?.status ?? "") === "terminou" && String(fin.json?.provedor ?? "") === "sonda319" && String(fin.json?.parcial ?? "").includes("sonda:sonda-a"), JSON.stringify(fin.json ?? null).slice(0, 220));
+
+    /* desliga e a escolha passa a ser recusada — linha existe, mas não atende */
+    await call("PUT", "/provedores", {
+      key: OPKEY,
+      corpo: { nome: "sonda319", tipo: "litellm", base_url: `http://127.0.0.1:${PORTA}/v1`, modelo: "sonda-a", chave: "***", mcp_interno: false, max_rodadas: 1, ativo: false, tenant: "global" },
+    });
+    r = await call("POST", "/chat", { key: TESTKEY, corpo: { pergunta: "oi", memoria: GAV, provedor: "sonda319" } });
+    f.check("provedor desligado não atende (409)", r.status === 409, r.texto.slice(0, 160));
+
+    r = await call("DELETE", `/provedores/${pid}`, { key: OPKEY });
+    f.check("operador apaga provedor", r.status === 200 && r.json?.ok === true, r.texto.slice(0, 120));
+    r = await call("GET", "/provedores", { key: TESTKEY });
+    f.check("lista fica sem a linha apagada", !(r.json?.provedores ?? []).some((x: any) => x.nome === "sonda319"), r.texto.slice(0, 160));
+
+    await call("DELETE", `/chat?memoria=${GAV}`, { key: TESTKEY });
+    if (CONTAINER) execFileSync("docker", ["exec", CONTAINER, "sh", "-c", `pkill -f ${PORTA} || true`]);
+    f.fechar("v3.19 provedores");
+  });
+
   await bloco(t, "freio de força bruta (último: bloqueia o IP)", async () => {
     const f = fiscal();
     for (let i = 0; i < 10; i++) {
