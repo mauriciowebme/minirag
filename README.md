@@ -22,6 +22,12 @@ parecidos com a pergunta, com uma nota de 0 a 1.
 
 ---
 ---
+## v3.24.0 (27/10) — O código da tela aparece sendo digitado
+- **O que você vê:** quando o agente escreve uma tela, a página nasce **à vista**: um bloco logo abaixo da conversa mostra o HTML sendo digitado, com o cursor piscando no fim e o contador de linhas e caracteres crescendo. Quando fica pronta, o bloco recolhe e o card com a prévia funcional assume; "código da tela" reabre para conferir o que foi escrito.
+- **Por que:** pedido do dono (27/10) — "queria muito poder ver o streaming digitando o código do preview, do jeito que está eu não vejo". Antes, o código só existia dentro do card, depois de pronto.
+- **Como funciona:** o servidor passou a repassar os pedaços dos argumentos da ferramenta de tela (`onArgs`) e a extrair dali o campo `html` já desescapado (`htmlParcial`), emitindo o evento `codigo` no stream com só o que ainda não foi mostrado. A tela acompanha e vai emendando os pedaços na bolha; nada disso volta para o modelo.
+- **Como é provado:** typecheck + build limpos; suíte completa com bloco novo `v3.24` (provedor falso em SSE escrevendo os argumentos em 7 pedaços: o código chega em pedaços, o texto remontado é **exatamente** o HTML escrito, o código nasce antes do card, a resposta final não repete o HTML e a tela chega pronta no fim).
+
 ## v3.23.0 (26/10) — O agente desenha a tela e ela funciona no chat
 - **O que você vê:** quando o pedido é visual — gráfico, painel, comparativo, tabela, formulário, simulador — o agente escreve a página e ela aparece na conversa como um **card com prévia que funciona**: botão clica, campo digita, conta e desenho acontecem ali mesmo. Cada card tem título, botão de **tela cheia** (⤢), **download do arquivo .html** (↓) e fecha no Esc.
 - **Por que:** pedido do dono (26/10) — "o agente gera o HTML e eu vejo o resultado funcionando, clicando". Antes, só dava para ler o código.
