@@ -36,6 +36,7 @@
 | T023 | Provedor escolhido na conversa + auto-descoberta de modelos | chat-srv + chat-ui | 🟡 Média | ✅ v3.19 | [#t023](#t023) |
 | T024 | Véu de toque iOS nos botões (⚙ "com transparência") | chat-ui | 🟢 Baixa | ✅ v3.25.0 | [#t024](#t024) |
 | T025 | Padronizar toast (sucesso verde / erro vermelho) | chat-ui | 🟡 Média | ✅ v3.25.0 | [#t025](#t025) |
+| T026 | Botão ⚙ "transparente" — fill sólido + borda forte | chat-ui | 🟢 Baixa | ✅ v3.25.1 | [#t026](#t026) |
 
 ---
 
@@ -334,6 +335,20 @@
 | **Arquivos afetados** | frontend/src/components/Toast.tsx, frontend/src/index.css, 11 componentes (Gavetas, Painel, Editor, Jobs, Arquivos, Buscar, Maquinas, Config, Chat) |
 | **Dependências** | Nenhuma. |
 | **Riscos** | Muda o visual do feedback em TODO o app — validar com clique real (toast de sucesso e de erro) antes de publicar; call site sem tipo fica `neutro` (comportamento de hoje). |
+
+<a id="t026"></a>
+### T026 — Botão ⚙ "transparente" — fill sólido + borda forte
+| Campo | Conteúdo |
+|---|---|
+| **Módulo** | chat-ui |
+| **Prioridade** | 🟢 Baixa — cosmético; medido ao vivo em 27/10 |
+| **Status** | ✅ v3.25.1 (executado em 27/10; build verde; regra medida no CSS compilado) |
+| **Spec/Plano** | Segue a mesma rodada de toque/toast ([002](planos/002-rodada-pendencias-toque-toast.md)) |
+| **Descrição** | Relato do dono (27/10, print do iPhone): "o botão de ajuste de conversa ainda está com o fundo com transparência". **Correção do diagnóstico de T024:** não era (só) o véu de toque — era o **fundo do botão em si**. O `.chat-ajustes-boto` usava fill `sup2` (`#161c25`), quase idêntico ao fundo da página (`bg` `#0b0e13`), + **borda fraca** (`borda` `#232b38`): o par fill-escuro-borda-fraca "desmorona" contra o fundo e lê como transparente/fantasma, enquanto os botões que seguram (`.btn`) usam borda forte (`bordaforte` `#313b4b`) + fill presente. Medido no CSS: `sup2`/`borda` sem alpha (opacos), mas o baixo contraste relativo é o problema. |
+| **Escopo** | Feito (27/10): `.chat-ajustes-boto` com **fill sólido claro** `#2a3344` (visível contra o fundo) + **borda forte** `bordaforte`; hover `#333d51`/`#43506a`; estado aberto ganha borda azul (`azul/60`) + mesmo fill. Só o botão ⚙ mudou (mic/enviar já têm peso próprio). Validação: build verde + regra medida no CSS compilado (`bg rgb(42 51 68)` + `border rgb(49 59 75)`). |
+| **Arquivos afetados** | frontend/src/index.css (`.chat-ajustes-boto`) |
+| **Dependências** | Nenhuma. |
+| **Riscos** | Cosmético; confirmar no iPhone físico que o ⚙ agora lê sólido (emulador serve o CSS mas não o toque). |
 
 ---
 
