@@ -934,7 +934,19 @@ export function Chat({
                       </div>
                     </details>
                   ) : null}
-                  {m.escrevendo && !m.texto ? (
+                  {/* v3.29: a tela nasce no ponto em que foi gerada — ANTES da conclusão.
+                      O servidor emite `tela` na execução da ferramenta e só depois o texto
+                      final da rodada; o card tem que vir primeiro (antes vinha depois). */}
+                  {(m.codigo || (m.telas && m.telas.length > 0)) && (
+                    <div className="tela-area">
+                      {m.telas && m.telas.length > 0 ? (
+                        m.telas.map((t) => <TelaGerada key={t.id} tela={t} />)
+                      ) : (
+                        <TelaGerada tela={null} codigo={m.codigo} digitando={Boolean(m.escrevendo)} />
+                      )}
+                    </div>
+                  )}
+                  {m.escrevendo && !m.texto && !(m.codigo || (m.telas && m.telas.length > 0)) ? (
                     m.raciocinio ? null : (
                       <span className="sub2" id="chatPensando">
                         pensando… {espera}s
@@ -1000,17 +1012,6 @@ export function Chat({
                     </div>
                   ))}
                 </details>
-              )}
-              {/* v3.24: o código da tela e o renderizado vivem na MESMA caixa (v3.28) —
-                 nada de bloco extra: ela escreve, depois vira a tela pronta */}
-              {(m.codigo || (m.telas && m.telas.length > 0)) && (
-                <div className="tela-area">
-                  {m.telas && m.telas.length > 0 ? (
-                    m.telas.map((t) => <TelaGerada key={t.id} tela={t} />)
-                  ) : (
-                    <TelaGerada tela={null} codigo={m.codigo} digitando={Boolean(m.escrevendo)} />
-                  )}
-                </div>
               )}
               {/* v3.18 (T004): de onde a resposta veio — os documentos que a busca tocou.
                  Chip só com fonte real; resposta sem ferramentas não inventa procedência. */}
