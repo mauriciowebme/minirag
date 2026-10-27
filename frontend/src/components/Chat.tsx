@@ -2,7 +2,6 @@ import { useCallback, useEffect, useRef, useState } from "react";
 import { ApiErro, del, get, getStream, post, postStream, qs } from "../services/api";
 import { useToast } from "./Toast";
 import { mdParaHtml } from "../lib/md";
-import { CodigoAoVivo } from "./CodigoAoVivo";
 import { TelaGerada } from "./TelaGerada";
 import {
   apararAteSid,
@@ -133,12 +132,14 @@ function Rastro({
   vivo,
   detalhes,
   aberto,
+  travado,
   onToggle,
 }: {
   segmentos: SegmentoRastro[];
   vivo: boolean;
   detalhes: FerramentaLinha[];
   aberto: boolean;
+  travado?: boolean;
   onToggle: (atual: boolean) => void;
 }) {
   const corpo = useRef<HTMLDivElement | null>(null);
@@ -182,7 +183,14 @@ function Rastro({
         onClick={() => onToggle(aberto)}
         aria-expanded={aberto}
         data-testid="rastroCab"
-        title={aberto ? "recolher o rastro do turno" : "ver o rastro do turno"}
+        disabled={travado}
+        title={
+          travado
+            ? "aberto enquanto processa — recolhe quando a conclusão começa"
+            : aberto
+              ? "recolher o rastro do turno"
+              : "ver o rastro do turno"
+        }
       >
         <span>
           <b>Rastro do turno</b>
@@ -323,7 +331,11 @@ export function Chat({
   const [rastroPref, setRastroPref] = useState<"1" | "0" | null>(
     () => (localStorage.getItem(RASTRO_CHAVE) === "1" ? "1" : localStorage.getItem(RASTRO_CHAVE) === "0" ? "0" : null),
   );
-  const rastroAberto = (vivo: boolean) => (rastroPref === null ? vivo : rastroPref === "1");
+  /* v3.28 (dono, 27/10): o rastro fica SEMPRE aberto até a CONCLUSÃO começar — isto é,
+     enquanto o turno processa e ainda não há texto de resposta. Quando a resposta começa
+     a ser escrita, vale a preferência do usuário (aberto/recolhido) em todas as mensagens. */
+  const emProcesso = (vivo: boolean, texto: string) => vivo && !texto.trim();
+  const rastroAberto = (vivo: boolean, texto: string) => (emProcesso(vivo, texto) ? true : rastroPref === "1");
   function alternarRastro(atual: boolean) {
     const novo = atual ? "0" : "1";
     localStorage.setItem(RASTRO_CHAVE, novo);
@@ -895,7 +907,8 @@ export function Chat({
                       segmentos={m.rastro}
                       vivo={Boolean(m.escrevendo)}
                       detalhes={m.ferramentas}
-                      aberto={rastroAberto(Boolean(m.escrevendo))}
+                      aberto={rastroAberto(Boolean(m.escrevendo), m.texto)}
+                      travado={emProcesso(Boolean(m.escrevendo), m.texto)}
                       onToggle={alternarRastro}
                     />
                   ) : m.raciocinio ? (
@@ -988,10 +1001,17 @@ export function Chat({
                   ))}
                 </details>
               )}
-              {/* v3.24: o código da tela enquanto ele é escrito (pedido do dono) */}
-              {m.codigo && <CodigoAoVivo texto={m.codigo} digitando={Boolean(m.escrevendo)} />}
-              {/* v3.23: telas geradas neste turno — o card com preview funcional */}
-              {m.telas && m.telas.length > 0 && m.telas.map((t) => <TelaGerada key={t.id} tela={t} />)}
+              {/* v3.24: o código da tela e o renderizado vivem na MESMA caixa (v3.28) —
+                 nada de bloco extra: ela escreve, depois vira a tela pronta */}
+              {(m.codigo || (m.telas && m.telas.length > 0)) && (
+                <div className="tela-area">
+                  {m.telas && m.telas.length > 0 ? (
+                    m.telas.map((t) => <TelaGerada key={t.id} tela={t} />)
+                  ) : (
+                    <TelaGerada tela={null} codigo={m.codigo} digitando={Boolean(m.escrevendo)} />
+                  )}
+                </div>
+              )}
               {/* v3.18 (T004): de onde a resposta veio — os documentos que a busca tocou.
                  Chip só com fonte real; resposta sem ferramentas não inventa procedência. */}
               {m.papel === "assistant" && m.fontes && m.fontes.length > 0 && (

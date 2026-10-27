@@ -721,6 +721,26 @@
   .tela-topo {
     @apply flex items-center justify-between gap-2 border-b border-borda bg-sup2 px-2 py-1;
   }
+  /* v3.28: a caixa da tela tem estado — enquanto o código é escrito o ponto pisca verde */
+  .tela-ponto {
+    @apply h-1.5 w-1.5 shrink-0 rounded-full bg-txt3;
+  }
+  .tela-card.escrevendo .tela-ponto {
+    background: var(--verde);
+    animation: piscar 1s steps(1) infinite;
+  }
+  .tela-conta {
+    @apply ml-auto shrink-0 text-[11.5px] text-txt3;
+  }
+  /* ação "ver código" ligada */
+  .tela-acao-on {
+    @apply text-verde;
+  }
+  .tela-codigo {
+    @apply m-0 overflow-auto whitespace-pre px-3 py-2 font-mono text-[11.5px] leading-[1.45] text-txt2;
+    max-height: 320px;
+    tab-size: 2;
+  }
   .tela-titulo {
     @apply truncate text-[12px] text-txt2;
   }
@@ -919,6 +939,14 @@
   }
   .chat-enviar:disabled {
     @apply cursor-default bg-sup3 text-txt3;
+  }
+  /* v3.28 (dono, 27/10): parar é VERMELHO. A classe já vinha do JSX, mas não existia
+     regra no CSS — o botão continuava verde justamente na ação destrutiva. */
+  .chat-enviar.chat-enviar-parando {
+    @apply bg-vermelho text-white hover:bg-[#ff6a60];
+  }
+  .chat-enviar.chat-enviar-parando:disabled {
+    @apply bg-vermelho/60 text-white/80;
   }
   /* v3.16 — pé em uma linha: [nova conversa] [campo…………………] [↑]. A dica de teclado
      saiu da tela (vai no título do campo); "trabalhando em segundo plano" desceu do topo. */
