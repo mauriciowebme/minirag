@@ -37,6 +37,7 @@
 | T024 | Véu de toque iOS nos botões (⚙ "com transparência") | chat-ui | 🟢 Baixa | ✅ v3.25.0 | [#t024](#t024) |
 | T025 | Padronizar toast (sucesso verde / erro vermelho) | chat-ui | 🟡 Média | ✅ v3.25.0 | [#t025](#t025) |
 | T026 | Botão ⚙ "transparente" — fill sólido + borda forte | chat-ui | 🟢 Baixa | ✅ v3.25.1 | [#t026](#t026) |
+| T027 | Popover de ajustes "transparente" — tokens `:root` ausentes | chat-ui | 🟢 Baixa | ✅ v3.25.2 | [#t027](#t027) |
 
 ---
 
@@ -349,6 +350,22 @@
 | **Arquivos afetados** | frontend/src/index.css (`.chat-ajustes-boto`) |
 | **Dependências** | Nenhuma. |
 | **Riscos** | Cosmético; confirmar no iPhone físico que o ⚙ agora lê sólido (emulador serve o CSS mas não o toque). |
+
+---
+
+<a id="t027"></a>
+### T027 — Popover de ajustes "transparente" — tokens `:root` ausentes
+| Campo | Conteúdo |
+|---|---|
+| **Módulo** | chat-ui |
+| **Prioridade** | 🟢 Baixa — cosmético; medido ao vivo em 27/10 |
+| **Status** | ✅ v3.25.2 (executado em 27/10; build verde; varredura: nenhuma `var(--x)` usada sem definição) |
+| **Spec/Plano** | Correção do **alvo** de T026: o elemento transparente era o **popover** (`.chat-ajustes-pop`), não o botão ⚙ |
+| **Descrição** | Relato do dono (27/10, print com o inspector do DevTools em `div.chat-ajustes-pop`): o **painel** de ajustes (exportar/nova) é que "afundava" transparente, não o botão. **Causa raiz real:** o popover (e a seta `::after` e o filete `.chat-ajustes-botoes`) usam `background: var(--sup)` / `border: var(--bordaforte)` / `border-top: var(--borda)`, mas **ninguma** dessas variáveis estava definida no `:root` (só `--verde-suave`/`--azul-suave`/`--vermelho-suave`). `var()` indefinida → `background-color`/`border-color` caem no valor inicial = **transparente**. O `:root` também faltava `--txt`/`--txt2`/`--txt3`/`--verde` (usados em textos e 2 fundos). |
+| **Escopo** | Feito (27/10): `:root` completado com a paleta exata do `tailwind.config.js` — `--sup #11151c`, `--borda #232b38`, `--bordaforte #313b4b`, `--txt #e7edf6`, `--txt2 #a8b3c3`, `--txt3 #7d8899`, `--verde #3fb950`, `--vermelho #f85149`. Isso cura o popover (fundo `#11151c` + borda `#313b4b`), a seta, o filete e os textos/fundos de status de uma vez, sem tocar nas regras individuais. Validação: build verde + varredura do CSS compilado → **nenhuma** `var(--x)` usada sem definição no `:root`. |
+| **Arquivos afetados** | frontend/src/index.css (`:root`) |
+| **Dependências** | Nenhuma. |
+| **Riscos** | Cosmético; confirmar no iPhone físico que o popover agora lê sólido. |
 
 ---
 
