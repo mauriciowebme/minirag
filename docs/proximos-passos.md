@@ -41,6 +41,7 @@
 | T028 | Tela inicial passa a ser o Chat (não o Painel) | chat-ui | 🟢 Baixa | ✅ v3.26.0 | [#t028](#t028) |
 | T029 | Chat como item principal do menu (primeiro da lista) | chat-ui | 🟢 Baixa | ✅ v3.26.1 | [#t029](#t029) |
 | T030 | Rota reflete a tela — app na raiz + `#/tela`, fim do `/painel/` fixo | chat-ui + http | 🟡 Média | ✅ v3.27.0 | [#t030](#t030) |
+| T031 | Acabamentos do chat: parar vermelho, rastro até a conclusão, caixa única da tela | chat-ui | 🟡 Média | ✅ v3.28.0 | [#t031](#t031) |
 
 ---
 
@@ -419,6 +420,22 @@
 | **Riscos** | Links antigos `/painel/` continuam válidos (302 → `/#/painel`); `#/tela` é fragmento, não chega ao servidor — nenhuma rota de API conflita. |
 
 ---
+
+---
+
+<a id="t031"></a>
+### T031 — Acabamentos do chat: parar vermelho, rastro até a conclusão, caixa única da tela
+| Campo | Conteúdo |
+|---|---|
+| **Módulo** | chat-ui |
+| **Prioridade** | 🟡 Média — três correções pedidas pelo dono em 27/10 |
+| **Status** | ✅ v3.28.0 (executado em 27/10; build verde; conferido no browser com turno simulado) |
+| **Spec/Plano** | Pedido do dono: (1) enviar verde / parar vermelho; (2) "o rastro fica sempre aberto até que comece a conclusão"; (3) "não precisa gerar muitos frames pra isso, basta uma caixa que vai escrever nela" |
+| **Descrição** | (1) O JSX já aplicava `chat-enviar-parando`, mas **não existia regra no CSS** — o botão ficava verde no estado parar. (2) `rastroAberto` respeitava a preferência do usuário **até durante o processamento**: quem tinha recolhido uma vez nunca via o rastro aberto enquanto pensava. (3) A tela gerada saía em DOIS blocos (`CodigoAoVivo` + `TelaGerada`), além do rastro — e o card do preview não tinha "ver código". |
+| **Escopo** | Feito (27/10): (1) `.chat-enviar.chat-enviar-parando` com fundo vermelho + hover, mantendo o ícone claro; (2) rastro **sempre aberto enquanto processa e ainda não há texto** (`vivo && !texto`), com o cabeçalho travado nessa fase e a preferência valendo a partir da conclusão — vale para todas as mensagens; (3) `TelaGerada` virou UMA caixa: enquanto o HTML chega (evento `codigo`) ela mostra o código nascendo com cursor e contador de linhas; ao receber o evento `tela`, a MESMA caixa vira o iframe renderizado, sem bloco extra, com ações **ver código**, **baixar .html** e **expandir**. `CodigoAoVivo` foi removido (absorvido). |
+| **Arquivos afetados** | frontend/src/index.css, frontend/src/components/Chat.tsx, frontend/src/components/TelaGerada.tsx (CodigoAoVivo.tsx removido) |
+| **Dependências** | T028/T030 (mesma rodada de ajustes de entrada do chat). |
+| **Riscos** | Cosmético; o estado "código incompleto" (turno abortado) mostra a caixa em modo código, sem ações de download. |
 
 ## Lotes recomendados (executados — saíram na v3.18)
 
