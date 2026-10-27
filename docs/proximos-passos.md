@@ -48,6 +48,7 @@
 | T035 | Rolagem do CHAT durante a escrita da tela (a conversa acompanha a caixa) | chat-ui | 🟡 Média | ✅ v3.30.1 | [#t035](#t035) |
 | T036 | A tela gerada é CONCLUSÃO: o rastro fecha quando o código começa | chat-ui | 🟢 Baixa | ✅ v3.30.2 | [#t036](#t036) |
 | T037 | Piso com "nova conversa"; exportar no popover "ferramentas" | chat-ui | 🟢 Baixa | ✅ v3.31.1 | [#t037](#t037) |
+| T038 | Respiro entre a tela gerada e a conclusão | chat-ui | 🟢 Baixa | ✅ v3.31.2 | [#t038](#t038) |
 
 ---
 
@@ -538,6 +539,22 @@
 | **Arquivos afetados** | frontend/src/components/Chat.tsx |
 | **Dependências** | T017 (exportar markdown), T022 (popover). |
 | **Riscos** | Dois botões de 48px antes do campo; medido no celular, o campo mantém folga (o rótulo da nova conversa some e sobra o ＋). |
+
+---
+
+<a id="t038"></a>
+### T038 — Respiro entre a tela gerada e a conclusão
+| Campo | Conteúdo |
+|---|---|
+| **Módulo** | chat-ui |
+| **Prioridade** | 🟢 Baixa — ajuste fino de leitura |
+| **Status** | ✅ v3.31.2 (build verde; medido no browser) |
+| **Spec/Plano** | Dono (27/10): "a conclusão está muito coladinha, acho que pode ter um pequeno espaço". |
+| **Descrição** | O card da tela encostava no parágrafo da conclusão: a única folga era o `margin-top` de 8px do `.md p`, e a margem do `.md` colapsava com a do card. |
+| **Escopo** | `.tela-area` ganhou `margin-bottom: 12px` (`mb-3`); a folga visível entre o card e a conclusão passou a ser de 12px (as margens colapsam para a maior). Nada mudou no topo do card (`mt-2`). |
+| **Arquivos afetados** | frontend/src/index.css |
+| **Dependências** | T031/T033 (caixa única e ordem da tela). |
+| **Riscos** | Nenhum; só espaçamento. |
 
 ## Lotes recomendados (executados — saíram na v3.18)
 
