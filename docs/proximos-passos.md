@@ -47,7 +47,7 @@
 | T034 | Rolagem da caixa da tela: acompanha a escrita só se o usuário está no fim | chat-ui | 🟢 Baixa | ✅ v3.30.0 | [#t034](#t034) |
 | T035 | Rolagem do CHAT durante a escrita da tela (a conversa acompanha a caixa) | chat-ui | 🟡 Média | ✅ v3.30.1 | [#t035](#t035) |
 | T036 | A tela gerada é CONCLUSÃO: o rastro fecha quando o código começa | chat-ui | 🟢 Baixa | ✅ v3.30.2 | [#t036](#t036) |
-| T037 | Exportar sai do popover: botão próprio na linha do campo | chat-ui | 🟢 Baixa | ✅ v3.31.0 | [#t037](#t037) |
+| T037 | Piso com "nova conversa"; exportar no popover "ferramentas" | chat-ui | 🟢 Baixa | ✅ v3.31.1 | [#t037](#t037) |
 
 ---
 
@@ -526,18 +526,18 @@
 ---
 
 <a id="t037"></a>
-### T037 — Exportar sai do popover: botão próprio na linha do campo
+### T037 — Piso com "nova conversa"; exportar dentro do popover "ferramentas"
 | Campo | Conteúdo |
 |---|---|
 | **Módulo** | chat-ui |
-| **Prioridade** | 🟢 Baixa — dono não gostou dos dois botões dentro do popover |
-| **Status** | ✅ v3.31.0 (build verde; medido no browser) |
-| **Spec/Plano** | Dono (27/10): "acho que apenas um botão de nova conversa aqui e colocar esse de exportação em outro lugar". |
-| **Descrição** | O popover "⚙ ajustes da conversa" tinha dois botões (exportar + nova). Misturava ajuste (provider/modelo/nova) com ação de saída (exportar). |
-| **Escopo** | `exportar` virou botão de ícone (⤓) na própria linha do campo, à direita do ⚙ — sempre visível, um toque, sem abrir popover. O popover ficou com provider/modelo e um único botão, "＋ nova conversa". Ids preservados (`chatExportar`, `chatNovaConversa`). |
+| **Prioridade** | 🟢 Baixa — o dono não gostou de "exportar" ao lado de "nova" no popover |
+| **Status** | ✅ v3.31.1 (build verde; medido no browser) |
+| **Spec/Plano** | Dono (27/10): "apenas um botão de nova conversa aqui e colocar esse de exportação em outro lugar" → depois: "era pra você ter colocado o botão de nova conversa no lugar de exportar e o exportar coloca dentro desse popover chamado de ferramentas". |
+| **Descrição** | O popover tinha exportar + nova (misturava ajuste com ação do dia a dia). Na primeira tentativa o exportar foi para o piso; o dono corrigiu a posição: o piso é da **nova conversa** e o exportar pertence ao popover, agora chamado **ferramentas**. |
+| **Escopo** | Estado final: piso `[⚙] [＋ nova conversa] [campo] [mic] [↑]` com `.chat-nova` (no celular vira quadrado de 44px, rótulo escondido por `.chat-nova-rotulo`); popover renomeado para **⚙ ferramentas** (title/aria/cabeçalho) guardando provider/modelo e o botão **⤓ exportar**. Ids preservados (`chatExportar`, `chatNovaConversa`). "nova conversa" continua pedindo confirmação (é destrutiva). |
 | **Arquivos afetados** | frontend/src/components/Chat.tsx |
 | **Dependências** | T017 (exportar markdown), T022 (popover). |
-| **Riscos** | Em telas estreitas a linha do campo ganha um botão de 34px — medido no celular, o campo continua com folga. |
+| **Riscos** | Dois botões de 48px antes do campo; medido no celular, o campo mantém folga (o rótulo da nova conversa some e sobra o ＋). |
 
 ## Lotes recomendados (executados — saíram na v3.18)
 
