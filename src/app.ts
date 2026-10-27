@@ -956,7 +956,7 @@ export function criarApp(): FastifyInstance {
     /* 3. corrida: tarefa terminou/falhou enquanto a conexão se montava */
     if (t.status === "terminou") {
       enviar({ tipo: "parcial", texto: t.parcial });
-      enviar({ tipo: "fim", dados: { resposta: t.parcial, ferramentas: t.ferramentas, aviso: t.aviso } });
+      enviar({ tipo: "fim", dados: { resposta: t.parcial, ferramentas: t.ferramentas, aviso: t.aviso, telas: t.telas ?? [] } });
       fechar();
       return;
     }

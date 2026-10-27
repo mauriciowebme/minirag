@@ -15,6 +15,7 @@ import { Usuario, log, tenantFor } from "./config";
 import { erro409, erro422 } from "./errors";
 import { q } from "./db";
 import { apertarRodada, custoDoPayload, type MsgChat, montarPayload } from "./compactar";
+import { MAX_TELAS_TURNO, type Tela } from "./telas";
 import {
   type ChamadaFerramenta,
   executarFerramenta,
@@ -143,6 +144,8 @@ export async function initProvider(): Promise<void> {
   /* v3.18 (T018): quanto custou cada resposta — {tok_in, tok_out, ms, modelo}. A coluna
      `fontes` nasceu em 2.0 e nunca foi escrita: passa a viver na T004. */
   await q(`ALTER TABLE chat_mensagens ADD COLUMN IF NOT EXISTS custo JSONB`);
+  /* v3.23: telas geradas pelo agente (HTML+CSS+JS) viajam com a resposta */
+  await q(`ALTER TABLE chat_mensagens ADD COLUMN IF NOT EXISTS telas JSONB`);
   await q(`CREATE INDEX IF NOT EXISTS chat_tenant_idx ON chat_mensagens (tenant, memoria, id)`);
 }
 
@@ -688,6 +691,8 @@ export type EventoChat =
   | { tipo: "descartar" }
   | { tipo: "ferramenta"; servidor: string; nome: string; ok: boolean; ms: number }
   | { tipo: "fala"; texto: string }
+  /** v3.23: tela gerada (HTML+CSS+JS) — o card com preview funcional aparece ao vivo */
+  | { tipo: "tela"; tela: Tela }
   | { tipo: "fim"; dados: Record<string, unknown> }
   | { tipo: "erro"; detalhe: string };
 
@@ -783,6 +788,8 @@ export async function responderChat(
   };
 
   const chamadas: ChamadaFerramenta[] = [];
+  /* v3.23: telas geradas neste turno (viram cards no chat e ficam gravadas na mensagem) */
+  const telas: Tela[] = [];
   const falas: string[] = []; // v3.8: as falas de caminho da rodada ficam na tela (e na gaveta)
   /* v3.15: a trilha do turno na ordem real. O bloco de pensamento da rodada em curso fecha
      quando a rodada decide (fala, chama ferramenta ou responde) — assim o tempo dele NÃO
@@ -816,6 +823,8 @@ export async function responderChat(
     ferramentas: chamadas,
     falas,
     rastro,
+    /* v3.23: telas geradas neste turno (o card do chat) */
+    telas,
     /** v3.13: raciocínio do modelo, para a tela recolher "Pensou por Ns" ao reabrir a conversa */
     raciocinio: pensamento.trim(),
     rodadas,
@@ -933,6 +942,15 @@ export async function responderChat(
       });
       rastro.push({ tipo: "ferramenta", servidor: exec.servidor, nome: exec.nome, ok: exec.ok, ms: duracao });
       emitir?.({ tipo: "ferramenta", servidor: exec.servidor, nome: exec.nome, ok: exec.ok, ms: exec.ms });
+      /* v3.23: tela gerada aparece na hora, sem esperar o fim do turno */
+      if (exec.tela) {
+        if (telas.length < MAX_TELAS_TURNO) {
+          telas.push(exec.tela);
+          emitir?.({ tipo: "tela", tela: exec.tela });
+        } else {
+          aviso = aviso ?? `o modelo gerou mais de ${MAX_TELAS_TURNO} telas neste turno — as excedentes não foram exibidas`;
+        }
+      }
       /* o resultado entra já aparado: ferramenta gulosamente verbosa não pode estourar a janela */
       const brutoTool = paraTexto(exec.saida);
       /* v3.18 (T004): documentos que a BUSCA devolveu são as fontes da resposta. A coluna
@@ -969,7 +987,7 @@ export async function responderChat(
     const parcial = emitido.trim();
     await gravarMensagens(
       tenant, memoria, pergunta, parcial, chamadas, falas, pensamento.trim(), rastro, [...fontes],
-      cfg.provedor, cfg.modelo,
+      cfg.provedor, cfg.modelo, telas,
     );
     return empacotar(parcial, "parada pelo usuário — o que chegou ficou gravado", true);
   }
@@ -986,7 +1004,7 @@ export async function responderChat(
         : "nenhuma ferramenta está ligada em Configurações → Ferramentas (MCP)");
   }
 
-  await gravarMensagens(tenant, memoria, pergunta, texto, chamadas, falas, pensamento.trim(), rastro, [...fontes], cfg.provedor, cfg.modelo);
+  await gravarMensagens(tenant, memoria, pergunta, texto, chamadas, falas, pensamento.trim(), rastro, [...fontes], cfg.provedor, cfg.modelo, telas);
   return empacotar(texto, aviso, false);
 }
 
@@ -1002,13 +1020,14 @@ async function gravarMensagens(
   fontes: string[] = [],
   provedor: string | null = null,
   modelo = "",
+  telas: Tela[] = [],
 ): Promise<void> {
   await q(
     `INSERT INTO chat_mensagens (tenant, memoria, papel, texto, ferramentas) VALUES ($1, $2, 'user', $3, NULL)`,
     [tenant, memoria, pergunta],
   );
   await q(
-    `INSERT INTO chat_mensagens (tenant, memoria, papel, texto, ferramentas, falas, raciocinio, rastro, fontes, custo, provedor, modelo) VALUES ($1, $2, 'assistant', $3, $4::jsonb, $5::jsonb, $6, $7::jsonb, $8::jsonb, $9::jsonb, $10, $11)`,
+    `INSERT INTO chat_mensagens (tenant, memoria, papel, texto, ferramentas, falas, raciocinio, rastro, fontes, custo, provedor, modelo, telas) VALUES ($1, $2, 'assistant', $3, $4::jsonb, $5::jsonb, $6, $7::jsonb, $8::jsonb, $9::jsonb, $10, $11, $12::jsonb)`,
     [
       tenant, memoria, resposta, JSON.stringify(chamadas), JSON.stringify(falas), raciocinio || null,
       JSON.stringify(rastro), JSON.stringify(fontes),
@@ -1017,6 +1036,8 @@ async function gravarMensagens(
       JSON.stringify({ tok_out: custoDoPayload([{ content: resposta }]) }),
       /* v3.19: quem respondeu (nome do provedor escolhido; null = padrão da casa) */
       provedor, modelo || "",
+      /* v3.23: telas geradas neste turno */
+      JSON.stringify(telas),
     ],
   );
 }
@@ -1029,7 +1050,7 @@ export async function historicoChat(
   const memoria = (opts.memoria ?? "").trim();
   const limite = Math.min(Math.max(opts.limit ?? 40, 1), 200);
   const r = await q(
-    `SELECT id, papel, texto, ferramentas, falas, raciocinio, rastro, fontes, custo, provedor, modelo, criado_em FROM chat_mensagens
+    `SELECT id, papel, texto, ferramentas, falas, raciocinio, rastro, fontes, custo, provedor, modelo, telas, criado_em FROM chat_mensagens
      WHERE tenant = $1 AND memoria = $2 ORDER BY id DESC LIMIT $3`,
     [tenant, memoria, limite],
   );
@@ -1050,6 +1071,8 @@ export async function historicoChat(
       /* v3.19: qual provedor respondeu esta mensagem (null = padrão da casa) */
       provedor: m.provedor ?? "",
       modelo: m.modelo ?? "",
+      /* v3.23: telas geradas (o card com preview volta ao reabrir a conversa) */
+      telas: m.telas ?? [],
       quando: m.criado_em,
     })),
   };

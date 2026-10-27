@@ -134,8 +134,8 @@ export async function rodarTarefa(id: string, u: Usuario): Promise<void> {
     );
     await grava; // drena a fila ANTES do UPDATE final (ver nota acima)
     await q(
-      `UPDATE chat_tarefas SET status = 'terminou', parcial = $1, ferramentas = $2::jsonb, aviso = $3, atualizado_em = now() WHERE id = $4`,
-      [resp.resposta, JSON.stringify(resp.ferramentas ?? []), resp.aviso ?? null, id],
+      `UPDATE chat_tarefas SET status = 'terminou', parcial = $1, ferramentas = $2::jsonb, aviso = $3, telas = $4::jsonb, atualizado_em = now() WHERE id = $5`,
+      [resp.resposta, JSON.stringify(resp.ferramentas ?? []), resp.aviso ?? null, JSON.stringify(resp.telas ?? []), id],
     );
     notificarTarefa(id, { tipo: "fim", dados: resp });
     /* v3.18 (T016): primeira troca de uma gaveta nomeada ganha título automático —

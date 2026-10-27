@@ -13,6 +13,7 @@
 import { CONFIG, Usuario } from "./config";
 import { q } from "./db";
 import { erro404, erro409, erro422 } from "./errors";
+import { resumoTela, type Tela } from "./telas";
 
 export type FerramentaEspec = { name: string; description: string; inputSchema: Record<string, unknown> };
 
@@ -351,7 +352,7 @@ export async function executarFerramenta(
   user: Usuario,
   pacote: PacoteFerramentas,
   contexto: { memoria?: string } = {},
-): Promise<{ servidor: string; nome: string; saida: string; ok: boolean; ms: number; args: Record<string, unknown> }> {
+): Promise<{ servidor: string; nome: string; saida: string; ok: boolean; ms: number; args: Record<string, unknown>; tela?: Tela }> {
   const rota = pacote.rotas.get(nome);
   if (!rota) return { servidor: "?", nome, saida: `ferramenta '${nome}' não está ligada neste momento`, ok: false, ms: 0, args };
   const argsUsados = { ...args };
@@ -365,6 +366,12 @@ export async function executarFerramenta(
         argsUsados.memoria = contexto.memoria;
       }
       const r = await chamarToolInterna(rota.original, argsUsados, user);
+      /* v3.23 — a tela gerada não volta como texto para o modelo (gastaria a janela):
+         o HTML viaja no campo `tela`, que só a camada do chat enxerga. */
+      if (rota.original === "mostrar_tela" && r && typeof (r as Tela).html === "string") {
+        const tela = r as Tela;
+        return { servidor: "minirag", nome: rota.original, saida: resumoTela(tela), ok: true, ms: Date.now() - inicio, args: argsUsados, tela };
+      }
       return { servidor: "minirag", nome: rota.original, saida: paraTexto(r), ok: true, ms: Date.now() - inicio, args: argsUsados };
     }
     const l = await linhaServidor(rota.servidor);

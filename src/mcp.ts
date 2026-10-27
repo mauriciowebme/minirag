@@ -24,6 +24,7 @@ import { escreverEsquecimento, lerEsquecimento } from "./esquecimento";
 import { alvoMaquina, criarPareamento, controleDeMaquinaAtivo, listarMaquinas, rodar } from "./maquinas";
 import { NOMES_MAQUINA_TOOLS, toolMaquina, wrapComando } from "./maquinas_tools";
 import { responderChat, salvarProvider, testarProvider, verProvider } from "./provider";
+import { montarTela } from "./telas";
 import {
   atualizarFerramentas,
   atualizarServidor,
@@ -242,6 +243,23 @@ export const TOOLS: Tool[] = [
         tenant: { type: "string", description: "dono (obrigatorio quando o operador apaga gaveta alheia)" },
       },
       required: ["memoria"],
+    },
+  },
+  {
+    name: "mostrar_tela",
+    description:
+      "Mostra ao usuário uma TELA gerada por você (HTML + CSS + JS numa página só): o chat abre um card com preview FUNCIONAL (botão clica, campo digita, gráfico desenha), além de tela cheia, código e download. USE quando o pedido for visual ou quando o resultado ficar melhor vendo do que lendo: gráfico, painel, comparativo, tabela formatada, formulário, calculadora, simulação, mapa mental, linha do tempo. NÃO use para resposta curta de texto, e NÃO repita o HTML na sua resposta depois de chamar a ferramenta.",
+    inputSchema: {
+      type: "object",
+      properties: {
+        titulo: { type: "string", description: "título curto do card (ex.: 'Vendas por mês — 2026')" },
+        html: {
+          type: "string",
+          description:
+            "página HTML completa ou fragmento (div/svg/table) com CSS e JS INLINE. Proibido CDN ou arquivo externo: tem de funcionar offline. Use os dados reais que você tem no contexto; o que faltar, diga na própria tela.",
+        },
+      },
+      required: ["titulo", "html"],
     },
   },
   {
@@ -646,6 +664,9 @@ async function executarTool(
   switch (name) {
     case "health":
       return deps.health();
+    case "mostrar_tela":
+      /* valida e normaliza; a camada do chat (ferramentas.ts) lê o HTML por fora do texto */
+      return montarTela({ titulo: args.titulo, html: args.html });
     case "search":
       if (typeof args.query !== "string" || !args.query.trim()) {
         throw new Error("parametros invalidos: campo obrigatorio: query");
