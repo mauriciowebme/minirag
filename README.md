@@ -22,6 +22,13 @@ parecidos com a pergunta, com uma nota de 0 a 1.
 
 ---
 ---
+## v3.23.0 (26/10) — O agente desenha a tela e ela funciona no chat
+- **O que você vê:** quando o pedido é visual — gráfico, painel, comparativo, tabela, formulário, simulador — o agente escreve a página e ela aparece na conversa como um **card com prévia que funciona**: botão clica, campo digita, conta e desenho acontecem ali mesmo. Cada card tem título, botão de **tela cheia** (⤢), **download do arquivo .html** (↓) e fecha no Esc.
+- **Por que:** pedido do dono (26/10) — "o agente gera o HTML e eu vejo o resultado funcionando, clicando". Antes, só dava para ler o código.
+- **Como funciona:** nova ferramenta `mostrar_tela` (HTML + CSS + JS numa página só, sem internet, teto de 3 telas por resposta). O modelo recebe de volta só uma linha dizendo que a tela apareceu — o HTML não volta para ele, então a conversa não gasta a janela à toa. As telas ficam gravadas junto da mensagem: reabrir a conversa devolve os mesmos cards.
+- **Segurança:** a prévia roda isolada, sem acesso ao painel, ao login ou aos dados da sessão; só o desenho e os cliques dela funcionam.
+- **Como é provado:** typecheck + build limpos; suíte completa com bloco novo `v3.23` (ferramenta na porta MCP, página montada a partir de fragmento, página inteira não duplicada, recusa de HTML vazio/sem marcação, teto de 3 telas com aviso e telas gravadas lidas de volta no histórico).
+
 ## v3.22.0 (26/10) — O chat ficou mais enxuto: exemplos prontos, ajustes num menu e ações no hover/toque
 - **O que você vê:** a conversa vazia agora abre com boas-vindas + 4 exemplos prontos (um clique preenche a pergunta e foca o campo); o rodapé ficou só com engrenagem + campo + microfone + enviar; provider, modelo, exportar e nova conversa moram no menu "⚙ ajustes da conversa" (abre no toque, fecha fora dele ou no Esc); as ações da mensagem (copiar/regenerar/editar) ficam invisíveis e aparecem no hover (mouse) ou no toque (celular).
 - **Por que:** maquete de UX aprovada em 26/10 (`sketches/chat-ux`) — a tela tinha 4 controles no rodapé competindo com o campo e as ações da mensagem sempre visíveis; o pedido era piso enxuto e ações sob demanda.
