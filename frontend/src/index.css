@@ -221,9 +221,18 @@
 
   /* ---------------------------------------------------------------- toast */
   .toast {
-    @apply pointer-events-none fixed bottom-5 left-1/2 z-50 -translate-x-1/2
+    /* v3.23.1 — o aviso morava em bottom-5 e caía DENTRO do pé da conversa
+       (o campo de digitação). Medido no celular: toast 792–836px, pé 767–844px;
+       no desktop, toast 578 contra pé a partir de 550 — o texto aparecia por
+       baixo do campo, quase ilegível. Agora ele flutua ACIMA do pé (o pé tem
+       ~78px no celular e ~90px no desktop, mais a barra de gesto) e com z-index
+       acima dele, então nunca divide espaço com o que você está digitando. */
+    @apply pointer-events-none fixed left-1/2 z-[60] -translate-x-1/2
       translate-y-3 rounded-campo border border-bordaforte bg-sup3 px-4 py-2.5
-      text-[14px] opacity-0 shadow-painel transition-all duration-200;
+      text-[14px] text-txt opacity-0 shadow-painel transition-all duration-200;
+    bottom: calc(160px + env(safe-area-inset-bottom));
+    max-width: min(92vw, 560px);
+    text-align: center;
   }
   .toast-ver {
     @apply translate-y-0 opacity-100;
