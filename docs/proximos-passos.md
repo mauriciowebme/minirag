@@ -38,6 +38,7 @@
 | T025 | Padronizar toast (sucesso verde / erro vermelho) | chat-ui | 🟡 Média | ✅ v3.25.0 | [#t025](#t025) |
 | T026 | Botão ⚙ "transparente" — fill sólido + borda forte | chat-ui | 🟢 Baixa | ✅ v3.25.1 | [#t026](#t026) |
 | T027 | Popover de ajustes "transparente" — tokens `:root` ausentes | chat-ui | 🟢 Baixa | ✅ v3.25.2 | [#t027](#t027) |
+| T028 | Tela inicial passa a ser o Chat (não o Painel) | chat-ui | 🟢 Baixa | ✅ v3.26.0 | [#t028](#t028) |
 
 ---
 
@@ -366,6 +367,22 @@
 | **Arquivos afetados** | frontend/src/index.css (`:root`) |
 | **Dependências** | Nenhuma. |
 | **Riscos** | Cosmético; confirmar no iPhone físico que o popover agora lê sólido. |
+
+---
+
+<a id="t028"></a>
+### T028 — Tela inicial passa a ser o Chat (não o Painel)
+| Campo | Conteúdo |
+|---|---|
+| **Módulo** | chat-ui |
+| **Prioridade** | 🟢 Baixa — mudança de comportamento pedida pelo dono em 27/10 |
+| **Status** | ✅ v3.26.0 (executado em 27/10; build verde) |
+| **Spec/Plano** | Pedido direto do dono: "hoje o minirag inicia com a tela de painel mas quero que passe a iniciar com a tela de chat" |
+| **Descrição** | O app abria com `vista = "painel"` como estado inicial e, depois do login, mandava o **operador** pro Painel e o comum pro Chat (`setVista(operador ? "painel" : "chat")`). Resultado: quem é operador sempre aterrissava na visão geral do acervo, tendo que clicar em Chat pra conversar. |
+| **Escopo** | Feito (27/10): estado inicial `useState<Vista>("chat")` e pós-login `setVista("chat")` para **todo mundo** (operador incluso). O Painel continua no menu lateral como tela normal — só deixou de ser a porta de entrada. Sem mudança de rota/URL (a navegação é estado React, não hash). |
+| **Arquivos afetados** | frontend/src/App.tsx (estado inicial + efeito pós-login) |
+| **Dependências** | Nenhuma. |
+| **Riscos** | Cosmético/comportamental; operador pode estranhar perder o Painel como home, mas o menu resolve em 1 clique. |
 
 ---
 
