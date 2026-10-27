@@ -46,6 +46,7 @@
 | T033 | Ordem do turno: tela gerada aparece ANTES da conclusão | chat-ui | 🟡 Média | ✅ v3.29.0 | [#t033](#t033) |
 | T034 | Rolagem da caixa da tela: acompanha a escrita só se o usuário está no fim | chat-ui | 🟢 Baixa | ✅ v3.30.0 | [#t034](#t034) |
 | T035 | Rolagem do CHAT durante a escrita da tela (a conversa acompanha a caixa) | chat-ui | 🟡 Média | ✅ v3.30.1 | [#t035](#t035) |
+| T036 | A tela gerada é CONCLUSÃO: o rastro fecha quando o código começa | chat-ui | 🟢 Baixa | ✅ v3.30.2 | [#t036](#t036) |
 
 ---
 
@@ -504,6 +505,22 @@
 | **Arquivos afetados** | frontend/src/components/Chat.tsx |
 | **Dependências** | T031/T034 (caixa da tela e rolagem interna). |
 | **Riscos** | Nenhum de dados; se o usuário estiver lendo mais acima, nada é puxado. |
+
+---
+
+<a id="t036"></a>
+### T036 — A tela gerada é CONCLUSÃO: o rastro fecha quando o código começa
+| Campo | Conteúdo |
+|---|---|
+| **Módulo** | chat-ui |
+| **Prioridade** | 🟢 Baixa — confusão visual: a caixa parecia mais um passo do rastro |
+| **Status** | ✅ v3.30.2 (build verde; medido no browser com escrita contínua) |
+| **Spec/Plano** | Dono (27/10): "quando está digitando parece que a tela montagem do html faz parte do rastro mas não faz, acho que ela faz parte da conclusão ou não?" — decisão: é conclusão. |
+| **Descrição** | `emProcesso` considerava só `vivo && !texto`: o rastro ficava aberto durante toda a escrita do HTML e a linha do tempo do rastro encostava na caixa, que parecia o próximo passo. |
+| **Escopo** | `produzindo(m)` (código da tela já começou ou tela pronta) entra na regra: com produto na tela, o rastro deixa de ser "em processo" e passa a seguir a preferência do usuário (recolhe por padrão). Vale também para o `<details>` de pensamento quando não há trilha. |
+| **Arquivos afetados** | frontend/src/components/Chat.tsx |
+| **Dependências** | T028/T031/T033 (rastro até a conclusão e caixa única). |
+| **Riscos** | Se o modelo gerar tela e continuar pensando depois, o rastro já estará recolhido — um clique reabre. |
 
 ## Lotes recomendados (executados — saíram na v3.18)
 
