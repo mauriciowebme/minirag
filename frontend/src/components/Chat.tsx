@@ -332,10 +332,17 @@ export function Chat({
     () => (localStorage.getItem(RASTRO_CHAVE) === "1" ? "1" : localStorage.getItem(RASTRO_CHAVE) === "0" ? "0" : null),
   );
   /* v3.28 (dono, 27/10): o rastro fica SEMPRE aberto até a CONCLUSÃO começar — isto é,
-     enquanto o turno processa e ainda não há texto de resposta. Quando a resposta começa
-     a ser escrita, vale a preferência do usuário (aberto/recolhido) em todas as mensagens. */
-  const emProcesso = (vivo: boolean, texto: string) => vivo && !texto.trim();
-  const rastroAberto = (vivo: boolean, texto: string) => (emProcesso(vivo, texto) ? true : rastroPref === "1");
+     enquanto o turno processa e ainda não há nada produzido. Quando a resposta começa
+     a ser escrita, vale a preferência do usuário (aberto/recolhido) em todas as mensagens.
+     v3.30.2 (dono, 27/10): a tela gerada É conclusão — o rastro fecha assim que o código
+     da tela começa a aparecer (senão a caixa parecia mais um passo do rastro). */
+  const emProcesso = (vivo: boolean, texto: string, produzindo?: boolean) =>
+    vivo && !texto.trim() && !produzindo;
+  const rastroAberto = (vivo: boolean, texto: string, produzindo?: boolean) =>
+    emProcesso(vivo, texto, produzindo) ? true : rastroPref === "1";
+  /* "já tem produto na tela" = o código da tela começou a nascer ou a tela está pronta */
+  const produzindo = (m: { codigo?: string; telas?: unknown[] }) =>
+    Boolean(m.codigo && m.codigo.length) || Boolean(m.telas && m.telas.length);
   function alternarRastro(atual: boolean) {
     const novo = atual ? "0" : "1";
     localStorage.setItem(RASTRO_CHAVE, novo);
@@ -914,12 +921,12 @@ export function Chat({
                       segmentos={m.rastro}
                       vivo={Boolean(m.escrevendo)}
                       detalhes={m.ferramentas}
-                      aberto={rastroAberto(Boolean(m.escrevendo), m.texto)}
-                      travado={emProcesso(Boolean(m.escrevendo), m.texto)}
+                      aberto={rastroAberto(Boolean(m.escrevendo), m.texto, produzindo(m))}
+                      travado={emProcesso(Boolean(m.escrevendo), m.texto, produzindo(m))}
                       onToggle={alternarRastro}
                     />
                   ) : m.raciocinio ? (
-                    <details className="racio" open={Boolean(m.escrevendo) && !m.texto}>
+                    <details className="racio" open={Boolean(m.escrevendo) && !m.texto && !produzindo(m)}>
                       <summary className="racio-cab">
                         <svg className="racio-ico" width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round" aria-hidden="true">
                           <path d="M9 18h6M10 21h4M12 3a6 6 0 0 0-3.5 10.9V16h7v-2.1A6 6 0 0 0 12 3z" />
