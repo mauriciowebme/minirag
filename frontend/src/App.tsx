@@ -28,6 +28,18 @@ const MENU: { id: Vista; rotulo: string; icone: string }[] = [
 
 const DENTRO_DO_CAMINHO = new Set<Vista>(["gavetas", "arquivos", "editor"]);
 
+/* v3.27 (dono, 27/10): a tela mora no ENDEREÇO (#/chat, #/painel, #/buscar...).
+   O app é servido na raiz e o hash diz onde o usuário está: sobrevive ao F5,
+   funciona no voltar/avançar e o link pode ser copiado com a tela certa. */
+const VISTAS_TODAS: Vista[] = [
+  "chat", "painel", "maquinas", "buscar", "jobs", "gavetas", "config", "arquivos", "editor",
+];
+
+function vistaDoHash(): Vista | null {
+  const bruto = window.location.hash.replace(/^#\/?/, "").trim();
+  return (VISTAS_TODAS as string[]).includes(bruto) ? (bruto as Vista) : null;
+}
+
 /* v3.4 (política do dono, 21/10): o usuário comum só tem três lugares na tela —
    Chat, Buscar e Fila. Painel, Usuários/Gavetas e Configurações são do admin.
    A parede de verdade está na API (dashboard/config gravam exigem operador);
@@ -48,7 +60,7 @@ const TITULOS: Record<Vista, string> = {
 
 export default function App() {
   const sessao = useSessao();
-  const [vista, setVista] = useState<Vista>("chat");
+  const [vista, setVista] = useState<Vista>(() => vistaDoHash() ?? "chat");
   const [usuarioAberto, setUsuarioAberto] = useState<string | null>(null);
   const [docAberto, setDocAberto] = useState<string | null>(null);
   const [novoNome, setNovoNome] = useState<string | null>(null);
@@ -120,8 +132,10 @@ export default function App() {
     if (!sessao.logado) return;
     setUsuarioAberto(null);
     /* v3.26.0 (dono, 27/10): TODO mundo aterrissa no Chat — antes o operador caía
-       no Painel e o comum no Chat. O Painel segue no menu, só não é mais a porta. */
-    setVista("chat");
+       no Painel e o comum no Chat. O Painel segue no menu, só não é mais a porta.
+       v3.27: se o endereço já traz a tela (#/painel etc.), ele manda — F5 continua onde estava. */
+    const alvo = vistaDoHash();
+    setVista(alvo && (sessao.sessao.operador || VISTAS_DO_COMUM.includes(alvo)) ? alvo : "chat");
     get<HealthResp>("/health")
       .then((h) => setVersao(h.versao || "?"))
       .catch(() => undefined);
@@ -129,6 +143,23 @@ export default function App() {
       .then((r) => setControleMaq(r.controle_maquinas !== false))
       .catch(() => undefined);
   }, [sessao.logado]);
+
+  /* v3.27 — o endereço acompanha a tela. replaceState (e não pushState) pra não
+     encher o histórico com cada clique de menu; a URL fica copiável e sobrevive ao F5. */
+  useEffect(() => {
+    const destino = "#/" + vista;
+    if (window.location.hash !== destino) window.history.replaceState(null, "", destino);
+  }, [vista]);
+
+  /* v3.27 — link com hash e voltar/avançar do navegador caem na tela certa */
+  useEffect(() => {
+    const aplicar = () => {
+      const v = vistaDoHash();
+      if (v) setVista(v);
+    };
+    window.addEventListener("hashchange", aplicar);
+    return () => window.removeEventListener("hashchange", aplicar);
+  }, []);
 
   useEffect(() => {
     function antesDeSair(e: BeforeUnloadEvent) {
