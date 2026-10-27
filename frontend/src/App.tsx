@@ -48,7 +48,7 @@ const TITULOS: Record<Vista, string> = {
 
 export default function App() {
   const sessao = useSessao();
-  const [vista, setVista] = useState<Vista>("painel");
+  const [vista, setVista] = useState<Vista>("chat");
   const [usuarioAberto, setUsuarioAberto] = useState<string | null>(null);
   const [docAberto, setDocAberto] = useState<string | null>(null);
   const [novoNome, setNovoNome] = useState<string | null>(null);
@@ -119,8 +119,9 @@ export default function App() {
   useEffect(() => {
     if (!sessao.logado) return;
     setUsuarioAberto(null);
-    /* comum não tem Painel: o ponto de entrada dele é o Chat (v3.4) */
-    setVista(sessao.sessao.operador ? "painel" : "chat");
+    /* v3.26.0 (dono, 27/10): TODO mundo aterrissa no Chat — antes o operador caía
+       no Painel e o comum no Chat. O Painel segue no menu, só não é mais a porta. */
+    setVista("chat");
     get<HealthResp>("/health")
       .then((h) => setVersao(h.versao || "?"))
       .catch(() => undefined);
