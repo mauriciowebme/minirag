@@ -176,14 +176,18 @@ test("minirag v2 — suíte completa", async (t) => {
     f.check(`health 200 + versao ${VERSAO_ESPERADA}`, h.status === 200 && h.json?.versao === VERSAO_ESPERADA, h.json);
     f.check("health operador ativo", h.json?.operador === true, h.json);
     f.check("health embedder ok", h.json?.embedder === "ok", h.json);
-    const p = await call("GET", "/painel/");
+    const p = await call("GET", "/");
     f.check(
-      "painel servido (200 html da SPA)",
+      "raiz serve a SPA (200 html, tela no hash)",
       p.status === 200 && p.texto.includes('id="root"') && p.texto.includes("/painel/assets/"),
       p.status,
     );
-    const raiz = await fetch(BASE + "/", { redirect: "manual" });
-    f.check("raiz 302 -> /painel/", raiz.status === 302 && raiz.headers.get("location") === "/painel/", raiz.status);
+    const antigo = await fetch(BASE + "/painel/", { redirect: "manual" });
+    f.check(
+      "link antigo /painel/ 302 -> /#/painel",
+      antigo.status === 302 && antigo.headers.get("location") === "/#/painel",
+      antigo.status,
+    );
 
     console.log("-- ingest vira documento com fonte");
     const C1 = "O farol da baia guia os barcos na neblina de novembro. ".repeat(3);
