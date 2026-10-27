@@ -115,6 +115,8 @@ const ROTULOS_FERRAMENTA: Record<string, string> = {
   apagar_usuario: "apagar usuário",
   esquecimento: "o esquecimento",
   config_provider: "a configuração do modelo",
+  web_search: "a busca na web",
+  web_open: "a leitura da página",
 };
 
 function rotuloFerramenta(s: { servidor: string; nome: string }): string {

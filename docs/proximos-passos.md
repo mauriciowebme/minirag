@@ -49,6 +49,7 @@
 | T036 | A tela gerada é CONCLUSÃO: o rastro fecha quando o código começa | chat-ui | 🟢 Baixa | ✅ v3.30.2 | [#t036](#t036) |
 | T037 | Piso com "nova conversa"; exportar no popover "ferramentas" | chat-ui | 🟢 Baixa | ✅ v3.31.1 | [#t037](#t037) |
 | T038 | Respiro entre a tela gerada e a conclusão | chat-ui | 🟢 Baixa | ✅ v3.31.2 | [#t038](#t038) |
+| T039 | Busca na web (`web_search`) e leitura de página (`web_open`) | ferramentas | 🟡 Média | ✅ v3.32.0 | [#t039](#t039) |
 
 ---
 
@@ -555,6 +556,22 @@
 | **Arquivos afetados** | frontend/src/index.css |
 | **Dependências** | T031/T033 (caixa única e ordem da tela). |
 | **Riscos** | Nenhum; só espaçamento. |
+
+---
+
+<a id="t039"></a>
+### T039 — Busca na web (`web_search`) e leitura de página (`web_open`)
+| Campo | Conteúdo |
+|---|---|
+| **Módulo** | ferramentas (MCP) |
+| **Prioridade** | 🟡 Média — o chat só sabia a memória; faltava o mundo lá fora |
+| **Status** | ✅ v3.32.0 (build verde; medido no browser) |
+| **Spec/Plano** | Dono (27/10): "preciso de uma ferramenta estilo a daqui do Hermes que consiga fazer busca na web". |
+| **Descrição** | Duas ferramentas novas no MCP interno, disponíveis ao chat sem configuração: `web_search` (título, link e trecho dos resultados) e `web_open` (texto limpo de uma página, até 12k chars). Sem chave de API. |
+| **Escopo** | `src/web.ts`: busca com cadeia de fontes — Brave (HTML público) → Bing News RSS → Google News RSS, e o resultado diz de onde veio; `site:` para restringir domínio; `k` de 1 a 10. `web_open` bloqueia endereço interno (localhost, 10/8, 172.16/12, 192.168/16, 169.254, ::1, fc00, fe80) antes e depois do DNS — leitura de arquivo binário é recusada com erro honesto. Rótulos no rastro: "a busca na web" / "a leitura da página". |
+| **Arquivos afetados** | src/web.ts (novo), src/mcp.ts (2 tools + dispatch + instructions), frontend/src/components/Chat.tsx (rótulos), Dockerfile (curl no estágio final) |
+| **Dependências** | T001 (MCP interno). |
+| **Riscos** | **429**: o Brave aceita curl e recusa o TLS do Node (fetch, node:https e http/2 levaram 429 com o mesmo user-agent) — por isso a imagem final instala curl e o `baixar()` usa curl, com fetch só de reserva. Sem curl o Brave falha e sobram os RSS de notícia. **Sem JS**: página que monta o conteúdo por JavaScript vem vazia em `web_open` — nesse caso diga que não deu, não invente. **Limite de uso**: raspagem de buscador público não tem contrato; se um dia bloquear de vez, trocar por chave (Brave/Tavily) é trocar o primeiro elo da cadeia. |
 
 ## Lotes recomendados (executados — saíram na v3.18)
 

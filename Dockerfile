@@ -85,9 +85,11 @@ ENV PYTHONUNBUFFERED=1 \
 
 WORKDIR /app
 
-# poppler roda o PDF escaneado (o Python do embedder chama pdftoppm)
+# poppler roda o PDF escaneado (o Python do embedder chama pdftoppm).
+# curl é o cliente HTTP da busca web: o Brave recusa o handshake TLS do Node (429),
+# mas aceita o do curl — ver src/web.ts.
 RUN apt-get update \
-    && apt-get install -y --no-install-recommends poppler-utils \
+    && apt-get install -y --no-install-recommends poppler-utils curl ca-certificates \
     && rm -rf /var/lib/apt/lists/*
 
 # deps Python + modelo vindos do estágio 1 (mesmas camadas, sem reinstalar)

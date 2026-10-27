@@ -25,6 +25,7 @@ import { alvoMaquina, criarPareamento, controleDeMaquinaAtivo, listarMaquinas, r
 import { NOMES_MAQUINA_TOOLS, toolMaquina, wrapComando } from "./maquinas_tools";
 import { responderChat, salvarProvider, testarProvider, verProvider } from "./provider";
 import { montarTela } from "./telas";
+import { abrirPagina, buscarWeb } from "./web";
 import {
   atualizarFerramentas,
   atualizarServidor,
@@ -260,6 +261,32 @@ export const TOOLS: Tool[] = [
         },
       },
       required: ["titulo", "html"],
+    },
+  },
+  {
+    name: "web_search",
+    description:
+      "Busca na INTERNET (não na memória): devolve títulos, links e trechos dos resultados. Use quando a pergunta for sobre fato atual, notícia, preço, versão de software ou algo que não está na memória — e diga de onde veio. Se quiser ler uma página inteira, chame web_open com a url.",
+    inputSchema: {
+      type: "object",
+      properties: {
+        query: { type: "string", description: "o que procurar (max 300 chars)" },
+        k: { type: "integer", description: "quantos resultados (1-10; default 5)" },
+        site: { type: "string", description: "opcional: restringe a um domínio (ex.: gov.br)" },
+      },
+      required: ["query"],
+    },
+  },
+  {
+    name: "web_open",
+    description:
+      "Abre uma URL da internet e devolve o TEXTO da página (sem menu, sem script), até 12000 caracteres. Use depois do web_search para ler a fonte que interessou, ou quando o usuário mandar um link.",
+    inputSchema: {
+      type: "object",
+      properties: {
+        url: { type: "string", description: "endereço http(s) da página" },
+      },
+      required: ["url"],
     },
   },
   {
@@ -649,7 +676,8 @@ function initialize(params: Row) {
       "edit_doc (edita texto e reindexa), rename_doc (renomeia/move/titulo), archive_doc, " +
       "list_gavetas, create_gaveta, delete_gaveta, list_jobs, chat (usa as ferramentas ligadas), " +
       "listar_usuarios e criar_usuario (operador), config_provider (provider do chat), " +
-      "listar_mcp e gerir_mcp (servidores MCP que dão ferramentas ao chat).",
+      "listar_mcp e gerir_mcp (servidores MCP que dão ferramentas ao chat), " +
+      "web_search (busca na internet) e web_open (texto de uma página).",
   };
 }
 
@@ -667,6 +695,14 @@ async function executarTool(
     case "mostrar_tela":
       /* valida e normaliza; a camada do chat (ferramentas.ts) lê o HTML por fora do texto */
       return montarTela({ titulo: args.titulo, html: args.html });
+    case "web_search":
+      return buscarWeb({
+        query: String(args.query ?? ""),
+        k: args.k === undefined ? undefined : Number(args.k),
+        site: args.site === undefined ? undefined : String(args.site),
+      });
+    case "web_open":
+      return abrirPagina(String(args.url ?? ""));
     case "search":
       if (typeof args.query !== "string" || !args.query.trim()) {
         throw new Error("parametros invalidos: campo obrigatorio: query");
