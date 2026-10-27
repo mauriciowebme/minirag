@@ -13,12 +13,12 @@ import { Maquinas } from "./components/Maquinas";
 import { get, qs } from "./services/api";
 import type { GavetasResp, HealthResp, ProviderResp, Vista } from "./types";
 
-/* A ordem é do dono (21/10, v3.2.2): Chat logo depois de Painel; Usuários/Gavetas
-   em cima de Configurações. Arquivos e Editor são passos internos (usuário → gaveta
-   → arquivos → nota) e não aparecem aqui. */
+/* A ordem é do dono (27/10, v3.26.1): Chat é o PRINCIPAL (primeiro item, é a porta
+   de entrada do app); Painel logo abaixo. Usuários/Gavetas em cima de Configurações.
+   Arquivos e Editor são passos internos (usuário → gaveta → arquivos → nota). */
 const MENU: { id: Vista; rotulo: string; icone: string }[] = [
-  { id: "painel", rotulo: "Painel", icone: "▦" },
   { id: "chat", rotulo: "Chat", icone: "💬" },
+  { id: "painel", rotulo: "Painel", icone: "▦" },
   { id: "maquinas", rotulo: "Máquinas", icone: "🖥" },
   { id: "buscar", rotulo: "Buscar", icone: "⌕" },
   { id: "jobs", rotulo: "Fila", icone: "≡" },
