@@ -44,6 +44,7 @@
 | T031 | Acabamentos do chat: parar vermelho, rastro até a conclusão, caixa única da tela | chat-ui | 🟡 Média | ✅ v3.28.0 | [#t031](#t031) |
 | T032 | Toast no canto superior direito, conforme o gabarito do arquiteto | chat-ui | 🟢 Baixa | ✅ v3.28.1 | [#t032](#t032) |
 | T033 | Ordem do turno: tela gerada aparece ANTES da conclusão | chat-ui | 🟡 Média | ✅ v3.29.0 | [#t033](#t033) |
+| T034 | Rolagem da caixa da tela: acompanha a escrita só se o usuário está no fim | chat-ui | 🟢 Baixa | ✅ v3.30.0 | [#t034](#t034) |
 
 ---
 
@@ -470,6 +471,22 @@
 | **Arquivos afetados** | frontend/src/components/Chat.tsx |
 | **Dependências** | T031 (caixa única da tela). |
 | **Riscos** | Turno com mais de uma tela: todas ficam acima do texto final (é a ordem em que o servidor as produziu). |
+
+---
+
+<a id="t034"></a>
+### T034 — Rolagem da caixa da tela: acompanha a escrita só se o usuário está no fim
+| Campo | Conteúdo |
+|---|---|
+| **Módulo** | chat-ui |
+| **Prioridade** | 🟢 Baixa — incomôdo do dono ao tentar reler o código durante a escrita |
+| **Status** | ✅ v3.30.0 (build verde; comportamento medido com escrita simulada) |
+| **Spec/Plano** | Pedido do dono (27/10): "quando vai digitando ele deveria ir rolando, a não ser que o usuário scrolle para cima, o que cria o botão de ir até embaixo". |
+| **Descrição** | O efeito de acompanhamento fazia `scrollTop = scrollHeight` a CADA pedaço de HTML, sem consultar a posição do usuário — quem subia para reler era puxado de volta ao fim no pedaço seguinte, e não havia botão de voltar. |
+| **Escopo** | Feito: estado `colado` (folga < 24px do fim) atualizado no `onScroll` do `<pre>`; o efeito só desce quando `colado`. Botão **↓ fim** (`.tela-fim`, canto inferior direito da caixa) aparece quando o usuário sobe e volta a colar ao ser clicado. Mesmo padrão do chat (`colado`/`irParaOFim`/botão "↓ fim"). Ao ficar pronta, a caixa volta a `colado = true`. |
+| **Arquivos afetados** | frontend/src/components/TelaGerada.tsx, frontend/src/index.css |
+| **Dependências** | T031 (caixa única da tela). |
+| **Riscos** | Nenhum de dados; só apresentação. |
 
 ## Lotes recomendados (executados — saíram na v3.18)
 
