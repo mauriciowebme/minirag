@@ -708,11 +708,13 @@
     height: 100%;
     flex: 1 1 auto;
   }
+  /* v3.24.1 (pedido do dono, 27/10): "expandir" = BORDA A BORDA, como página web de
+     verdade — sem moldura escura, sem margem, sem cantos; só a barra fina de título. */
   .tela-cheia {
-    @apply fixed inset-0 z-50 flex items-center justify-center bg-black/70 p-4;
+    @apply fixed inset-0 z-50 flex bg-sup;
   }
   .tela-cheia-caixa {
-    @apply flex h-full max-h-[92vh] w-full max-w-[1100px] flex-col overflow-hidden rounded-campo border border-bordaforte bg-sup;
+    @apply flex h-full w-full flex-col overflow-hidden;
   }
   .chat-acoes-eu {
     @apply mt-1 flex items-center justify-end gap-1 opacity-70;
