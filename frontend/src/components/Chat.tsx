@@ -300,8 +300,8 @@ export function Chat({
   /* ---------------- v3.18: edição de pergunta, ditado por voz, rascunho por gaveta ---------------- */
   const [editando, setEditando] = useState<number | null>(null); // sid da pergunta que está sendo editada
   const [ditando, setDitando] = useState(false);
-  /* v3.22 (preview aprovado): popover "⚙ ajustes da conversa" — provider, modelo e nova
-     conversa moram aqui; no piso ficam engrenagem, exportar (v3.31), campo, mic e enviar. */
+  /* v3.31.1 (dono, 27/10): o popover "⚙ ferramentas" guarda provider/modelo e exportar;
+     no piso ficam engrenagem, "nova conversa", campo, mic e enviar. */
   const [ajustesAberto, setAjustesAberto] = useState(false);
   const ajustesRef = useRef<HTMLDivElement | null>(null);
   useEffect(() => {
@@ -1116,15 +1116,14 @@ export function Chat({
             </p>
           )}
           <div className="chat-piso-linha">
-            {/* v3.31: piso — [⚙] [⤓] [campo………] [mic] [↑]. O popover "⚙ ajustes da conversa"
-               guarda provider/modelo e "nova conversa"; o exportar virou botão próprio na
-               linha do campo (um toque, sem abrir popover). */}
+            {/* v3.31.1: piso — [⚙] [＋ nova conversa] [campo………] [mic] [↑]. O popover
+               "⚙ ferramentas" guarda provider/modelo e exportar. */}
             <div className="chat-ajustes" ref={ajustesRef}>
               <button
                 id="chatAjustes"
                 className="chat-ajustes-boto"
-                title="ajustes da conversa (provider, modelo, nova conversa)"
-                aria-label="ajustes da conversa"
+                title="ferramentas da conversa (provider, modelo, exportar)"
+                aria-label="ferramentas da conversa"
                 aria-expanded={ajustesAberto}
                 onClick={() => setAjustesAberto((v) => !v)}
               >
@@ -1134,8 +1133,8 @@ export function Chat({
                 </svg>
               </button>
               {ajustesAberto && (
-                <div className="chat-ajustes-pop" role="dialog" aria-label="ajustes da conversa">
-                  <div className="chat-ajustes-cab">⚙ ajustes da conversa</div>
+                <div className="chat-ajustes-pop" role="dialog" aria-label="ferramentas da conversa">
+                  <div className="chat-ajustes-cab">⚙ ferramentas</div>
                   {provedores.some((p) => p.ativo) && (
                     <div className="chat-ajustes-modelos" data-testid="chatModelos">
                       <select
@@ -1176,31 +1175,27 @@ export function Chat({
                   )}
                   <div className="chat-ajustes-botoes">
                     <button
-                      id="chatNovaConversa"
+                      id="chatExportar"
                       className="btn btn-mini"
-                      title="apagar esta conversa e recomeçar do zero"
-                      onClick={() => void limpar()}
+                      title="exportar a conversa (markdown)"
+                      onClick={exportarConversa}
                     >
-                      ＋ nova conversa
+                      ⤓ exportar
                     </button>
                   </div>
                 </div>
               )}
             </div>
-            {/* v3.31 (dono, 27/10): o exportar saiu do popover e ficou na linha do campo —
-                um toque, sempre visível; o popover guarda provider/modelo e "nova conversa". */}
+            {/* v3.31.1 (dono, 27/10): o piso tem "nova conversa" (ação do dia a dia) e o
+                popover virou "⚙ ferramentas" (provider/modelo + exportar). */}
             <button
-              id="chatExportar"
-              className="chat-ajustes-boto"
-              title="exportar a conversa (markdown)"
-              aria-label="exportar a conversa"
-              onClick={exportarConversa}
+              id="chatNovaConversa"
+              className="chat-nova"
+              title="apagar esta conversa e recomeçar do zero"
+              aria-label="nova conversa"
+              onClick={() => void limpar()}
             >
-              <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true">
-                <path d="M12 4v10" />
-                <path d="m8 11 4 4 4-4" />
-                <path d="M4 19h16" />
-              </svg>
+              ＋<span className="chat-nova-rotulo">nova conversa</span>
             </button>
             <div
               className="chat-composer"
