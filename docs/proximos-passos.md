@@ -42,6 +42,7 @@
 | T029 | Chat como item principal do menu (primeiro da lista) | chat-ui | 🟢 Baixa | ✅ v3.26.1 | [#t029](#t029) |
 | T030 | Rota reflete a tela — app na raiz + `#/tela`, fim do `/painel/` fixo | chat-ui + http | 🟡 Média | ✅ v3.27.0 | [#t030](#t030) |
 | T031 | Acabamentos do chat: parar vermelho, rastro até a conclusão, caixa única da tela | chat-ui | 🟡 Média | ✅ v3.28.0 | [#t031](#t031) |
+| T032 | Toast no canto superior direito, conforme o gabarito do arquiteto | chat-ui | 🟢 Baixa | ✅ v3.28.1 | [#t032](#t032) |
 
 ---
 
@@ -436,6 +437,22 @@
 | **Arquivos afetados** | frontend/src/index.css, frontend/src/components/Chat.tsx, frontend/src/components/TelaGerada.tsx (CodigoAoVivo.tsx removido) |
 | **Dependências** | T028/T030 (mesma rodada de ajustes de entrada do chat). |
 | **Riscos** | Cosmético; o estado "código incompleto" (turno abortado) mostra a caixa em modo código, sem ações de download. |
+
+---
+
+<a id="t032"></a>
+### T032 — Toast no canto superior direito, conforme o gabarito do arquiteto
+| Campo | Conteúdo |
+|---|---|
+| **Módulo** | chat-ui (transversal: todas as telas usam o mesmo `ToastProvider`) |
+| **Prioridade** | 🟢 Baixa — incômodo do dono com o aviso caindo sobre a conversa |
+| **Status** | ✅ v3.28.1 (build verde; posição/z-index medidos no browser) |
+| **Spec/Plano** | `arquiteto-sistema/references/notificacoes.md`: toast no canto superior direito (`fixed top-4 right-4`), acima de modais (`z-[100]`), auto-hide ~5s, sucesso verde + ícone, erro vermelho + ícone, X fecha, empilhamento vertical. |
+| **Descrição** | O minirag divergia do gabarito: `.toast-pilha` ficava em `bottom:160px`, centralizado (`left-1/2 -translate-x-1/2`), `z-[60]`, 3,5s — o aviso caía em cima da conversa e do campo de digitação. |
+| **Escopo** | Feito: `.toast-pilha` passou a `fixed right-4 top-[1rem+safe-area]`, `z-[100]`, itens alinhados à direita, largura máx. 420px; auto-hide padrão 5s (`Toast.tsx`). Cores, ícones, X e empilhamento (máx. 3) mantidos. |
+| **Arquivos afetados** | frontend/src/index.css, frontend/src/components/Toast.tsx |
+| **Dependências** | T025 (variantes de toast) e T026/T027 (popover de ajustes, que ocupa o topo direito quando aberto — toast fica acima por ser z-100). |
+| **Riscos** | Em tela pequena o toast cobre o topo da conversa por 5s; é o preço do padrão (não bloqueia clique). |
 
 ## Lotes recomendados (executados — saíram na v3.18)
 
