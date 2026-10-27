@@ -997,11 +997,14 @@
     flex: none;
   }
   .chat-ajustes-boto {
+    /* v3.25.1 (T026): o gear "desmoronava" (borda fraca + fill sup2 ≈ fundo da
+       página) e parecia transparente. Agora fill claramente sólido + borda forte,
+       o mesmo peso visual dos botões do app. */
     @apply grid h-[48px] w-[48px] cursor-pointer place-items-center rounded-xl border
-      border-borda bg-sup2 text-txt hover:border-bordaforte hover:bg-sup3;
+      border-bordaforte bg-[#2a3344] text-txt hover:border-[#43506a] hover:bg-[#333d51];
   }
   .chat-ajustes-boto[aria-expanded="true"] {
-    @apply border-bordaforte bg-sup3 text-txt;
+    @apply border-azul/60 bg-[#2a3344] text-txt;
   }
   .chat-ajustes-pop {
     position: absolute;
