@@ -22,6 +22,11 @@ parecidos com a pergunta, com uma nota de 0 a 1.
 
 ---
 ---
+## v3.22.0 (26/10) — O chat ficou mais enxuto: exemplos prontos, ajustes num menu e ações no hover/toque
+- **O que você vê:** a conversa vazia agora abre com boas-vindas + 4 exemplos prontos (um clique preenche a pergunta e foca o campo); o rodapé ficou só com engrenagem + campo + microfone + enviar; provider, modelo, exportar e nova conversa moram no menu "⚙ ajustes da conversa" (abre no toque, fecha fora dele ou no Esc); as ações da mensagem (copiar/regenerar/editar) ficam invisíveis e aparecem no hover (mouse) ou no toque (celular).
+- **Por que:** maquete de UX aprovada em 26/10 (`sketches/chat-ux`) — a tela tinha 4 controles no rodapé competindo com o campo e as ações da mensagem sempre visíveis; o pedido era piso enxuto e ações sob demanda.
+- **Como é provado:** typecheck + build limpos; suíte e2e completa 24/24; hover e toque validados ao vivo no browser (regra CSS ativa + toggle `data-acao` no clique).
+
 ## v3.21.2 (26/10) — O tipo de conexão ficou só com duas opções: OpenAI compatível e Ollama
 - **O que você vê:** no cadastro/edição de provider, o menu "tipo" agora tem só duas opções — **OpenAI compatível (llama.cpp, LiteLLM, vLLM...)** e **Ollama local**. A opção "LiteLLM" saiu: era a mesma conexão que "OpenAI", só com nome que confundia. A tabela de providers também passa a mostrar "openai" no lugar de "litellm" nas linhas já cadastradas.
 - **Por que:** o dono viu o menu e achou estranho/redundante — "LiteLLM" não descrevia a conexão (qualquer API no padrão OpenAI funciona ali), e o dono mandou manter só Ollama + OpenAI compatível (decisão de 26/10).
