@@ -2,6 +2,7 @@ import { useCallback, useEffect, useRef, useState } from "react";
 import { ApiErro, del, get, getStream, post, postStream, qs } from "../services/api";
 import { useToast } from "./Toast";
 import { mdParaHtml } from "../lib/md";
+import { TelaGerada } from "./TelaGerada";
 import {
   apararAteSid,
   assinar,
@@ -20,13 +21,14 @@ import {
   type Estado,
   type EventoTransporte,
   type FerramentaLinha,
+  type Linha,
   type SegmentoRastro,
   type Transportar,
 } from "../lib/conversa";
 import type { ChatHistorico, Compactacao, ProviderResp, Provedor } from "../types";
 
 /** linha de status da tarefa viva (GET /chat/tarefas e GET /chat/tarefa/:id) */
-type TarefaStatus = { id: string; pergunta?: string; status: string; parcial: string; ferramentas?: unknown[]; aviso?: string | null };
+type TarefaStatus = { id: string; pergunta?: string; status: string; parcial: string; ferramentas?: unknown[]; telas?: unknown[]; aviso?: string | null };
 
 /** v3.3: lê o stream de uma tarefa no servidor, RELIGANDO em queda de rede (até 3×, backoff).
  *  Queda de conexão ≠ falha: a tarefa vive no servidor; se o stream quebrar, consulta o
@@ -53,7 +55,7 @@ async function bombearTarefa(
         /* servidor inacessível também: tratar como rodando e tentar de novo */
       }
       if (t && t.status !== "rodando") {
-        if (t.status === "terminou") return { resposta: t.parcial, ferramentas: t.ferramentas ?? [], aviso: t.aviso ?? null };
+        if (t.status === "terminou") return { resposta: t.parcial, ferramentas: t.ferramentas ?? [], telas: t.telas ?? [], aviso: t.aviso ?? null };
         throw new ApiErro(0, t.aviso || "a tarefa falhou");
       }
       if (tentativa >= 3) throw new ApiErro(0, "sem conexão com o servidor");
@@ -373,7 +375,7 @@ export function Chat({
   const carregarHistorico = useCallback(async () => {
     try {
       const h = await get<ChatHistorico>("/chat?" + qs({ memoria, ...(tenantParam ? { tenant: tenantParam } : {}) }));
-      const linhas: { id: string; papel: "user" | "assistant"; texto: string; ferramentas: (typeof h.mensagens)[number]["ferramentas"]; fala?: boolean; raciocinio?: string; rastro?: SegmentoRastro[]; sid?: number; when?: string; fontes?: string[]; custo?: Record<string, unknown> | null }[] = [];
+      const linhas: Linha[] = [];
       for (const m of h.mensagens) {
         const trilha = (m.rastro ?? []) as SegmentoRastro[];
         /* v.8: as falas de caminho voltam como balões próprios na ordem em que foram escritas —
@@ -394,6 +396,8 @@ export function Chat({
           ...(m.custo ? { custo: m.custo as Record<string, unknown> } : {}),
           ...(m.provedor ? { provedor: String(m.provedor) } : {}),
           ...(m.modelo ? { modelo: String(m.modelo) } : {}),
+          /* v3.23: o card da tela gerada volta ao reabrir a conversa */
+          ...(Array.isArray(m.telas) && m.telas.length ? { telas: m.telas } : {}),
         });
       }
       semear(chave, linhas);
@@ -983,6 +987,8 @@ export function Chat({
                   ))}
                 </details>
               )}
+              {/* v3.23: telas geradas neste turno — o card com preview funcional */}
+              {m.telas && m.telas.length > 0 && m.telas.map((t) => <TelaGerada key={t.id} tela={t} />)}
               {/* v3.18 (T004): de onde a resposta veio — os documentos que a busca tocou.
                  Chip só com fonte real; resposta sem ferramentas não inventa procedência. */}
               {m.papel === "assistant" && m.fontes && m.fontes.length > 0 && (

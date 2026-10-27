@@ -234,6 +234,9 @@ export type RastroServidor =
   | { tipo: "narracao"; texto: string }
   | { tipo: "ferramenta"; servidor: string; nome: string; ok: boolean; ms: number };
 
+/** v3.23 — tela gerada pelo agente: card com preview funcional (HTML+CSS+JS). */
+export type Tela = { id: string; titulo: string; html: string };
+
 /** O que o Chat chamou de ferramenta (registrado na tela e no histórico). */
 export type ChamadaFerramenta = {
   servidor: string;
@@ -255,6 +258,8 @@ export type ChatResp = {
   servidores: { interno: boolean; externos: number };
   tem_system_prompt: boolean;
   compactacao?: Compactacao | null;
+  /** v3.23: telas geradas neste turno (cards com preview) */
+  telas?: Tela[];
   ms: number;
   aviso: string | null;
 };
@@ -292,6 +297,8 @@ export type ChatHistorico = {
     /** v3.19: quem respondeu (nome do provedor; ausente = padrão da casa) */
     provedor?: string;
     modelo?: string;
+    /** v3.23: telas geradas (o card volta ao reabrir a conversa) */
+    telas?: Tela[];
   }[];
 };
 

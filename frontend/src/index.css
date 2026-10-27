@@ -636,6 +636,35 @@
   .chat-hora {
     @apply text-[11px] text-txt3;
   }
+  /* v3.23 — tela gerada pelo agente: card com preview funcional (iframe isolado) */
+  .tela-card {
+    @apply mt-2 overflow-hidden rounded-campo border border-bordaforte bg-sup;
+  }
+  .tela-topo {
+    @apply flex items-center justify-between gap-2 border-b border-borda bg-sup2 px-2 py-1;
+  }
+  .tela-titulo {
+    @apply truncate text-[12px] text-txt2;
+  }
+  .tela-acoes {
+    @apply flex shrink-0 items-center gap-1;
+  }
+  .tela-quadro {
+    @apply block w-full border-0 bg-white;
+  }
+  .tela-quadro.embutida {
+    height: 380px;
+  }
+  .tela-quadro.cheia {
+    height: 100%;
+    flex: 1 1 auto;
+  }
+  .tela-cheia {
+    @apply fixed inset-0 z-50 flex items-center justify-center bg-black/70 p-4;
+  }
+  .tela-cheia-caixa {
+    @apply flex h-full max-h-[92vh] w-full max-w-[1100px] flex-col overflow-hidden rounded-campo border border-bordaforte bg-sup;
+  }
   .chat-acoes-eu {
     @apply mt-1 flex items-center justify-end gap-1 opacity-70;
   }

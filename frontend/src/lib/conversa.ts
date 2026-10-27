@@ -10,6 +10,10 @@
  *  isso é outro degrau (tarefa no servidor); aqui o objetivo é sobreviver à navegação no painel.
  */
 
+/** v3.23 — tela gerada pelo agente (mesmo formato de `types.ts`; aqui sem import para o
+ *  módulo continuar puro, sem dependência). */
+export type Tela = { id: string; titulo: string; html: string };
+
 export type EventoTransporte =
   | { tipo: "delta"; texto: string }
   /** v3.13: pedaço do raciocínio do modelo (estilo Open WebUI) */
@@ -21,6 +25,8 @@ export type EventoTransporte =
   /** v3.8: fala de caminho da rodada — mostra e FICA (pedido do dono) */
   | { tipo: "fala"; texto: string }
   | { tipo: "ferramenta"; servidor: string; nome: string; ok: boolean; ms: number }
+  /** v3.23: tela pronta — o card com preview funcional entra na bolha na hora */
+  | { tipo: "tela"; tela: Tela }
   | { tipo: "fim"; dados: Record<string, unknown> }
   | { tipo: "erro"; detalhe: string };
 
@@ -76,6 +82,8 @@ export type Linha = {
   /** v3.19: qual provedor nomeado respondeu (ausente = padrão da casa) */
   provedor?: string;
   modelo?: string;
+  /** v3.23: telas geradas neste turno (cards com preview funcional) */
+  telas?: Tela[];
 };
 
 export type Estado = {
@@ -331,6 +339,9 @@ export async function reativar(
         fecharPensamento(bolha);
         acrescentar(bolha, { tipo: "ferramenta", servidor: String(e.servidor), nome: String(e.nome), ok: Boolean(e.ok), ms: Number(e.ms) });
         bolha.ferramentas.push({ servidor: String(e.servidor), nome: String(e.nome), ok: Boolean(e.ok), ms: Number(e.ms), args: {}, resumo: "" });
+      } else if (e.tipo === "tela") {
+        /* v3.23: a tela chega pronta — o card entra na bolha sem esperar o fim */
+        (bolha.telas ??= []).push(e.tela);
       } else if (e.tipo === "fim") {
         caixa.dados = e.dados;
       } else if (e.tipo === "erro") {
@@ -361,6 +372,8 @@ export async function reativar(
       /* v3.18: fontes (T004) e custo (T018) chegam no `fim` — a tela mostra e o histórico confirma */
       if (Array.isArray(r.fontes)) bolha.fontes = (r.fontes as string[]).map(String);
       if (r.custo && typeof r.custo === "object") bolha.custo = r.custo as Record<string, unknown>;
+      /* v3.23: no reanexar sem stream as telas vêm no `fim` (nunca some o card) */
+      if (Array.isArray(r.telas) && r.telas.length) bolha.telas = r.telas as Tela[];
       /* v3.19: quem respondeu */
       if (r.provedor) bolha.provedor = String(r.provedor);
       if (r.modelo) bolha.modelo = String(r.modelo);
@@ -444,6 +457,9 @@ async function bombeia(chave: string, memoria: string, tenant: string | undefine
         fecharPensamento(bolha);
         acrescentar(bolha, { tipo: "ferramenta", servidor: String(e.servidor), nome: String(e.nome), ok: Boolean(e.ok), ms: Number(e.ms) });
         bolha.ferramentas.push({ servidor: String(e.servidor), nome: String(e.nome), ok: Boolean(e.ok), ms: Number(e.ms), args: {}, resumo: "" });
+      } else if (e.tipo === "tela") {
+        /* v3.23: a tela chega pronta — o card entra na bolha sem esperar o fim */
+        (bolha.telas ??= []).push(e.tela);
       } else if (e.tipo === "fim") {
         caixa.dados = e.dados;
       } else if (e.tipo === "erro") {
@@ -474,6 +490,8 @@ async function bombeia(chave: string, memoria: string, tenant: string | undefine
       /* v3.18: fontes (T004) e custo (T018) chegam no `fim` — a tela mostra e o histórico confirma */
       if (Array.isArray(r.fontes)) bolha.fontes = (r.fontes as string[]).map(String);
       if (r.custo && typeof r.custo === "object") bolha.custo = r.custo as Record<string, unknown>;
+      /* v3.23: no reanexar sem stream as telas vêm no `fim` (nunca some o card) */
+      if (Array.isArray(r.telas) && r.telas.length) bolha.telas = r.telas as Tela[];
       /* v3.19: quem respondeu */
       if (r.provedor) bolha.provedor = String(r.provedor);
       if (r.modelo) bolha.modelo = String(r.modelo);
