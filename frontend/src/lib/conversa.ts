@@ -27,6 +27,8 @@ export type EventoTransporte =
   | { tipo: "ferramenta"; servidor: string; nome: string; ok: boolean; ms: number }
   /** v3.23: tela pronta — o card com preview funcional entra na bolha na hora */
   | { tipo: "tela"; tela: Tela }
+  /** v3.24: código da tela chegando em pedaços (o dono vê o HTML sendo digitado) */
+  | { tipo: "codigo"; texto: string }
   | { tipo: "fim"; dados: Record<string, unknown> }
   | { tipo: "erro"; detalhe: string };
 
@@ -84,6 +86,8 @@ export type Linha = {
   modelo?: string;
   /** v3.23: telas geradas neste turno (cards com preview funcional) */
   telas?: Tela[];
+  /** v3.24: o código da tela enquanto o modelo escreve (o HTML nasce à vista) */
+  codigo?: string;
 };
 
 export type Estado = {
@@ -342,6 +346,9 @@ export async function reativar(
       } else if (e.tipo === "tela") {
         /* v3.23: a tela chega pronta — o card entra na bolha sem esperar o fim */
         (bolha.telas ??= []).push(e.tela);
+      } else if (e.tipo === "codigo") {
+        /* v3.24: o código da tela nasce letra por letra (pedido do dono) */
+        bolha.codigo = (bolha.codigo ?? "") + String(e.texto ?? "");
       } else if (e.tipo === "fim") {
         caixa.dados = e.dados;
       } else if (e.tipo === "erro") {
@@ -460,6 +467,9 @@ async function bombeia(chave: string, memoria: string, tenant: string | undefine
       } else if (e.tipo === "tela") {
         /* v3.23: a tela chega pronta — o card entra na bolha sem esperar o fim */
         (bolha.telas ??= []).push(e.tela);
+      } else if (e.tipo === "codigo") {
+        /* v3.24: o código da tela nasce letra por letra (pedido do dono) */
+        bolha.codigo = (bolha.codigo ?? "") + String(e.texto ?? "");
       } else if (e.tipo === "fim") {
         caixa.dados = e.dados;
       } else if (e.tipo === "erro") {

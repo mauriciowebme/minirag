@@ -646,6 +646,46 @@
     @apply text-[11px] text-txt3;
   }
   /* v3.23 — tela gerada pelo agente: card com preview funcional (iframe isolado) */
+  /* v3.24 — o código da tela sendo digitado (pedido do dono: "quero ver o streaming
+     digitando o código"). Fica dentro da bolha, discreto, e recolhe quando a tela fica
+     pronta — aí o card do preview assume o lugar. */
+  .codigo-vivo {
+    @apply mt-2 overflow-hidden rounded-campo border border-borda bg-sup;
+  }
+  .codigo-vivo.vivo {
+    @apply border-bordaforte;
+  }
+  .codigo-topo {
+    @apply flex w-full cursor-pointer items-center gap-2 border-b border-borda bg-sup2 px-2.5 py-1.5 text-left text-[12px] text-txt2;
+  }
+  .codigo-ponto {
+    @apply h-1.5 w-1.5 shrink-0 rounded-full bg-txt3;
+  }
+  .codigo-vivo.vivo .codigo-ponto {
+    background: var(--verde);
+    animation: piscar 1s steps(1) infinite;
+  }
+  .codigo-rotulo {
+    @apply shrink-0 text-txt2;
+  }
+  .codigo-conta {
+    @apply ml-auto shrink-0 text-[11.5px] text-txt3;
+  }
+  .codigo-seta {
+    @apply shrink-0 text-txt3;
+  }
+  .codigo-area {
+    @apply m-0 overflow-auto whitespace-pre px-3 py-2 font-mono text-[11.5px] leading-[1.45] text-txt2;
+    max-height: 260px;
+    tab-size: 2;
+  }
+  .codigo-cursor {
+    @apply ml-[1px] inline-block align-middle;
+    width: 6px;
+    height: 12px;
+    background: var(--verde);
+    animation: piscar 1s steps(1) infinite;
+  }
   .tela-card {
     @apply mt-2 overflow-hidden rounded-campo border border-bordaforte bg-sup;
   }

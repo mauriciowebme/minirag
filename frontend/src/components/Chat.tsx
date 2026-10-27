@@ -2,6 +2,7 @@ import { useCallback, useEffect, useRef, useState } from "react";
 import { ApiErro, del, get, getStream, post, postStream, qs } from "../services/api";
 import { useToast } from "./Toast";
 import { mdParaHtml } from "../lib/md";
+import { CodigoAoVivo } from "./CodigoAoVivo";
 import { TelaGerada } from "./TelaGerada";
 import {
   apararAteSid,
@@ -987,6 +988,8 @@ export function Chat({
                   ))}
                 </details>
               )}
+              {/* v3.24: o código da tela enquanto ele é escrito (pedido do dono) */}
+              {m.codigo && <CodigoAoVivo texto={m.codigo} digitando={Boolean(m.escrevendo)} />}
               {/* v3.23: telas geradas neste turno — o card com preview funcional */}
               {m.telas && m.telas.length > 0 && m.telas.map((t) => <TelaGerada key={t.id} tela={t} />)}
               {/* v3.18 (T004): de onde a resposta veio — os documentos que a busca tocou.
