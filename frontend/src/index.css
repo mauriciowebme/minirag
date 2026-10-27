@@ -719,6 +719,10 @@
     background: var(--verde);
     animation: piscar 1s steps(1) infinite;
   }
+  /* v3.31.2: respiro entre a tela e a conclusão (o card encostava no texto) */
+  .tela-area {
+    @apply mb-3;
+  }
   .tela-card {
     @apply relative mt-2 overflow-hidden rounded-campo border border-bordaforte bg-sup;
   }
