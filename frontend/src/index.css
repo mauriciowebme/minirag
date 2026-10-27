@@ -720,7 +720,12 @@
     animation: piscar 1s steps(1) infinite;
   }
   .tela-card {
-    @apply mt-2 overflow-hidden rounded-campo border border-bordaforte bg-sup;
+    @apply relative mt-2 overflow-hidden rounded-campo border border-bordaforte bg-sup;
+  }
+  /* v3.30: "↓ fim" da caixa do código — mesmo gesto do botão do chat */
+  .tela-fim {
+    @apply absolute bottom-2 right-3 z-10 cursor-pointer rounded-full border border-bordaforte
+      bg-sup3 px-2.5 py-1 text-[11.5px] text-txt2 shadow-md hover:text-txt;
   }
   .tela-topo {
     @apply flex items-center justify-between gap-2 border-b border-borda bg-sup2 px-2 py-1;

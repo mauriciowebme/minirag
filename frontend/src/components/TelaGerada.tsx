@@ -31,6 +31,9 @@ export function TelaGerada({
 }) {
   const [cheia, setCheia] = useState(false);
   const [verCodigo, setVerCodigo] = useState(false);
+  /** v3.30 — acompanha a escrita SÓ se o usuário está no fim; se ele sobe, para e
+   *  aparece o "↓ fim" (mesmo padrão do chat: colado/irParaOFim). */
+  const [colado, setColado] = useState(true);
   const area = useRef<HTMLPreElement | null>(null);
 
   const pronto = tela !== null;
@@ -48,15 +51,30 @@ export function TelaGerada({
     return () => window.removeEventListener("keydown", esc);
   }, [cheia]);
 
-  /* acompanha a última linha escrita: o olho tem de estar onde a caneta está */
+  /* acompanha a última linha escrita: o olho tem de estar onde a caneta está —
+     MAS só se você estiver no fim. Subiu para reler, a caixa para de puxar. */
+  const medir = () => {
+    const el = area.current;
+    if (!el) return;
+    setColado(el.scrollHeight - el.scrollTop - el.clientHeight < 24);
+  };
+  const irAoFim = () => {
+    const el = area.current;
+    if (el) el.scrollTop = el.scrollHeight;
+    setColado(true);
+  };
   useEffect(() => {
     const el = area.current;
-    if (el && (escrevendo || verCodigo)) el.scrollTop = el.scrollHeight;
-  }, [html, escrevendo, verCodigo]);
+    if (!el) return;
+    if (colado) el.scrollTop = el.scrollHeight;
+  }, [html, escrevendo, verCodigo, colado]);
 
   /* quando fica pronto, volta para o renderizado (o código fica a um clique) */
   useEffect(() => {
-    if (pronto) setVerCodigo(false);
+    if (pronto) {
+      setVerCodigo(false);
+      setColado(true);
+    }
   }, [pronto]);
 
   const baixar = () => {
@@ -80,7 +98,7 @@ export function TelaGerada({
   );
 
   const codigoNaCaixa = (
-    <pre className="tela-codigo" ref={area} tabIndex={0} aria-label="código da tela">
+    <pre className="tela-codigo" ref={area} tabIndex={0} aria-label="código da tela" onScroll={medir}>
       {html}
       {escrevendo && <span className="codigo-cursor" aria-hidden="true" />}
     </pre>
@@ -117,6 +135,17 @@ export function TelaGerada({
         )}
       </div>
       {pronto ? (verCodigo ? codigoNaCaixa : quadro("embutida")) : codigoNaCaixa}
+      {/* v3.30: subiu para reler no meio da escrita → este botão volta para o fim */}
+      {!colado && (
+        <button
+          className="tela-fim"
+          title="rolar até o fim do código"
+          aria-label="ir até o fim do código"
+          onClick={irAoFim}
+        >
+          ↓ fim
+        </button>
+      )}
       {cheia && tela && (
         <div className="tela-cheia" role="dialog" aria-modal="true" onClick={() => setCheia(false)}>
           <div className="tela-cheia-caixa" onClick={(e) => e.stopPropagation()}>
