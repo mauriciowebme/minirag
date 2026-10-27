@@ -45,6 +45,7 @@
 | T032 | Toast no canto superior direito, conforme o gabarito do arquiteto | chat-ui | 🟢 Baixa | ✅ v3.28.1 | [#t032](#t032) |
 | T033 | Ordem do turno: tela gerada aparece ANTES da conclusão | chat-ui | 🟡 Média | ✅ v3.29.0 | [#t033](#t033) |
 | T034 | Rolagem da caixa da tela: acompanha a escrita só se o usuário está no fim | chat-ui | 🟢 Baixa | ✅ v3.30.0 | [#t034](#t034) |
+| T035 | Rolagem do CHAT durante a escrita da tela (a conversa acompanha a caixa) | chat-ui | 🟡 Média | ✅ v3.30.1 | [#t035](#t035) |
 
 ---
 
@@ -487,6 +488,22 @@
 | **Arquivos afetados** | frontend/src/components/TelaGerada.tsx, frontend/src/index.css |
 | **Dependências** | T031 (caixa única da tela). |
 | **Riscos** | Nenhum de dados; só apresentação. |
+
+---
+
+<a id="t035"></a>
+### T035 — Rolagem do CHAT durante a escrita da tela
+| Campo | Conteúdo |
+|---|---|
+| **Módulo** | chat-ui |
+| **Prioridade** | 🟡 Média — a caixa crescia para fora da tela e a conversa ficava parada |
+| **Status** | ✅ v3.30.1 (build verde; medido no browser com escrita contínua) |
+| **Spec/Plano** | Dono (27/10): "quando vai digitando deveria ir rolando, a não ser que o usuário scrolle para cima, o que cria o botão de ir até embaixo". |
+| **Descrição** | A chave que dispara o auto-scroll do chat (`rastro`) somava só `msgs.length`, `texto.length` e `raciocinio.length`. O evento `codigo` (HTML nascendo) não entrava — a caixa crescia e a conversa NÃO descia; a escrita saía por baixo da tela. O T034 resolveu a rolagem INTERNA da caixa; faltava esta, a da conversa. |
+| **Escopo** | `rastro` passou a incluir `codigo.length` e `telas.length` da última mensagem. Com isso `irParaOFim()` roda a cada pedaço de HTML e, se o usuário subir, `colado=false` → para de puxar e o botão "↓ fim" do chat aparece (comportamento que já existia). |
+| **Arquivos afetados** | frontend/src/components/Chat.tsx |
+| **Dependências** | T031/T034 (caixa da tela e rolagem interna). |
+| **Riscos** | Nenhum de dados; se o usuário estiver lendo mais acima, nada é puxado. |
 
 ## Lotes recomendados (executados — saíram na v3.18)
 
