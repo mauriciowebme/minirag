@@ -39,6 +39,7 @@
 | T026 | Botão ⚙ "transparente" — fill sólido + borda forte | chat-ui | 🟢 Baixa | ✅ v3.25.1 | [#t026](#t026) |
 | T027 | Popover de ajustes "transparente" — tokens `:root` ausentes | chat-ui | 🟢 Baixa | ✅ v3.25.2 | [#t027](#t027) |
 | T028 | Tela inicial passa a ser o Chat (não o Painel) | chat-ui | 🟢 Baixa | ✅ v3.26.0 | [#t028](#t028) |
+| T029 | Chat como item principal do menu (primeiro da lista) | chat-ui | 🟢 Baixa | ✅ v3.26.1 | [#t029](#t029) |
 
 ---
 
@@ -383,6 +384,22 @@
 | **Arquivos afetados** | frontend/src/App.tsx (estado inicial + efeito pós-login) |
 | **Dependências** | Nenhuma. |
 | **Riscos** | Cosmético/comportamental; operador pode estranhar perder o Painel como home, mas o menu resolve em 1 clique. |
+
+---
+
+<a id="t029"></a>
+### T029 — Chat como item principal do menu (primeiro da lista)
+| Campo | Conteúdo |
+|---|---|
+| **Módulo** | chat-ui |
+| **Prioridade** | 🟢 Baixa — pedido direto do dono (27/10) |
+| **Status** | ✅ v3.26.1 (executado em 27/10; build verde; clique real conferido no browser) |
+| **Spec/Plano** | Pedido do dono junto do T028: "no menu o chat — deixe ele no principal" |
+| **Descrição** | O menu lateral abria com **Painel** em primeiro (herança da v3.2.2, quando o Painel era a home). Com o Chat virando a porta de entrada (T028), o item principal do menu tinha de ser o Chat. |
+| **Escopo** | Feito (27/10): `MENU` reordenado — `chat` passa a ser o primeiro item (ícone 💬), `painel` logo abaixo. Resto da ordem intacta (Máquinas, Buscar, Fila, Gavetas, Configurações). |
+| **Arquivos afetados** | frontend/src/App.tsx (`MENU`) |
+| **Dependências** | T028 (mesma rodada). |
+| **Riscos** | Nenhum; só ordem visual. |
 
 ---
 
