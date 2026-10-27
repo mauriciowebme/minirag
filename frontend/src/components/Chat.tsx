@@ -524,13 +524,20 @@ export function Chat({
   }
 
   /* o texto chega em pedaços: desce junto se (e somente se) o usuário estiver no fim.
-     NAO depende do cronômetro — era ele que puxava a tela a cada 500 ms. */
+     NAO depende do cronômetro — era ele que puxava a tela a cada 500 ms.
+     v3.30.1: o CÓDIGO da tela e as telas prontas também empurram a conversa. Sem eles na
+     chave, a caixa crescia para fora da tela e a conversa ficava parada. */
+  const ultima = snap.msgs[snap.msgs.length - 1];
   const rastro =
     snap.msgs.length +
     ":" +
-    (snap.msgs[snap.msgs.length - 1]?.texto.length ?? 0) +
+    (ultima?.texto.length ?? 0) +
     ":" +
-    (snap.msgs[snap.msgs.length - 1]?.raciocinio?.length ?? 0);
+    (ultima?.raciocinio?.length ?? 0) +
+    ":" +
+    (ultima?.codigo?.length ?? 0) +
+    ":" +
+    (ultima?.telas?.length ?? 0);
   useEffect(() => {
     if (colado.current) irParaOFim();
     else setNovoAbaixo(true);
