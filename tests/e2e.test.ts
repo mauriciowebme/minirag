@@ -3230,6 +3230,99 @@ await bloco(t, "v3.6: máquinas por usuário — hub WS, pareamento, run, escopo
     f.fechar("v3.23 telas");
   });
 
+  await bloco(t, "v3.24: o código da tela aparece SENDO DIGITADO no chat (streaming do HTML)", async () => {
+    const f = fiscal();
+    const CONTAINER = process.env.CONTAINER ?? "";
+    const GAV = "suite-v324";
+    if (!CONTAINER) {
+      f.check("v3.24 precisa de CONTAINER", false, "sem container: bloco não executável");
+      f.fechar("v3.24 código ao vivo");
+      return;
+    }
+
+    /* o HTML que o "modelo" vai escrever: quebra de linha, aspas, acento e repetição —
+       é o que prova que o pedaço cru do provider vira texto legível na tela */
+    const HTML_ALVO =
+      '<h1>oi</h1>\n<button id="b" onclick="this.textContent=\'ok!\'">ok</button>\n' +
+      "linha com acento: ação ✓\n".repeat(40);
+    const ARGS = JSON.stringify({ titulo: "Tela viva", html: HTML_ALVO });
+
+    /* provedor OpenAI-compatível falso, em SSE: a 1ª rodada chama mostrar_tela mandando os
+       argumentos em 7 pedaços (é assim que o modelo real escreve, pedaço por pedaço) */
+    const PORTF = 30000 + (Math.floor(Date.now() / 1000) % 700);
+    const cod = [
+      "const http=require('http');let n=0;",
+      "const args=" + JSON.stringify(ARGS) + ";",
+      "http.createServer((req,res)=>{let b='';req.on('data',c=>b+=c);req.on('end',()=>{n++;",
+      "res.setHeader('content-type','text/event-stream');",
+      "const envia=(o)=>res.write('data: '+JSON.stringify(o)+'\\n\\n');",
+      "if(n===1){",
+      "envia({choices:[{delta:{tool_calls:[{index:0,id:'c1',type:'function',function:{name:'mostrar_tela',arguments:''}}]}}]});",
+      "const passo=Math.ceil(args.length/7);",
+      "for(let i=0;i<args.length;i+=passo){envia({choices:[{delta:{tool_calls:[{index:0,function:{arguments:args.slice(i,i+passo)}}]}}]});}",
+      "envia({choices:[{delta:{},finish_reason:'tool_calls'}]});",
+      "} else { envia({choices:[{delta:{content:'PRONTO-V324'}}]}); }",
+      "res.write('data: [DONE]\\n\\n');res.end();",
+      "});}).listen(",
+      String(PORTF),
+      ",'127.0.0.1');setTimeout(()=>process.exit(0),120000);",
+    ].join("");
+    execFileSync("docker", ["exec", "-d", CONTAINER, "node", "-e", cod]);
+    await dormir(1200);
+
+    await call("PUT", "/config/provider", {
+      key: OPKEY,
+      corpo: {
+        tipo: "litellm",
+        base_url: `http://127.0.0.1:${PORTF}/v1`,
+        modelo: "modelo-v324",
+        chave: "***",
+        temperatura: 0.2,
+        system_prompt: "",
+        mcp_interno: true,
+        max_rodadas: 3,
+        ativo: true,
+        global: true,
+      },
+    });
+
+    const { eventos } = await fluxo(TESTKEY, { pergunta: "gere uma tela com botão", memoria: GAV });
+    const codigos = eventos.filter((e: any) => e?.tipo === "codigo");
+    const junto = codigos.map((e: any) => String(e.texto ?? "")).join("");
+    const tipos = eventos.map((e: any) => e?.tipo);
+    const idxUltimoCodigo = tipos.lastIndexOf("codigo");
+    const idxTela = tipos.indexOf("tela");
+    const fim = eventos.filter((e: any) => e?.tipo === "fim").pop()?.dados ?? {};
+    const deltas = eventos.filter((e: any) => e?.tipo === "delta").map((e: any) => String(e.texto ?? "")).join("");
+
+    f.check("o código da tela chega em PEDAÇOS (não num bloco só)", codigos.length >= 3, `${codigos.length} eventos codigo`);
+    f.check(
+      "o que foi digitado é EXATAMENTE o HTML escrito pelo modelo (escape resolvido)",
+      junto === HTML_ALVO,
+      `${junto.length} de ${HTML_ALVO.length} caracteres`,
+    );
+    f.check(
+      "o código nasce ANTES do card da tela (ordem do nascimento)",
+      idxUltimoCodigo >= 0 && idxTela > idxUltimoCodigo,
+      `ultimo codigo@${idxUltimoCodigo}, tela@${idxTela}`,
+    );
+    f.check(
+      "a resposta final é a fala do modelo, sem repetir o HTML",
+      String(fim.resposta ?? "") === "PRONTO-V324" && !deltas.includes("<h1>oi</h1>"),
+      JSON.stringify(String(fim.resposta ?? "")).slice(0, 80),
+    );
+    f.check(
+      "a mesma tela chega pronta no fim (card) com o mesmo corpo",
+      Array.isArray(fim.telas) && fim.telas.length === 1 && String(fim.telas[0].html).includes('<button id="b"'),
+      JSON.stringify((fim.telas ?? []).map((x: any) => x.titulo)),
+    );
+
+    await call("PUT", "/config/provider", { key: OPKEY, corpo: { ativo: false, global: true } });
+    await call("DELETE", `/chat?memoria=${GAV}`, { key: TESTKEY });
+    execFileSync("docker", ["exec", CONTAINER, "sh", "-c", `pkill -f ${PORTF} || true`]);
+    f.fechar("v3.24 código ao vivo");
+  });
+
   await bloco(t, "freio de força bruta (último: bloqueia o IP)", async () => {
     const f = fiscal();
     for (let i = 0; i < 10; i++) {
