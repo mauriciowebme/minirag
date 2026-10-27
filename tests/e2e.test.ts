@@ -349,7 +349,7 @@ test("minirag v2 — suíte completa", async (t) => {
     f.fechar("v1.8");
   });
 
-  await bloco(t, "MCP: JSON-RPC stateless com as 46 tools", async () => {
+  await bloco(t, "MCP: JSON-RPC stateless com as 47 tools", async () => {
     const f = fiscal();
     const H = { key: TESTKEY };
     const rpc = (id: unknown, method: string, params?: unknown, key: string | null = TESTKEY) =>
@@ -397,6 +397,8 @@ test("minirag v2 — suíte completa", async (t) => {
       "gerir_mcp",
       "listar_usuarios",
       "maquinas_online",
+      /* v3.23: tela gerada pelo agente */
+      "mostrar_tela",
       "rename_doc",
       "rodar_comando",
       "search",
@@ -407,7 +409,7 @@ test("minirag v2 — suíte completa", async (t) => {
       "janelas", "ler_arquivo", "listar_arquivos", "power", "processos",
       "rede", "rodar_lote", "servicos", "sessao", "escrever_arquivo",
     ].sort();
-    f.check("tools/list tem 46 tools (paridade com a REST)", JSON.stringify(nomes) === JSON.stringify(ESPERADAS.sort()), nomes.length);
+    f.check("tools/list tem 47 tools (paridade com a REST)", JSON.stringify(nomes) === JSON.stringify(ESPERADAS.sort()), nomes.length);
 
     r = await rpc(5, "tools/call", { name: "health" }, null);
     f.check("tools/call sem Bearer -> 401", r.status === 401 && "error" in (r.json ?? {}), r.texto.slice(0, 150));
@@ -3131,6 +3133,101 @@ await bloco(t, "v3.6: máquinas por usuário — hub WS, pareamento, run, escopo
     await call("DELETE", `/chat?memoria=${GAV}`, { key: TESTKEY });
     if (CONTAINER) execFileSync("docker", ["exec", CONTAINER, "sh", "-c", `pkill -f ${PORTA} || true`]);
     f.fechar("v3.19 provedores");
+  });
+
+  await bloco(t, "v3.23: tela gerada pelo agente (mostrar_tela) — card com preview funcional", async () => {
+    const f = fiscal();
+    const CONTAINER = process.env.CONTAINER ?? "";
+    const GAV = "suite-v323";
+    if (!CONTAINER) {
+      f.check("v3.23 precisa de CONTAINER", false, "sem container: bloco não executável");
+      f.fechar("v3.23 telas");
+      return;
+    }
+
+    /* --- superfície MCP: a ferramenta existe e normaliza o que o modelo manda --- */
+    let r = await call("POST", "/mcp", { key: TESTKEY, corpo: { jsonrpc: "2.0", id: 1, method: "tools/list" } });
+    const nomes: string[] = (r.json?.result?.tools ?? []).map((x: any) => x.name);
+    f.check("tools/list anuncia mostrar_tela", nomes.includes("mostrar_tela"), `${nomes.length} tools`);
+
+    const chamarTela = (args: Record<string, unknown>) =>
+      call("POST", "/mcp", {
+        key: TESTKEY,
+        corpo: { jsonrpc: "2.0", id: 8, method: "tools/call", params: { name: "mostrar_tela", arguments: args } },
+      });
+    /* o retorno do MCP embrulha o objeto em content[].text (JSON) */
+    const telaDoMcp = (res: any): any => {
+      try {
+        return JSON.parse(String(res.json?.result?.content?.[0]?.text ?? "{}"));
+      } catch {
+        return {};
+      }
+    };
+
+    r = await chamarTela({
+      titulo: "Botão que conta",
+      html: '<div id="alvo">0</div><button id="b" onclick="document.getElementById(\'alvo\').textContent=Number(document.getElementById(\'alvo\').textContent)+1">somar</button>',
+    });
+    const t1 = telaDoMcp(r);
+    f.check(
+      "fragmento vira PÁGINA completa (doctype, charset, viewport) e o título entra",
+      r.json?.result?.isError !== true && /^<!doctype html>/i.test(String(t1.html)) && /charset="?utf-8/i.test(String(t1.html)) && String(t1.html).includes('id="b"') && t1.titulo === "Botão que conta",
+      JSON.stringify({ titulo: t1.titulo, ini: String(t1.html ?? "").slice(0, 60) }).slice(0, 220),
+    );
+    f.check("a tela ganha id próprio (o card precisa de chave estável)", typeof t1.id === "string" && t1.id.length >= 8, String(t1.id));
+
+    r = await chamarTela({ titulo: "Completa", html: '<!doctype html><html lang="pt-BR"><body><h1>pronta</h1></body></html>' });
+    const t2 = telaDoMcp(r);
+    const doctypes = (String(t2.html).match(/<!doctype html>/gi) ?? []).length;
+    f.check(
+      "página completa não é duplicada; só ganha charset/viewport que faltavam",
+      doctypes === 1 && /<meta[^>]+charset/i.test(String(t2.html)) && String(t2.html).includes("<h1>pronta</h1>"),
+      String(t2.html).slice(0, 90),
+    );
+
+    r = await chamarTela({ titulo: "Vazia", html: "   " });
+    f.check("html vazio é recusado (não abre card em branco)", r.json?.result?.isError === true, JSON.stringify(r.json?.result ?? {}).slice(0, 160));
+    r = await chamarTela({ titulo: "Texto", html: "apenas uma frase solta" });
+    f.check("texto sem marcação é recusado", r.json?.result?.isError === true, JSON.stringify(r.json?.result ?? {}).slice(0, 160));
+
+    /* --- o chat: 4 telas no mesmo turno => 3 cards + aviso honesto do teto --- */
+    const PORTF = 20000 + (Math.floor(Date.now() / 1000) % 700);
+    const cod = [
+      "const http=require('http');let n=0;",
+      "http.createServer((req,res)=>{let b='';req.on('data',c=>b+=c);req.on('end',()=>{n++;",
+      "res.setHeader('content-type','application/json');",
+      "let out;",
+      "if(n===1){const calls=[1,2,3,4].map(i=>({id:'c'+i,type:'function',function:{name:'mostrar_tela',arguments:JSON.stringify({titulo:'Tela '+i,html:'<h2>tela '+i+'</h2><button id=\"b'+i+'\">ok</button>'})}}));",
+      "out={choices:[{message:{role:'assistant',content:'',tool_calls:calls}}]};}",
+      "else out={choices:[{message:{role:'assistant',content:'PRONTO-V323'}}]};",
+      "res.end(JSON.stringify(out));",
+      "});}).listen(",
+      String(PORTF),
+      ",'127.0.0.1');setTimeout(()=>process.exit(0),120000);",
+    ].join("");
+    execFileSync("docker", ["exec", "-d", CONTAINER, "node", "-e", cod]);
+    await dormir(1200);
+
+    await call("PUT", "/config/provider", {
+      key: OPKEY,
+      corpo: { tipo: "litellm", base_url: `http://127.0.0.1:${PORTF}/v1`, modelo: "modelo-v323", chave: "***", temperatura: 0.2, system_prompt: "", mcp_interno: true, max_rodadas: 4, ativo: true, global: true },
+    });
+    r = await call("POST", "/chat", { key: TESTKEY, corpo: { pergunta: "gere quatro telas", memoria: GAV } });
+    f.check("o chat fechou a resposta depois das telas", r.status === 200 && String(r.json?.resposta) === "PRONTO-V323", r.texto.slice(0, 200));
+    const telas: any[] = r.json?.telas ?? [];
+    f.check("teto do turno: 3 telas exibidas das 4 geradas", telas.length === 3, `${telas.length} telas`);
+    f.check("quem ficou de fora é DITO (aviso), não engolido", String(r.json?.aviso ?? "").includes("3"), String(r.json?.aviso ?? "sem aviso").slice(0, 140));
+    f.check("cada tela chega com id, título e HTML de página inteira", telas.every((x) => x.id && x.titulo && /^<!doctype html>/i.test(String(x.html))), JSON.stringify(telas.map((x) => x.titulo)));
+    f.check("as telas exibidas são as três primeiras, na ordem", telas.map((x) => x.titulo).join(",") === "Tela 1,Tela 2,Tela 3", telas.map((x) => x.titulo).join(","));
+
+    r = await call("GET", `/chat?memoria=${GAV}`, { key: TESTKEY });
+    const ult = (r.json?.mensagens ?? []).filter((m: any) => m.papel === "assistant").pop() ?? {};
+    f.check("reabrir a conversa devolve as telas gravadas (o card volta)", Array.isArray(ult.telas) && ult.telas.length === 3 && ult.telas[0].id === telas[0].id, JSON.stringify(ult.telas ?? null).slice(0, 200));
+
+    await call("PUT", "/config/provider", { key: OPKEY, corpo: { ativo: false, global: true } });
+    await call("DELETE", `/chat?memoria=${GAV}`, { key: TESTKEY });
+    execFileSync("docker", ["exec", CONTAINER, "sh", "-c", `pkill -f ${PORTF} || true`]);
+    f.fechar("v3.23 telas");
   });
 
   await bloco(t, "freio de força bruta (último: bloqueia o IP)", async () => {
