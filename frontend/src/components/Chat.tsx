@@ -80,6 +80,15 @@ function textoCompacto(c?: Compactacao | null): string | undefined {
 
 const RASTRO_CHAVE = "minirag:rastro-expandido";
 
+/* v3.22 (preview aprovado): exemplos do estado vazio — textos literais da maquete aprovada.
+   O clique preenche o campo com o `t`; o `sub` é só a legenda do chip. */
+const EXEMPLOS_VAZIO = [
+  { t: "o que anotei sobre o minirag essa semana?", sub: "busca na memória" },
+  { t: "as decisões que tomamos sobre provider", sub: "resumo de decisões" },
+  { t: "resuma a conversa de ontem com o cliente", sub: "resumo de conversa" },
+  { t: "quais pendências ficaram abertas?", sub: "check de pendências" },
+] as const;
+
 /* As ferramentas internas do minirag têm nome em inglês no MCP; a linha do rastro fala como a
    tela (o jeito do IA_GO, que tem mapa de rótulos). Ferramenta de servidor externo mantém o
    nome que o servidor deu — inventar rótulo alheio seria mentira. */
@@ -280,6 +289,27 @@ export function Chat({
   /* ---------------- v3.18: edição de pergunta, ditado por voz, rascunho por gaveta ---------------- */
   const [editando, setEditando] = useState<number | null>(null); // sid da pergunta que está sendo editada
   const [ditando, setDitando] = useState(false);
+  /* v3.22 (preview aprovado): popover "⚙ ajustes da conversa" — provider, modelo, exportar
+     e nova conversa moram aqui; no piso ficam só engrenagem + campo + mic + enviar. */
+  const [ajustesAberto, setAjustesAberto] = useState(false);
+  const ajustesRef = useRef<HTMLDivElement | null>(null);
+  useEffect(() => {
+    if (!ajustesAberto) return;
+    const fora = (e: MouseEvent | TouchEvent) => {
+      if (ajustesRef.current && !ajustesRef.current.contains(e.target as Node)) setAjustesAberto(false);
+    };
+    const tecla = (e: KeyboardEvent) => {
+      if (e.key === "Escape") setAjustesAberto(false);
+    };
+    document.addEventListener("mousedown", fora);
+    document.addEventListener("touchstart", fora);
+    document.addEventListener("keydown", tecla);
+    return () => {
+      document.removeEventListener("mousedown", fora);
+      document.removeEventListener("touchstart", fora);
+      document.removeEventListener("keydown", tecla);
+    };
+  }, [ajustesAberto]);
   const recRef = useRef<{ stop(): void } | null>(null);
   /* T014: trocar de gaveta não mata o texto que você começou a digitar na outra */
   const rascunhos = useRef(new Map<string, string>());
@@ -804,14 +834,53 @@ export function Chat({
         <div className="chat-msgs min-h-0 flex-1 overflow-auto" id="chatMsgs" ref={area} onScroll={medirRolagem}>
           <div className="chat-coluna">
           {msgs.length === 0 && !rodando && (
-            <p className="dica">
-              {semFerramenta
-                ? "nenhuma ferramenta ligada — o modelo responde só com o que sabe (ligue MCP em Configurações → Ferramentas)"
-                : "pergunte o que quiser; o que ele chamar de ferramenta aparece registrado embaixo da resposta"}
-            </p>
+            semFerramenta ? (
+              <p className="dica">
+                "nenhuma ferramenta ligada — o modelo responde só com o que sabe (ligue MCP em Configurações → Ferramentas)"
+              </p>
+            ) : (
+              /* v3.22 (preview aprovado): estado vazio — boas-vindas + 4 exemplos clicáveis.
+                 O clique cai o texto no campo e foca. Textos literais da maquete aprovada. */
+              <div className="chat-vazio" id="chatVazio">
+                <p className="chat-vazio-titulo">"Boa. Sua memória está aqui."</p>
+                <p className="chat-vazio-sub">"Pergunte com suas palavras, ou comece por uma destas:"</p>
+                <div className="chat-chips">
+                  {EXEMPLOS_VAZIO.map((ex) => (
+                    <button
+                      key={ex.t}
+                      className="chat-chip"
+                      onClick={() => {
+                        setPergunta(ex.t);
+                        requestAnimationFrame(() => {
+                          campoRef.current?.focus();
+                          ajustarAltura(campoRef.current as HTMLTextAreaElement);
+                        });
+                      }}
+                    >
+                      <span className="chat-chip-corpo">
+                        <span className="chat-chip-tit">{ex.t}</span>
+                        <span className="chat-chip-sub">{ex.sub}</span>
+                      </span>
+                      <span className="chat-chip-seta" aria-hidden="true">"▸"</span>
+                    </button>
+                  ))}
+                </div>
+              </div>
+            )
           )}
           {msgs.map((m, i) => (
-            <div key={m.id ?? i} className={"msg " + (m.papel === "user" ? "msg-eu" : "msg-ia") + (m.falha ? " msg-falha" : "")}>
+            <div
+              key={m.id ?? i}
+              className={"msg " + (m.papel === "user" ? "msg-eu" : "msg-ia") + (m.falha ? " msg-falha" : "")}
+              onClick={(e) => {
+                /* v3.22 (preview aprovado): as ações (copiar/regenerar/editar) ficam invisíveis
+                   e aparecem no hover (mouse) ou no toque (celular). O toque no corpo da
+                   mensagem alterna; toque em botão/ação/detalhe não alterna. */
+                const alvo = e.target as HTMLElement;
+                if (alvo.closest("button, a, summary, details, select, textarea, input")) return;
+                e.currentTarget.toggleAttribute("data-acao");
+              }}
+            >
               {m.papel === "assistant" ? (
                 <>
                   {/* v3.13 — bloco de raciocínio no estilo do Open WebUI: "Pensando… Ns"
@@ -1003,69 +1072,87 @@ export function Chat({
             </p>
           )}
           <div className="chat-piso-linha">
-            {/* v3.18 (T017): descer a conversa em markdown — nada de PrintScreen */}
-            <button
-              id="chatExportar"
-              className="chat-acao"
-              title="exportar a conversa (markdown)"
-              aria-label="exportar conversa"
-              onClick={exportarConversa}
-            >
-              <svg className="chat-ico" width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true">
-                <path d="M12 3v11M8 10l4 4 4-4" />
-                <path d="M4 19h16" />
-              </svg>
-            </button>
-            <button
-              id="chatNovaConversa"
-              className="chat-nova"
-              title="apagar esta conversa e recomeçar do zero"
-              onClick={() => void limpar()}
-            >
-              <svg className="chat-ico" width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true">
-                <path d="M4 5h16v11h-9l-4 3.5V16H4z" transform="scale(.75) translate(3 2)" />
-                <path d="M17 3v6M14 6h6" />
-              </svg>
-              <span className="chat-nova-rotulo">nova conversa</span>
-            </button>
-            {provedores.some((p) => p.ativo) && (
-              <div className="chat-modelos" data-testid="chatModelos">
-                <select
-                  aria-label="provedor da conversa"
-                  title="que serviço responde esta conversa"
-                  value={sel.provedor}
-                  onChange={(e) => mudarSelecao({ provedor: e.target.value, modelo: "" })}
-                >
-                  <option value="">padrão da casa</option>
-                  {provedores.filter((p) => p.ativo).map((p) => (
-                    <option key={p.id} value={p.nome}>
-                      {p.nome}
-                      {p.padrao ? " · padrão" : ""}
-                    </option>
-                  ))}
-                </select>
-                {selProvedor && (
-                  <select
-                    aria-label="modelo"
-                    title={
-                      selProvedor.modelos.length
-                        ? selProvedor.modelos_em
-                          ? "modelos descobertos (cache de " + selProvedor.modelos_em.slice(0, 10) + ")"
-                          : "modelos descobertos"
-                        : "só o modelo cadastrado"
-                    }
-                    value={sel.modelo || selProvedor.modelo}
-                    onChange={(e) => mudarSelecao({ provedor: sel.provedor, modelo: e.target.value })}
-                  >
-                    {(selProvedor.modelos.length ? selProvedor.modelos : [selProvedor.modelo]).map((m) => (
-                      <option key={m} value={m}>
-                        {m}
-                      </option>
-                    ))}
-                  </select>
-                )}
-              </div>
-            )}
+            {/* v3.22 (preview aprovado): piso enxuto — [⚙] [campo………] [mic] [↑].
+               Provider, modelo, exportar e nova conversa moram no popover "⚙ ajustes da
+               conversa" (abre no toque, fecha fora dele ou no Esc). Os ids antigos
+               (chatExportar/chatNovaConversa/chatModelos) continuam no mesmo lugar lógico,
+               agora dentro do popover. */}
+            <div className="chat-ajustes" ref={ajustesRef}>
+              <button
+                id="chatAjustes"
+                className="chat-ajustes-boto"
+                title="ajustes da conversa (provider, modelo, exportar, nova)"
+                aria-label="ajustes da conversa"
+                aria-expanded={ajustesAberto}
+                onClick={() => setAjustesAberto((v) => !v)}
+              >
+                <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true">
+                  <circle cx="12" cy="12" r="3" />
+                  <path d="M19.4 15a1.65 1.65 0 0 0 .33 1.82l.06.06a2 2 0 1 1-2.83 2.83l-.06-.06a1.65 1.65 0 0 0-1.82-.33 1.65 1.65 0 0 0-1 1.51V21a2 2 0 1 1-4 0v-.09a1.65 1.65 0 0 0-1-1.51 1.65 1.65 0 0 0-1.82.33l-.06.06a2 2 0 1 1-2.83-2.83l.06-.06a1.65 1.65 0 0 0 .33-1.82 1.65 1.65 0 0 0-1.51-1H3a2 2 0 1 1 0-4h.09a1.65 1.65 0 0 0 1.51-1 1.65 1.65 0 0 0-.33-1.82l-.06-.06a2 2 0 1 1 2.83-2.83l.06.06a1.65 1.65 0 0 0 1.82.33h.01a1.65 1.65 0 0 0 1-1.51V3a2 2 0 1 1 4 0v.09a1.65 1.65 0 0 0 1 1.51h.01a1.65 1.65 0 0 0 1.82-.33l.06-.06a2 2 0 1 1 2.83 2.83l-.06.06a1.65 1.65 0 0 0-.33 1.82v.01a1.65 1.65 0 0 0 1.51 1H21a2 2 0 1 1 0 4h-.09a1.65 1.65 0 0 0-1.51 1z" />
+                </svg>
+              </button>
+              {ajustesAberto && (
+                <div className="chat-ajustes-pop" role="dialog" aria-label="ajustes da conversa">
+                  <div className="chat-ajustes-cab">⚙ ajustes da conversa</div>
+                  {provedores.some((p) => p.ativo) && (
+                    <div className="chat-ajustes-modelos" data-testid="chatModelos">
+                      <select
+                        aria-label="provedor da conversa"
+                        title="que serviço responde esta conversa"
+                        value={sel.provedor}
+                        onChange={(e) => mudarSelecao({ provedor: e.target.value, modelo: "" })}
+                      >
+                        <option value="">padrão da casa</option>
+                        {provedores.filter((p) => p.ativo).map((p) => (
+                          <option key={p.id} value={p.nome}>
+                            {p.nome}
+                            {p.padrao ? " · padrão" : ""}
+                          </option>
+                        ))}
+                      </select>
+                      {selProvedor && (
+                        <select
+                          aria-label="modelo"
+                          title={
+                            selProvedor.modelos.length
+                              ? selProvedor.modelos_em
+                                ? "modelos descobertos (cache de " + selProvedor.modelos_em.slice(0, 10) + ")"
+                                : "modelos descobertos"
+                              : "só o modelo cadastrado"
+                          }
+                          value={sel.modelo || selProvedor.modelo}
+                          onChange={(e) => mudarSelecao({ provedor: sel.provedor, modelo: e.target.value })}
+                        >
+                          {(selProvedor.modelos.length ? selProvedor.modelos : [selProvedor.modelo]).map((m) => (
+                            <option key={m} value={m}>
+                              {m}
+                            </option>
+                          ))}
+                        </select>
+                      )}
+                    </div>
+                  )}
+                  <div className="chat-ajustes-botoes">
+                    <button
+                      id="chatExportar"
+                      className="btn btn-mini"
+                      title="exportar a conversa (markdown)"
+                      onClick={exportarConversa}
+                    >
+                      ⤓ exportar
+                    </button>
+                    <button
+                      id="chatNovaConversa"
+                      className="btn btn-mini"
+                      title="apagar esta conversa e recomeçar do zero"
+                      onClick={() => void limpar()}
+                    >
+                      ＋ nova
+                    </button>
+                  </div>
+                </div>
+              )}
+            </div>
             <div
               className="chat-composer"
               onClick={(e) => {
@@ -1078,7 +1165,7 @@ export function Chat({
                 ref={campoRef}
                 className="chat-campo"
                 rows={1}
-                placeholder={editando !== null ? "reenviar pergunta editada… (Enter)" : rodando ? "próxima pergunta… (fila)" : "pergunte qualquer coisa…"}
+                placeholder={editando !== null ? "reenviar pergunta editada… (Enter)" : rodando ? "próxima pergunta… (Enter fila)" : "pergunte qualquer coisa…"}
                 title={editando !== null ? "Enter reenvia · Esc cancela a edição" : "Enter envia · Shift+Enter quebra linha"}
                 enterKeyHint="send"
                 value={pergunta}
@@ -1113,38 +1200,42 @@ export function Chat({
                 <path d="M5 11a7 7 0 0 0 14 0M12 18v3" />
               </svg>
             </button>
-            {rodando && (
-              /* v3.18 (T001): parar — o servidor corta a chamada e o que chegou fica na tela */
-              <button
-                id="chatParar"
-                className="chat-acao-icone"
-                title={snap.parando ? "parando…" : "parar esta resposta"}
-                aria-label="parar a resposta"
-                disabled={snap.parando}
-                onClick={pararResposta}
-              >
-                <svg width="15" height="15" viewBox="0 0 24 24" fill="currentColor" aria-hidden="true">
-                  <rect x="6" y="6" width="12" height="12" rx="2" />
-                </svg>
-              </button>
-            )}
             {editando !== null && (
               <button className="btn btn-mini" title="cancelar a edição (Esc)" onClick={cancelarEdicao}>
                 ✕<span className="chat-editar-rotulo"> editar</span>
               </button>
             )}
+            {/* v3.22 (preview aprovado): "parar" continua existindo — vira o próprio botão de
+               enviar enquanto a resposta chega (quadrado). O id muda de chatEnviar para
+               chatParar no estado rodando, mantendo os dois ganchos do E2E vivos no seu
+               estado; a fila continua pelo Enter no campo. */}
             <button
-              id="chatEnviar"
-              className="chat-enviar"
-              disabled={!pergunta.trim()}
-              title={editando !== null ? "reenviar editada" : rodando ? "colocar na fila" : "enviar"}
-              onClick={editando !== null ? confirmarEdicao : enviar}
+              id={rodando ? "chatParar" : "chatEnviar"}
+              className={"chat-enviar" + (rodando ? " chat-enviar-parando" : "")}
+              disabled={rodando ? snap.parando : !pergunta.trim()}
+              title={
+                rodando
+                  ? snap.parando
+                    ? "parando…"
+                    : "parar esta resposta"
+                  : editando !== null
+                    ? "reenviar editada"
+                    : "enviar"
+              }
+              aria-label={rodando ? "parar a resposta" : "enviar"}
+              onClick={rodando ? pararResposta : editando !== null ? confirmarEdicao : enviar}
             >
-              <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.2" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true">
-                <path d="M12 19V5" />
-                <path d="M5 12l7-7 7 7" />
-              </svg>
-              </button>
+              {rodando ? (
+                <svg width="15" height="15" viewBox="0 0 24 24" fill="currentColor" aria-hidden="true">
+                  <rect x="6" y="6" width="12" height="12" rx="2" />
+                </svg>
+              ) : (
+                <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.2" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true">
+                  <path d="M12 19V5" />
+                  <path d="M5 12l7-7 7 7" />
+                </svg>
+              )}
+            </button>
             </div>
           </div>
         </div>

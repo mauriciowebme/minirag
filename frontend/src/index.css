@@ -814,7 +814,7 @@
   /* v3.16 — pé em uma linha: [nova conversa] [campo…………………] [↑]. A dica de teclado
      saiu da tela (vai no título do campo); "trabalhando em segundo plano" desceu do topo. */
   .chat-piso-linha {
-    @apply mx-auto flex items-end gap-2;
+    @apply mx-auto flex items-center gap-2;
     max-width: 780px;
   }
   .chat-piso-linha .chat-composer {
@@ -892,6 +892,128 @@
   .chat-rodape[open] .chat-rodape-abrir {
     @apply hidden;
   }
+  /* v3.22 (preview aprovado) — piso enxuto: engrenagem 48px + popover "⚙ ajustes da
+     conversa" que abre acima (seta apontando para ela), com provider/modelo empilhados
+     em largura cheia e exportar/nova embaixo. No celular o alvo de toque é 44px. */
+  .chat-ajustes {
+    position: relative;
+    flex: none;
+  }
+  .chat-ajustes-boto {
+    @apply grid h-[48px] w-[48px] cursor-pointer place-items-center rounded-xl border
+      border-borda bg-sup2 text-txt2 hover:border-bordaforte hover:bg-sup3 hover:text-txt;
+  }
+  .chat-ajustes-boto[aria-expanded="true"] {
+    @apply border-bordaforte bg-sup3 text-txt;
+  }
+  .chat-ajustes-pop {
+    position: absolute;
+    bottom: calc(100% + 10px);
+    left: 0;
+    z-index: 30;
+    display: flex;
+    flex-direction: column;
+    gap: 10px;
+    width: 320px;
+    max-width: calc(100vw - 24px);
+    padding: 14px;
+    background: var(--sup);
+    border: 1px solid var(--bordaforte);
+    border-radius: 14px;
+    box-shadow: 0 14px 40px rgba(0, 0, 0, 0.45);
+  }
+  /* seta do popover apontando para a engrenagem */
+  .chat-ajustes-pop::after {
+    content: "";
+    position: absolute;
+    bottom: -5.5px;
+    left: 24px;
+    width: 9px;
+    height: 9px;
+    background: var(--sup);
+    border-right: 1px solid var(--bordaforte);
+    border-bottom: 1px solid var(--bordaforte);
+    transform: rotate(45deg);
+  }
+  .chat-ajustes-cab {
+    font-size: 13px;
+    font-weight: 700;
+    color: var(--txt);
+  }
+  .chat-ajustes-modelos {
+    display: flex;
+    flex-direction: column;
+    gap: 8px;
+  }
+  .chat-ajustes-modelos select {
+    @apply h-[40px] w-full cursor-pointer rounded-lg border border-bordaforte bg-sup2
+      px-3 text-[13px] text-txt2 focus:outline-none;
+  }
+  .chat-ajustes-modelos select:focus {
+    border-color: rgba(108, 182, 255, 0.5);
+  }
+  .chat-ajustes-botoes {
+    @apply flex gap-2;
+    border-top: 1px solid var(--borda);
+    padding-top: 10px;
+  }
+  /* v3.22 (preview aprovado) — estado vazio: boas-vindas + exemplos clicáveis
+     (duas linhas por chip: pergunta + legenda, seta à direita) */
+  .chat-vazio {
+    @apply mx-auto mt-8 flex flex-col;
+    max-width: 560px;
+  }
+  .chat-vazio-titulo {
+    font-size: 16px;
+    font-weight: 700;
+    color: var(--txt);
+  }
+  .chat-vazio-sub {
+    margin: 4px 0 12px;
+    font-size: 13px;
+    color: var(--txt2);
+  }
+  .chat-chips {
+    @apply flex flex-col gap-2;
+  }
+  .chat-chip {
+    @apply flex cursor-pointer items-center justify-between gap-3 rounded-xl border
+      border-borda bg-sup2 px-3.5 py-2.5 text-left hover:border-bordaforte hover:bg-sup3;
+  }
+  .chat-chip-corpo {
+    @apply flex min-w-0 flex-col gap-0.5;
+  }
+  .chat-chip-tit {
+    font-size: 13.5px;
+    color: var(--txt);
+  }
+  .chat-chip-sub {
+    font-size: 11.5px;
+    color: var(--txt3);
+  }
+  .chat-chip-seta {
+    @apply flex-none text-[12px] text-txt3;
+  }
+  /* v3.22 (preview aprovado) — ações de mensagem (copiar/regenerar/editar) invisíveis por
+     padrão: aparecem no hover (mouse), no focus (teclado) ou no toque (data-acao, via
+     toggle no onClick do .msg). A linha de falhas (tentar de novo) segue a mesma regra. */
+  .msg .chat-acoes,
+  .msg .chat-acoes-eu {
+    opacity: 0;
+    transition: opacity 0.12s ease;
+  }
+  @media (hover: hover) {
+    .msg:hover .chat-acoes,
+    .msg:hover .chat-acoes-eu,
+    .msg:focus-within .chat-acoes,
+    .msg:focus-within .chat-acoes-eu {
+      opacity: 1;
+    }
+  }
+  .msg[data-acao] .chat-acoes,
+  .msg[data-acao] .chat-acoes-eu {
+    opacity: 1;
+  }
 }
 
 @media (max-width: 720px) {
@@ -926,6 +1048,11 @@
     width: 44px;
     height: 44px;
     justify-content: center;
+  }
+  /* v3.22 (preview aprovado): a engrenagem segue a regra do dedo (44px no celular) */
+  .chat-ajustes-boto {
+    width: 44px;
+    height: 44px;
   }
   .chat-nova-rotulo {
     @apply hidden;
