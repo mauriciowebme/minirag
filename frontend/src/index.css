@@ -8,6 +8,18 @@
   --verde-suave: rgba(63, 185, 80, 0.12);
   --azul-suave: rgba(108, 182, 255, 0.12);
   --vermelho-suave: rgba(248, 81, 73, 0.12);
+  /* Superfícies + bordas + textos da paleta (v1.11) — usadas por var() nos
+     componentes (popover de ajustes, seta, filetes, textos, status). Sem isso
+     var(--x) resolvia p/ transparente/inherit e o painel de ajustes "afundava"
+     no fundo da tela. Valores iguais a tailwind.config.js (colors). */
+  --sup: #11151c;
+  --borda: #232b38;
+  --bordaforte: #313b4b;
+  --txt: #e7edf6;
+  --txt2: #a8b3c3;
+  --txt3: #7d8899;
+  --verde: #3fb950;
+  --vermelho: #f85149;
 }
 
 @layer base {
