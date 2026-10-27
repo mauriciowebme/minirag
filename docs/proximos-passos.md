@@ -43,6 +43,7 @@
 | T030 | Rota reflete a tela — app na raiz + `#/tela`, fim do `/painel/` fixo | chat-ui + http | 🟡 Média | ✅ v3.27.0 | [#t030](#t030) |
 | T031 | Acabamentos do chat: parar vermelho, rastro até a conclusão, caixa única da tela | chat-ui | 🟡 Média | ✅ v3.28.0 | [#t031](#t031) |
 | T032 | Toast no canto superior direito, conforme o gabarito do arquiteto | chat-ui | 🟢 Baixa | ✅ v3.28.1 | [#t032](#t032) |
+| T033 | Ordem do turno: tela gerada aparece ANTES da conclusão | chat-ui | 🟡 Média | ✅ v3.29.0 | [#t033](#t033) |
 
 ---
 
@@ -453,6 +454,22 @@
 | **Arquivos afetados** | frontend/src/index.css, frontend/src/components/Toast.tsx |
 | **Dependências** | T025 (variantes de toast) e T026/T027 (popover de ajustes, que ocupa o topo direito quando aberto — toast fica acima por ser z-100). |
 | **Riscos** | Em tela pequena o toast cobre o topo da conversa por 5s; é o preço do padrão (não bloqueia clique). |
+
+---
+
+<a id="t033"></a>
+### T033 — Ordem do turno: a tela gerada aparece ANTES da conclusão
+| Campo | Conteúdo |
+|---|---|
+| **Módulo** | chat-ui |
+| **Prioridade** | 🟡 Média — o dono viu a conclusão acima do gráfico que a originou |
+| **Status** | ✅ v3.29.0 (build verde; ordem medida no DOM e na tela) |
+| **Spec/Plano** | Relato do dono (27/10): "o gráfico foi gerado antes mas a conclusão foi colocada antes dele, a ordem está incorreta". |
+| **Descrição** | O servidor emite `tela` na execução da ferramenta e o texto da rodada final DEPOIS (`src/provider.ts`: `emitir({tipo:"tela"})` antes do próximo round). O JSX do chat renderizava `texto` e só então `tela-area` — o card caía abaixo de uma conclusão que veio depois dele. |
+| **Escopo** | O bloco `tela-area` subiu para antes do texto da mensagem (ordem real do turno: rastro → tela → conclusão). O aviso "pensando…" deixou de aparecer quando já existe caixa de tela. Nada mudou no servidor nem no formato gravado. |
+| **Arquivos afetados** | frontend/src/components/Chat.tsx |
+| **Dependências** | T031 (caixa única da tela). |
+| **Riscos** | Turno com mais de uma tela: todas ficam acima do texto final (é a ordem em que o servidor as produziu). |
 
 ## Lotes recomendados (executados — saíram na v3.18)
 
