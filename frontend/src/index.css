@@ -245,9 +245,13 @@
      (arquiteto-sistema/references/notificacoes.md): sucesso = verde + ícone,
      erro = vermelho + ícone, X fecha na hora, toasts empilham (máx. 3). */
   .toast-pilha {
-    @apply pointer-events-none fixed left-1/2 z-[60] flex w-max max-w-[min(92vw,560px)]
-      -translate-x-1/2 flex-col items-center gap-2;
-    bottom: calc(160px + env(safe-area-inset-bottom));
+    /* v3.28.1 — alinhado ao gabarito do arquiteto
+       (arquiteto-sistema/references/notificacoes.md): canto SUPERIOR DIREITO,
+       acima de modais (z-100), some em ~5s. Antes ficava em bottom:160px
+       centralizado (z-60) e caía em cima da conversa/composer. */
+    @apply pointer-events-none fixed right-4 z-[100] flex w-max max-w-[min(92vw,420px)]
+      flex-col items-end gap-2;
+    top: calc(1rem + env(safe-area-inset-top));
   }
   .toast {
     @apply pointer-events-auto flex max-w-full items-center gap-2 rounded-campo

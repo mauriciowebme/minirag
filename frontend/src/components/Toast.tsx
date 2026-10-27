@@ -47,7 +47,7 @@ export function ToastProvider({ children }: { children: ReactNode }) {
   const [itens, setItens] = useState<Item[]>([]);
   const seq = useRef(0);
 
-  const toast = useCallback((m: string, tipo: Tipo = "neutro", ms = 3500) => {
+  const toast = useCallback((m: string, tipo: Tipo = "neutro", ms = 5000) => {
     const id = ++seq.current;
     // empilha (máx. 3 visíveis); cada um tem auto-hide próprio
     setItens((v) => [...v.slice(-2), { id, msg: m, tipo }]);
