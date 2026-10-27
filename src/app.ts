@@ -205,7 +205,18 @@ export function criarApp(): FastifyInstance {
   definirHealth(health); // ferramenta interna do chat usa o mesmo health da rota
   app.get("/health", async () => health());
 
-  app.get("/", async (_req, reply) => reply.code(302).header("location", "/painel/").send());
+  /* v3.27 (dono, 27/10): a SPA passou a ser servida na RAIZ e a tela mora no hash
+     (#/chat, #/painel, #/buscar...). Antes a raiz pulava para /painel/ e o endereço
+     ficava /painel/ mesmo mostrando o Chat — a URL mentia sobre a tela. Os assets
+     continuam em /painel/assets (base fixa do vite), que funciona de qualquer path. */
+  app.get("/", async (_req, reply) => {
+    const arquivo = path.join(CONFIG.painelDir, "index.html");
+    if (!fs.existsSync(arquivo)) return reply.code(404).send({ detail: "Not Found" });
+    return reply
+      .code(200)
+      .header("content-type", "text/html; charset=utf-8")
+      .send(fs.createReadStream(arquivo));
+  });
 
   /* -------------------------------------------------------------- ingest */
 
@@ -1116,12 +1127,15 @@ export function criarApp(): FastifyInstance {
   };
 
   app.get("/painel", async (_req, reply) =>
-    reply.code(302).header("location", "/painel/").send(),
+    reply.code(302).header("location", "/#/painel").send(),
   );
 
   app.get("/painel/*", async (req, reply) => {
     const wildcard = (req.params as Record<string, string>)["*"] ?? "";
-    const rel = wildcard === "" ? "index.html" : wildcard;
+    /* v3.27: /painel/ (link antigo) vira atalho para a tela do Painel no endereço novo.
+       Os assets (/painel/assets/...) continuam sendo servidos daqui. */
+    if (wildcard === "") return reply.code(302).header("location", "/#/painel").send();
+    const rel = wildcard;
     const alvo = path.resolve(CONFIG.painelDir, rel);
     if (!alvo.startsWith(path.resolve(CONFIG.painelDir))) {
       return reply.code(404).send({ detail: "Not Found" });
