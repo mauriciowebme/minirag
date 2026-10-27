@@ -40,6 +40,7 @@
 | T027 | Popover de ajustes "transparente" — tokens `:root` ausentes | chat-ui | 🟢 Baixa | ✅ v3.25.2 | [#t027](#t027) |
 | T028 | Tela inicial passa a ser o Chat (não o Painel) | chat-ui | 🟢 Baixa | ✅ v3.26.0 | [#t028](#t028) |
 | T029 | Chat como item principal do menu (primeiro da lista) | chat-ui | 🟢 Baixa | ✅ v3.26.1 | [#t029](#t029) |
+| T030 | Rota reflete a tela — app na raiz + `#/tela`, fim do `/painel/` fixo | chat-ui + http | 🟡 Média | ✅ v3.27.0 | [#t030](#t030) |
 
 ---
 
@@ -400,6 +401,22 @@
 | **Arquivos afetados** | frontend/src/App.tsx (`MENU`) |
 | **Dependências** | T028 (mesma rodada). |
 | **Riscos** | Nenhum; só ordem visual. |
+
+---
+
+<a id="t030"></a>
+### T030 — Rota reflete a tela (app na raiz + `#/tela`)
+| Campo | Conteúdo |
+|---|---|
+| **Módulo** | chat-ui + http |
+| **Prioridade** | 🟡 Média — o endereço mentia sobre a tela (relato do dono, print de 27/10) |
+| **Status** | ✅ v3.27.0 (executado em 27/10; tsc verde, build verde, rotas conferidas ao vivo no browser) |
+| **Spec/Plano** | Relato do dono: "olha aí o problema na rota" — print com `/painel/` na barra de endereço e o **Chat** na tela |
+| **Descrição** | O app só era servido em `/painel/` (e `/` fazia 302 pra lá). Como a navegação é estado React, o endereço ficava `/painel/` **em qualquer tela** — abrir no Chat mostrava `/painel/`. A URL não dizia onde o usuário estava e o F5 sempre caía na tela inicial. |
+| **Escopo** | Feito (27/10): (a) **servidor** — `GET /` serve a SPA direto (sem 302) e `/painel/` + `/painel` viram atalho 302 → `/#/painel`; assets seguem em `/painel/assets/` (base fixa do vite, funciona de qualquer path). (b) **front** — a tela mora no hash (`#/chat`, `#/painel`, `#/buscar`, `#/jobs`, `#/gavetas`, `#/config`, `#/maquinas`): lida no boot, `replaceState` a cada navegação (sem encher o histórico) e `hashchange` pra link direto/voltar. Sem hash, cai no Chat (T028). Tela do endereço só vale se o papel do usuário permitir (comum não entra em tela de admin). (c) **teste** — e2e checa `GET /` 200 com HTML da SPA e `/painel/` 302 → `/#/painel` (antes checava a raiz 302 → `/painel/`). |
+| **Arquivos afetados** | src/app.ts (raiz + atalho `/painel/`), frontend/src/App.tsx (hash router), tests/e2e.test.ts |
+| **Dependências** | T028 (Chat como tela inicial). |
+| **Riscos** | Links antigos `/painel/` continuam válidos (302 → `/#/painel`); `#/tela` é fragmento, não chega ao servidor — nenhuma rota de API conflita. |
 
 ---
 
