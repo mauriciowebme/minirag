@@ -22,6 +22,12 @@ parecidos com a pergunta, com uma nota de 0 a 1.
 
 ---
 ---
+## v3.24.1 (27/10) — Expandir ocupa a tela inteira, como uma página web de verdade
+- **O que você vê:** o botão ⤢ do card de tela aberta **de borda a borda**: a tela gerada ocupa 100% da altura e da largura, sem moldura escura, sem margem e sem cantos arredondados. Sobram só a barra fina de cima (título, download, fechar) e o Esc continua fechando.
+- **Por que:** pedido do dono (27/10) — "quando clicar em expandir tinha que literalmente ocupar a tela inteira, sabe como se fosse uma página web mesmo". Antes, o "tela cheia" era um quadro centralizado (92% da altura, largura máxima e fundo escuro ao redor).
+- **Como funciona:** mudança só no visual do overlay do card (duas classes de estilo); o iframe sandboxizado, o download e o Esc não mudaram.
+- **Como é provado:** typecheck + build limpos; suíte completa sem falhas; medição na tela (o overlay cobre 0,0 até a largura e a altura completas do viewport) e foto.
+
 ## v3.24.0 (27/10) — O código da tela aparece sendo digitado
 - **O que você vê:** quando o agente escreve uma tela, a página nasce **à vista**: um bloco logo abaixo da conversa mostra o HTML sendo digitado, com o cursor piscando no fim e o contador de linhas e caracteres crescendo. Quando fica pronta, o bloco recolhe e o card com a prévia funcional assume; "código da tela" reabre para conferir o que foi escrito.
 - **Por que:** pedido do dono (27/10) — "queria muito poder ver o streaming digitando o código do preview, do jeito que está eu não vejo". Antes, o código só existia dentro do card, depois de pronto.
