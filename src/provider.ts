@@ -15,7 +15,7 @@ import { Usuario, log, tenantFor } from "./config";
 import { erro409, erro422 } from "./errors";
 import { q } from "./db";
 import { apertarRodada, custoDoPayload, type MsgChat, montarPayload } from "./compactar";
-import { MAX_TELAS_TURNO, type Tela } from "./telas";
+import { MAX_TELAS_TURNO, htmlParcial, type Tela } from "./telas";
 import {
   type ChamadaFerramenta,
   executarFerramenta,
@@ -487,6 +487,9 @@ export async function chamarModelo(
     onDelta?: (t: string) => void;
     /** pedaços do raciocínio do modelo (reasoning_content/thinking) — o chat mostra ao vivo */
     onRaciocinio?: (t: string) => void;
+    /** v3.24: pedaço dos ARGUMENTOS de uma chamada de ferramenta, como o provider mandou.
+       É por aqui que o código da tela aparece sendo digitado no chat. */
+    onArgs?: (indice: number, nome: string, pedaco: string) => void;
     /** v3.18 (T001): sinal externo ("parar" do usuário). Abortado: o erro lançado é
        exatamente "cancelado-pelo-usuario" — quem chama preserva o parcial e não grava falha. */
     sinal?: AbortSignal;
@@ -578,7 +581,11 @@ export async function chamarModelo(
           const alvo = (chamadas[k] ??= { id: "", nome: "", args: "" });
           if (c.id) alvo.id = c.id;
           if (c.function?.name) alvo.nome += c.function.name;
-          if (c.function?.arguments) alvo.args += c.function.arguments;
+          if (c.function?.arguments) {
+            alvo.args += c.function.arguments;
+            /* v3.24: o pedaço cru também vai para quem quiser mostrar o código nascendo */
+            opts.onArgs?.(k, alvo.nome, c.function.arguments);
+          }
         }
       }
     }
@@ -693,6 +700,8 @@ export type EventoChat =
   | { tipo: "fala"; texto: string }
   /** v3.23: tela gerada (HTML+CSS+JS) — o card com preview funcional aparece ao vivo */
   | { tipo: "tela"; tela: Tela }
+  /** v3.24: código da tela sendo ESCRITO (pedaço do HTML ainda em construção) */
+  | { tipo: "codigo"; texto: string }
   | { tipo: "fim"; dados: Record<string, unknown> }
   | { tipo: "erro"; detalhe: string };
 
@@ -795,6 +804,10 @@ export async function responderChat(
      quando a rodada decide (fala, chama ferramenta ou responde) — assim o tempo dele NÃO
      carrega o tempo da ferramenta, que é linha separada. */
   const rastro: SegmentoRastro[] = [];
+  /* v3.24 — o código da tela nasce na tela. Cada chamada de ferramenta acumula os argumentos
+     crus; se for a ferramenta de tela, o campo `html` já desescapado é emitido em pedaços
+     (só o que ainda não foi mostrado). O dono pediu: "quero ver o streaming digitando o código". */
+  const parciais = new Map<number, { nome: string; bruto: string; emitido: number }>();
   let bloco: { texto: string; inicio: number } | null = null;
   const fecharBloco = (): void => {
     if (!bloco) return;
@@ -847,6 +860,7 @@ export async function responderChat(
   for (;;) {
     if (opts.sinal?.aborted) throw new Error("cancelado-pelo-usuario");
     emitido = "";
+    parciais.clear(); /* v3.24: argumentos são por rodada — índice 0 de uma rodada ≠ da outra */
     rodadas++;
     const usaFerramentas = pacote.specs.length > 0 && cfg.max_rodadas > 0;
     let saiuTexto = false;
@@ -869,6 +883,24 @@ export async function responderChat(
     const r = await chamarModelo(cfg, mensagens, {
       tools: usaFerramentas ? pacote.specs : undefined,
       stream: Boolean(emitir),
+      /* v3.24: cada rodada traz chamadas novas — o acumulador de argumentos zera aqui */
+      onArgs: emitir
+        ? (indice, nome, pedaco) => {
+            let p = parciais.get(indice);
+            if (!p) {
+              p = { nome: "", bruto: "", emitido: 0 };
+              parciais.set(indice, p);
+            }
+            if (nome) p.nome = nome;
+            p.bruto += pedaco;
+            if (!/tela/i.test(p.nome)) return; /* só a tela interessa para o olho */
+            const html = htmlParcial(p.bruto);
+            if (html.length > p.emitido) {
+              emitir({ tipo: "codigo", texto: html.slice(p.emitido) });
+              p.emitido = html.length;
+            }
+          }
+        : undefined,
       onDelta: emitir
         ? (t) => {
             saiuTexto = true;

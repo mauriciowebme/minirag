@@ -41,6 +41,46 @@ const CSS_BASE = [
 const escaparAtributo = (s: string): string =>
   s.replace(/[&<>"']/g, (c) => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;", "'": "&#39;" })[c] as string);
 
+/** v3.24 — o `html` de um JSON de argumentos AINDA EM CONSTRUÇÃO, já desescapado.
+ *
+ *  Pedido do dono (27/10): "queria muito poder ver o streaming digitando o código do
+ *  preview, do jeito que está eu não vejo". O modelo escreve os argumentos da
+ *  ferramenta em pedaços; aqui a gente lê o campo `html` desse JSON parcial e devolve
+ *  o texto legível até onde ele chegou — escape cortado no meio (`\` ou `\u12`) para
+ *  antes, sem inventar caractere que ainda não chegou. */
+export function htmlParcial(bruto: string): string {
+  const achado = /"(?:html|conteudo|codigo)"\s*:\s*"/i.exec(bruto);
+  if (!achado) return "";
+  let i = achado.index + achado[0].length;
+  const saida: string[] = [];
+  while (i < bruto.length) {
+    const ch = bruto[i];
+    if (ch === "\\") {
+      const nx = bruto[i + 1];
+      if (nx === undefined) break; /* escape pela metade: espera o próximo pedaço */
+      if (nx === "n") { saida.push("\n"); i += 2; continue; }
+      if (nx === "t") { saida.push("\t"); i += 2; continue; }
+      if (nx === "r") { saida.push("\r"); i += 2; continue; }
+      if (nx === "b") { saida.push("\b"); i += 2; continue; }
+      if (nx === "f") { saida.push("\f"); i += 2; continue; }
+      if (nx === "u") {
+        const hex = bruto.slice(i + 2, i + 6);
+        if (hex.length < 4) break; /* \uXXXX incompleto */
+        saida.push(String.fromCharCode(parseInt(hex, 16)));
+        i += 6;
+        continue;
+      }
+      saida.push(nx); /* \" \\ \/ e qualquer escape simples */
+      i += 2;
+      continue;
+    }
+    if (ch === '"') break; /* fim do valor: o que vem depois não é código */
+    saida.push(ch);
+    i++;
+  }
+  return saida.join("");
+}
+
 /** página inteira a partir de um pedaço: garante charset/viewport e uma base legível */
 function documentoCompleto(html: string, titulo: string): string {
   const corpo = html.trim();
