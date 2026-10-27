@@ -1,0 +1,360 @@
+<!doctype html>
+<html lang="pt-BR">
+<head>
+<meta charset="utf-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1" />
+<title>minirag — preview tela de chat (ATUAL × PROPOSTA)</title>
+<style>
+  :root{
+    --bg:#0b0e13; --sup:#11151c; --sup2:#161c25; --sup3:#1c2330;
+    --borda:#232b38; --bordaforte:#313b4b;
+    --txt:#e7edf6; --txt2:#a8b3c3; --txt3:#7d8899;
+    --verde:#3fb950; --verde-claro:#4ccd60; --azul:#6cb6ff; --roxo:#a371f7;
+    --vermelho:#f85149; --amarelo:#d29922;
+    --campo:10px; --cartao:14px;
+  }
+  *{box-sizing:border-box;margin:0;padding:0}
+  body{
+    font-family:system-ui,"Segoe UI",Roboto,-apple-system,sans-serif;
+    background:var(--bg); color:var(--txt); font-size:14px; line-height:1.55;
+    -webkit-font-smoothing:antialiased; padding:22px;
+  }
+  .palco{max-width:1180px;margin:0 auto}
+  h1{font-size:20px;letter-spacing:-.2px;margin-bottom:4px}
+  .sub{color:var(--txt3);font-size:13px;margin-bottom:16px}
+
+  /* chave ATUAL / PROPOSTA */
+  .chave{display:inline-flex;background:var(--sup2);border:1px solid var(--bordaforte);
+    border-radius:12px;padding:4px;margin-bottom:18px}
+  .chave button{border:0;background:transparent;color:var(--txt2);font:inherit;font-size:14px;
+    padding:8px 16px;border-radius:9px;cursor:pointer}
+  .chave button.on{background:var(--sup3);color:var(--txt);font-weight:550}
+  .legenda{margin-left:14px;color:var(--txt3);font-size:12.5px}
+
+  .bancada{display:flex;gap:26px;align-items:flex-start;flex-wrap:wrap}
+  .col{flex:0 1 auto}
+
+  /* moldura de celular */
+  .fone{width:392px;background:#05070a;border:1px solid var(--bordaforte);
+    border-radius:34px;padding:10px;box-shadow:0 10px 30px rgba(0,0,0,.4)}
+  .tela{background:var(--sup);border-radius:25px;overflow:hidden;height:720px;
+    display:flex;flex-direction:column}
+
+  /* topo do chat (só celular) */
+  .topo{display:flex;align-items:center;gap:8px;padding:10px 12px}
+  .menu{width:36px;height:36px;border-radius:10px;border:1px solid var(--borda);
+    background:transparent;color:var(--txt2);display:grid;place-items:center;cursor:pointer}
+  .topo .tit{font-size:15px;font-weight:550}
+  .topo .status{margin-left:auto;font-size:11.5px;color:var(--txt3);
+    display:flex;align-items:center;gap:6px}
+  .status .ponto{width:7px;height:7px;border-radius:50%;background:var(--verde)}
+
+  /* mensagens */
+  .msgs{flex:1;overflow:auto;padding:6px 16px 8px}
+  .coluna{max-width:780px;margin:0 auto}
+  .dica{color:var(--txt3);font-size:13px;margin:2px 0 14px}
+
+  .msg{margin-bottom:14px}
+  .msg-eu{margin-left:auto;max-width:88%;background:var(--sup3);
+    border:1px solid var(--bordaforte);border-radius:18px;border-bottom-right-radius:7px;
+    padding:9px 14px;font-size:14.5px;white-space:pre-wrap}
+  .msg-ia{max-width:none;font-size:14.5px}
+  .msg-ia .md p{margin:8px 0}
+  .msg-ia .md b{font-weight:600}
+  .md code{background:#0c1017;border-radius:5px;padding:1px 5px;font-family:ui-monospace,Consolas,monospace;font-size:13px}
+
+  /* raciocínio / fontes (discretos, como no real) */
+  .racio-cab{display:inline-flex;align-items:center;gap:6px;background:transparent;
+    border:1px solid var(--borda);border-radius:999px;padding:4px 11px;font-size:11.5px;
+    color:var(--txt3);cursor:pointer;margin-bottom:8px}
+  .fontes{margin-top:8px}
+  .chat-fonte{display:inline-block;max-width:220px;overflow:hidden;text-overflow:ellipsis;
+    white-space:nowrap;background:var(--sup3);border:1px solid var(--borda);
+    border-radius:999px;padding:2px 9px;font-size:11px;color:var(--txt2);margin:0 6px 6px 0}
+
+  /* ações da mensagem — ATUAL: sempre visíveis (ruído) */
+  .acoes{display:flex;align-items:center;gap:6px;margin-top:7px;justify-content:flex-end}
+  .acoes .ic{width:26px;height:26px;border-radius:8px;border:1px solid var(--borda);
+    background:transparent;color:var(--txt3);display:grid;place-items:center;cursor:pointer}
+  .acoes .hora{font-size:11px;color:var(--txt3);margin-right:2px}
+  .acoes .via{font-size:11px;color:var(--txt3)}
+
+  /* ===== PROPOSTA #2 — ações só no hover ===== */
+  .msg-ia .acoes-proposta, .msg-eu-wrap .acoes-proposta{
+    opacity:0;transition:opacity .15s}
+  .msg-ia:hover .acoes-proposta, .msg-ia:focus-within .acoes-proposta,
+  .msg-eu-wrap:hover .acoes-proposta{opacity:1}
+  .acoes-proposta .ic{border-color:transparent;background:transparent}
+  .acoes-proposta .ic:hover{background:var(--sup2);color:var(--txt)}
+
+  /* ===== PROPOSTA #3 — estado vazio com chips ===== */
+  .vazio{padding:26px 8px 10px;text-align:left}
+  .vazio .oi{font-size:16px;font-weight:550;margin-bottom:4px}
+  .vazio .txt{color:var(--txt3);font-size:13px;margin-bottom:14px}
+  .chips{display:flex;flex-wrap:wrap;gap:8px}
+  .chip{border:1px solid var(--bordaforte);background:var(--sup2);color:var(--txt2);
+    border-radius:999px;padding:8px 13px;font-size:13px;cursor:pointer;text-align:left}
+  .chip:hover{background:var(--sup3);color:var(--txt);border-color:var(--azul)}
+  .chip .tag{color:var(--txt3);font-size:11px;display:block}
+
+  /* piso */
+  .piso{border-top:1px solid var(--borda);padding:10px 12px calc(10px + 6px)}
+  .piso-linha{max-width:780px;margin:0 auto;display:flex;align-items:flex-end;gap:8px}
+
+  /* ATUAL: régua de modelos + nova conversa + exportar + campo + mic + parar + enviar */
+  .modelos{display:flex;gap:8px;overflow-x:auto;padding-bottom:6px;max-width:780px;margin:0 auto}
+  .modelos::-webkit-scrollbar{display:none}
+  .modelos select{height:30px;background:var(--sup2);border:1px solid var(--bordaforte);
+    color:var(--txt2);border-radius:9px;padding:0 8px;font-size:12px;max-width:260px;flex:none}
+  .nova{height:48px;flex:none;display:inline-flex;align-items:center;gap:8px;
+    border:1px solid var(--borda);background:var(--sup2);color:var(--txt2);
+    border-radius:12px;padding:0 12px;font-size:12.5px;cursor:pointer;white-space:nowrap}
+  .composer{flex:1;min-width:0;display:flex;align-items:flex-end;gap:8px;
+    background:var(--sup2);border:1px solid var(--bordaforte);border-radius:12px;
+    padding:6px 6px 6px 14px;min-height:48px}
+  .campo{flex:1;border:0;background:transparent;color:var(--txt);font:inherit;
+    font-size:15px;line-height:1.45;resize:none;min-width:0;max-height:120px;padding:7px 0}
+  .campo::placeholder{color:var(--txt3)}
+  .enviar{width:34px;height:34px;flex:none;border:0;border-radius:10px;background:var(--verde);
+    color:#06210c;display:grid;place-items:center;cursor:pointer}
+  .mic{width:34px;height:34px;flex:none;border:0;background:transparent;color:var(--txt2);
+    display:grid;place-items:center;cursor:pointer;border-radius:10px}
+  .parar{width:34px;height:34px;flex:none;border:0;background:var(--sup3);color:var(--txt2);
+    display:grid;place-items:center;cursor:pointer;border-radius:10px}
+  .exportar{height:48px;flex:none;width:44px;display:grid;place-items:center;border:1px solid var(--borda);
+    background:var(--sup2);color:var(--txt2);border-radius:12px;cursor:pointer}
+
+  /* ===== PROPOSTA #1 — piso enxuto: só [⚙] [campo……] [mic] [enviar] ===== */
+  .piso-proposta .piso-linha{align-items:center}
+  .engrenagem{width:48px;height:48px;flex:none;border:1px solid var(--borda);
+    background:var(--sup2);color:var(--txt2);border-radius:12px;display:grid;place-items:center;cursor:pointer}
+  .piso-proposta .composer{min-height:48px}
+
+  /* popover de ajustes */
+  .popover{position:absolute;left:12px;bottom:70px;width:320px;max-width:calc(100% - 24px);
+    background:var(--sup);border:1px solid var(--bordaforte);border-radius:14px;
+    box-shadow:0 12px 34px rgba(0,0,0,.5);padding:12px;display:none;z-index:20}
+  .popover.aberto{display:block}
+  .popover h4{font-size:12px;color:var(--txt3);font-weight:550;text-transform:none;
+    margin:2px 2px 10px;display:flex;align-items:center;gap:7px}
+  .pop-row{display:flex;gap:8px;margin-bottom:10px}
+  .pop-row select{flex:1;height:36px;background:var(--sup2);border:1px solid var(--bordaforte);
+    color:var(--txt2);border-radius:9px;padding:0 9px;font-size:13px}
+  .pop-btns{display:flex;gap:8px}
+  .pop-btns button{flex:1;height:36px;border:1px solid var(--borda);background:var(--sup2);
+    color:var(--txt2);border-radius:9px;font:inherit;font-size:13px;cursor:pointer;
+    display:inline-flex;align-items:center;justify-content:center;gap:7px}
+  .pop-btns button:hover{background:var(--sup3);color:var(--txt)}
+  .seta-pop{position:absolute;left:26px;bottom:60px;width:12px;height:12px;background:var(--sup);
+    border-left:1px solid var(--bordaforte);border-bottom:1px solid var(--bordaforte);
+    transform:rotate(45deg)}
+
+  /* painel lateral de anotações */
+  .notas{flex:1 1 320px;min-width:300px}
+  .notas .cartao{background:var(--sup);border:1px solid var(--borda);border-radius:14px;padding:16px;margin-bottom:14px}
+  .notas h3{font-size:14px;margin-bottom:8px;display:flex;align-items:center;gap:8px}
+  .notas .num{width:22px;height:22px;border-radius:7px;background:var(--sup3);color:var(--azul);
+    display:grid;place-items:center;font-size:12px;font-weight:600}
+  .notas p{color:var(--txt2);font-size:13px}
+  .notas .antes{color:var(--vermelho)}
+  .notas .depois{color:var(--verde)}
+  .badge{display:inline-block;font-size:10.5px;padding:2px 8px;border-radius:999px;
+    background:var(--sup3);color:var(--txt3);border:1px solid var(--borda);vertical-align:middle;margin-left:6px}
+
+  /* marca de estado oculto */
+  [data-estado="atual"] .somente-proposta{display:none!important}
+  [data-estado="proposta"] .somente-atual{display:none!important}
+</style>
+</head>
+<body>
+<div class="palco">
+  <h1>Tela de chat — 3 melhorias de UI/UX</h1>
+  <div class="sub">Preview estático (mesmo fluxo do Provider). Cores e tipografia reais do minirag. Toque nos elementos pra ver o que muda.</div>
+
+  <div style="display:flex;align-items:center">
+    <div class="chave" id="chave">
+      <button data-e="atual" class="on">ATUAL</button>
+      <button data-e="proposta">PROPOSTA</button>
+    </div>
+    <span class="legenda" id="legenda">v3.21.2 — como está hoje</span>
+  </div>
+
+  <div class="bancada" id="estado" data-estado="atual">
+    <!-- ===================== FONE ===================== -->
+    <div class="col">
+      <div class="fone">
+        <div class="tela">
+          <div class="topo">
+            <div class="menu">☰</div>
+            <div class="tit">Chat</div>
+            <div class="status"><span class="ponto"></span>provider ok</div>
+          </div>
+
+          <div class="msgs">
+            <div class="coluna">
+
+              <!-- ===== ESTADO VAZIO (só PROPOSTA mostra; ATUAL mostra só a frase "dica") ===== -->
+              <div class="dica somente-atual">pergunte o que quiser — eu busco na sua memória.</div>
+
+              <div class="vazio somente-proposta">
+                <div class="oi">Boa. Sua memória está aqui.</div>
+                <div class="txt">Pergunte com suas palavras, ou comece por uma destas:</div>
+                <div class="chips">
+                  <button class="chip" data-chip="o que anotei sobre o projeto minirag esta semana?">o que anotei sobre o minirag essa semana?<span class="tag">busca na memória</span></button>
+                  <button class="chip" data-chip="me lembre das decisões que tomamos sobre o provider">as decisões que tomamos sobre provider<span class="tag">resumo de decisões</span></button>
+                  <button class="chip" data-chip="resuma a conversa de ontem com o cliente do cardápio">resuma a conversa de ontem com o cliente<span class="tag">resumo de conversa</span></button>
+                  <button class="chip" data-chip="quais pendências ficaram abertas?">quais pendências ficaram abertas?<span class="tag">check de pendências</span></button>
+                </div>
+              </div>
+
+              <!-- exemplo de conversa (aparece nos dois estados, pra mostrar ações) -->
+              <div class="msg msg-eu-wrap">
+                <div class="msg msg-eu" style="margin-bottom:0">qual era o modelo padrão do provider da casa?</div>
+                <div class="acoes somente-atual"><span class="hora">21:47</span>
+                  <span class="ic" title="copiar a pergunta">⧉</span></div>
+                <div class="acoes acoes-proposta somente-proposta" style="justify-content:flex-end"><span class="hora">21:47</span>
+                  <span class="ic" title="copiar a pergunta">⧉</span>
+                  <span class="ic" title="editar e reenviar">✎</span></div>
+              </div>
+
+              <div class="msg msg-ia">
+                <div class="racio-cab">◔ pensei · 3 passos · 1,2s</div>
+                <div class="md"><p>O padrão da casa é o <b>llama.cpp</b> atrás do proxy, servindo o modelo <code>swift-27b</code>, com temperatura <code>0,2</code>. Está ativo no provider "padrão da casa".</p></div>
+                <div class="fontes">
+                  <span class="chat-fonte">notas/minirag-provider.md</span>
+                  <span class="chat-fonte">conversas/2026-10-26.md</span>
+                </div>
+                <!-- ATUAL: ações sempre visíveis -->
+                <div class="acoes somente-atual"><span class="via">via padrão da casa</span><span class="hora">21:47</span>
+                  <span class="ic" title="copiar a resposta">⧉</span>
+                  <span class="ic" title="regenerar a resposta">↻</span></div>
+                <!-- PROPOSTA: só no hover -->
+                <div class="acoes acoes-proposta somente-proposta"><span class="via">via padrão da casa</span><span class="hora">21:47</span>
+                  <span class="ic" title="copiar a resposta">⧉</span>
+                  <span class="ic" title="regenerar a resposta">↻</span></div>
+              </div>
+
+              <div class="msg msg-eu-wrap">
+                <div class="msg msg-eu" style="margin-bottom:0">e a temperatura, 0,5 não ficava mais tranquilo?</div>
+                <div class="acoes somente-atual"><span class="hora">21:48</span>
+                  <span class="ic" title="copiar a pergunta">⧉</span></div>
+                <div class="acoes acoes-proposta somente-proposta" style="justify-content:flex-end"><span class="hora">21:48</span>
+                  <span class="ic" title="copiar a pergunta">⧉</span>
+                  <span class="ic" title="editar e reenviar">✎</span></div>
+              </div>
+
+              <div class="msg msg-ia">
+                <div class="md"><p>Concordo — <code>0,5</code> é um bom meio-termo: resposta menos robótica, sem perder o foco. Posso aplicar no padrão da casa se você autorizar.</p></div>
+                <div class="acoes somente-atual"><span class="via">via padrão da casa</span><span class="hora">21:48</span>
+                  <span class="ic" title="copiar a resposta">⧉</span>
+                  <span class="ic" title="regenerar a resposta">↻</span></div>
+                <div class="acoes acoes-proposta somente-proposta"><span class="via">via padrão da casa</span><span class="hora">21:48</span>
+                  <span class="ic" title="copiar a resposta">⧉</span>
+                  <span class="ic" title="regenerar a resposta">↻</span></div>
+              </div>
+
+            </div>
+          </div>
+
+          <!-- ============ PISO — ATUAL (lotado) ============ -->
+          <div class="piso somente-atual">
+            <div class="modelos">
+              <select><option>padrão da casa</option><option>ollama-noot</option><option>openai-credito</option></select>
+              <select><option>swift-27b</option><option>llama3.1:8b</option><option>qwen2.5:14b</option></select>
+            </div>
+            <div class="piso-linha" style="margin-top:8px">
+              <button class="nova">＋ nova</button>
+              <div class="exportar" title="exportar a conversa">⤓</div>
+              <div class="composer">
+                <textarea class="campo" rows="1" placeholder="pergunte qualquer coisa…"></textarea>
+                <button class="mic" title="ditar a pergunta (voz)">🎙</button>
+                <button class="parar" title="parar esta resposta">■</button>
+                <button class="enviar" title="enviar">↑</button>
+              </div>
+            </div>
+          </div>
+
+          <!-- ============ PISO — PROPOSTA (enxuto + popover) ============ -->
+          <div class="piso piso-proposta somente-proposta" style="position:relative">
+            <div class="popover" id="pop">
+              <div class="seta-pop"></div>
+              <h4>⚙ Ajustes da conversa</h4>
+              <div class="pop-row">
+                <select title="provedor da conversa">
+                  <option>padrão da casa</option><option>ollama-noot</option><option>openai-credito</option>
+                </select>
+              </div>
+              <div class="pop-row">
+                <select title="modelo">
+                  <option>swift-27b</option><option>llama3.1:8b</option><option>qwen2.5:14b</option>
+                </select>
+              </div>
+              <div class="pop-btns">
+                <button>⤓ exportar</button>
+                <button>＋ nova</button>
+              </div>
+            </div>
+            <div class="piso-linha">
+              <button class="engrenagem" id="btnPop" title="ajustes da conversa">⚙</button>
+              <div class="composer">
+                <textarea class="campo" rows="1" placeholder="pergunte qualquer coisa…"></textarea>
+                <button class="mic" title="ditar a pergunta (voz)">🎙</button>
+                <button class="enviar" title="enviar">↑</button>
+              </div>
+            </div>
+          </div>
+
+        </div>
+      </div>
+    </div>
+
+    <!-- ===================== NOTAS ===================== -->
+    <div class="notas">
+      <div class="cartao">
+        <h3><span class="num">1</span> Barra de baixo enxuta</h3>
+        <p><span class="antes">Antes:</span> nova conversa + exportar + 2 selects (provider/modelo) + mic + parar + enviar, tudo na mesma linha — no celular espreme e some o campo.</p>
+        <p><span class="depois">Depois:</span> no piso fica só <b>⚙ + campo + mic + enviar</b>. O resto (provider, modelo, exportar, nova) vai num popover <b>⚙ ajustes da conversa</b> que abre ao toque.</p>
+        <p class="sub" style="margin-top:8px">"parar" continua existindo — vira o próprio botão de enviar enquanto a resposta chega (fica quadrado).</p>
+      </div>
+      <div class="cartao">
+        <h3><span class="num">2</span> Ações de mensagem no hover</h3>
+        <p><span class="antes">Antes:</span> copiar / regenerar / editar aparecem em <b>toda</b> mensagem = ruído num histórico longo.</p>
+        <p><span class="depois">Depois:</span> ficam invisíveis e <b>aparecem só quando você passa o mouse</b> (no celular, ao tocar na mensagem). Passe o mouse numa resposta aí do lado pra ver.</p>
+      </div>
+      <div class="cartao">
+        <h3><span class="num">3</span> Estado vazio com exemplos</h3>
+        <p><span class="antes">Antes:</span> só uma frase cinza — a tela em branco não ensina nada do que o chat de memória faz.</p>
+        <p><span class="depois">Depois:</span> boas-vindas + <b>4 chips clicáveis</b> (busca, resumo de decisões, resumo de conversa, pendências). Toque num chip aí do lado: ele cai no campo.</p>
+      </div>
+      <div class="sub">Nada muda de lógica/contrato — só posicionamento e limpeza. Aprovou as 3 (ou alguma) que eu implanto e valido ao vivo.</div>
+    </div>
+  </div>
+</div>
+
+<script>
+  const chave=document.getElementById('chave');
+  const estado=document.getElementById('estado');
+  const legenda=document.getElementById('legenda');
+  chave.querySelectorAll('button').forEach(b=>b.addEventListener('click',()=>{
+    chave.querySelectorAll('button').forEach(x=>x.classList.remove('on'));
+    b.classList.add('on');
+    estado.dataset.estado=b.dataset.e;
+    legenda.textContent=b.dataset.e==='atual'?'v3.21.2 — como está hoje':'proposta — piso enxuto + ações no hover + estado vazio';
+    document.getElementById('pop').classList.remove('aberto');
+  }));
+  // popover
+  const btnPop=document.getElementById('btnPop');
+  const pop=document.getElementById('pop');
+  if(btnPop)btnPop.addEventListener('click',(e)=>{e.stopPropagation();pop.classList.toggle('aberto');});
+  document.addEventListener('click',(e)=>{if(pop&&pop.classList.contains('aberto')&&!pop.contains(e.target))pop.classList.remove('aberto');});
+  // abre direto no estado pedido via ?e=proposta (útil p/ screenshot)
+  const qe=new URLSearchParams(location.search).get('e');
+  if(qe){const b=chave.querySelector(`[data-e="${qe}"]`);if(b)b.click();}
+  // chips
+  document.querySelectorAll('.chip').forEach(c=>c.addEventListener('click',()=>{
+    const t=document.querySelector('.somente-proposta .campo')||document.querySelector('.campo');
+    t.value=c.dataset.chip; t.focus();
+  }));
+</script>
+</body>
+</html>
