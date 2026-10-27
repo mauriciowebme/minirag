@@ -29,7 +29,7 @@ export function Jobs({ tenant, nome, operador }: { tenant: string; nome: string;
         );
       } catch (e) {
         setDados(null);
-        toast("jobs: " + (e as Error).message);
+        toast("jobs: " + (e as Error).message, "erro");
       } finally {
         setCarregando(false);
       }
@@ -44,20 +44,20 @@ export function Jobs({ tenant, nome, operador }: { tenant: string; nome: string;
   async function cancelar(job: Job) {
     try {
       await post(`/jobs/${job.job_id}/cancel?` + qs({ tenant: operador ? job.tenant : "" }));
-      toast("job cancelado");
+      toast("job cancelado", "sucesso");
       void carregar(status);
     } catch (e) {
-      toast((e as Error).message);
+      toast((e as Error).message, "erro");
     }
   }
 
   async function retentar(job: Job) {
     try {
       await post(`/jobs/${job.job_id}/retry?` + qs({ tenant: operador ? job.tenant : "" }));
-      toast("job reenfileirado");
+      toast("job reenfileirado", "sucesso");
       void carregar(status);
     } catch (e) {
-      toast((e as Error).message);
+      toast((e as Error).message, "erro");
     }
   }
 

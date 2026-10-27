@@ -57,10 +57,10 @@ export function Maquinas({ operador }: { operador: boolean }) {
     setGerandoCli(true);
     try {
       await baixarPorLink(plat);
-      toast("cliente gerado — o download começou; o arquivo já é do teu usuário");
+      toast("cliente gerado — o download começou; o arquivo já é do teu usuário", "sucesso");
       carregar();
     } catch (e) {
-      toast("gerar cliente: " + (e as Error).message);
+      toast("gerar cliente: " + (e as Error).message, "erro");
     } finally {
       setGerandoCli(false);
     }
@@ -72,7 +72,7 @@ export function Maquinas({ operador }: { operador: boolean }) {
       .then((r) => {
         setMaquinas(r.maquinas);
       })
-      .catch((e) => toast("máquinas: " + (e as Error).message));
+      .catch((e) => toast("máquinas: " + (e as Error).message, "erro"));
     void get<{ log: MaquinasLogLinha[] }>("/maquinas/log?limit=30")
       .then((r) => setLog(r.log))
       .catch(() => undefined);
@@ -87,10 +87,10 @@ export function Maquinas({ operador }: { operador: boolean }) {
   async function ativar(m: MaquinaLinha, ativo: boolean) {
     try {
       await patch(`/maquinas/${encodeURIComponent(m.host)}?tenant=${encodeURIComponent(m.tenant)}`, { ativo });
-      toast(`${m.host} ${ativo ? "reativada" : "desativada"}`);
+      toast(`${m.host} ${ativo ? "reativada" : "desativada"}`, "sucesso");
       carregar();
     } catch (e) {
-      toast("interruptor: " + (e as Error).message);
+      toast("interruptor: " + (e as Error).message, "erro");
     }
   }
 
@@ -98,10 +98,10 @@ export function Maquinas({ operador }: { operador: boolean }) {
     if (!window.confirm(`apagar a máquina ${m.host}? o cliente dela precisa ser re-pareado.`)) return;
     try {
       await del(`/maquinas/${encodeURIComponent(m.host)}?tenant=${encodeURIComponent(m.tenant)}`);
-      toast(`${m.host} removida`);
+      toast(`${m.host} removida`, "sucesso");
       carregar();
     } catch (e) {
-      toast("apagar: " + (e as Error).message);
+      toast("apagar: " + (e as Error).message, "erro");
     }
   }
 

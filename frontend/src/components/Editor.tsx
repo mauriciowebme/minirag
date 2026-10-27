@@ -59,7 +59,7 @@ export function Editor({
         if (!vivo) return;
         setStatus("");
         setConteudo("");
-        toast("sem fonte para abrir: " + (e as Error).message);
+        toast("sem fonte para abrir: " + (e as Error).message, "erro");
       }
       if (vivo) areaRef.current?.focus();
     })();
@@ -90,12 +90,12 @@ export function Editor({
       setStatus(`reindexando ${st.chunks_feitos}/${st.chunks_total} · ${st.status}`);
       if (st.status === "concluido") {
         setStatus("salvo e reindexado ✓");
-        toast("salvo e reindexado ✓");
+        toast("salvo e reindexado ✓", "sucesso");
         onSalvo();
         break;
       }
       if (st.status === "erro") {
-        toast("job com erro: " + (st.erro || "?"));
+        toast("job com erro: " + (st.erro || "?"), "erro");
         break;
       }
       if (st.status === "cancelado") break;
@@ -107,7 +107,7 @@ export function Editor({
     const alvo = idAtual;
     if (!alvo) return;
     if (!conteudo.trim()) {
-      toast("conteúdo vazio");
+      toast("conteúdo vazio", "erro");
       return;
     }
     setSalvando(true);
@@ -131,7 +131,7 @@ export function Editor({
       marcarSujo(false);
       void acompanhar(r.job_id);
     } catch (e) {
-      toast("salvar: " + (e as Error).message);
+      toast("salvar: " + (e as Error).message, "erro");
     } finally {
       setSalvando(false);
     }
@@ -161,7 +161,7 @@ export function Editor({
   async function aplicarRename() {
     if (!idAtual) return;
     if (!novoId.trim() && !novaGaveta.trim()) {
-      toast("nada para mudar");
+      toast("nada para mudar", "erro");
       return;
     }
     try {
@@ -173,7 +173,7 @@ export function Editor({
           tenant: operador ? escopo.tenant : undefined,
         },
       );
-      toast(`ok: ${r.doc_id} → gaveta ${r.memoria || "(padrão)"}`);
+      toast(`ok: ${r.doc_id} → gaveta ${r.memoria || "(padrão)"}`, "sucesso");
       if (r.movido && r.memoria !== escopo.memoria) {
         marcarSujo(false);
         onFechar();
@@ -183,7 +183,7 @@ export function Editor({
         onSalvo();
       }
     } catch (e) {
-      toast("renomear: " + (e as Error).message);
+      toast("renomear: " + (e as Error).message, "erro");
     }
   }
 

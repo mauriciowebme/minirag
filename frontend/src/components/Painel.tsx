@@ -16,7 +16,7 @@ export function Painel({ tenant, operador }: { tenant: string; operador: boolean
       const r = await get<DashboardResp>("/dashboard" + (operador && tenant ? "?" + qs({ tenant }) : ""));
       setD(r);
     } catch (e) {
-      toast("painel: " + (e as Error).message);
+      toast("painel: " + (e as Error).message, "erro");
     } finally {
       setCarregando(false);
     }

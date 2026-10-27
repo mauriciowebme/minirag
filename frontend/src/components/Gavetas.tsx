@@ -88,10 +88,10 @@ export function Gavetas({ operador, tenant, usuario, onAbrirUsuario, onVoltar, o
   async function metaGaveta(g: Gaveta, mud: { titulo?: string; fixada?: boolean; arquivada?: boolean }, brinde: string) {
     try {
       await put("/gavetas/meta", { tenant: g.tenant, memoria: g.memoria, ...mud });
-      toast(brinde);
+      toast(brinde, "sucesso");
       void carregar();
     } catch (e) {
-      toast("gaveta: " + (e as Error).message);
+      toast("gaveta: " + (e as Error).message, "erro");
     }
   }
 
@@ -115,7 +115,7 @@ export function Gavetas({ operador, tenant, usuario, onAbrirUsuario, onVoltar, o
       );
       setAchados(r.resultados ?? []);
     } catch (err) {
-      toast("buscar: " + (err as Error).message);
+      toast("buscar: " + (err as Error).message, "erro");
     } finally {
       setBuscando(false);
     }
@@ -128,7 +128,7 @@ export function Gavetas({ operador, tenant, usuario, onAbrirUsuario, onVoltar, o
   async function criarUsuario() {
     const nome = novoUsuarioNome.trim().toLowerCase();
     if (!/^[a-z0-9][a-z0-9._-]{1,31}$/.test(nome)) {
-      toast("nome inválido: 2-32 caracteres, sem acento nem espaço");
+      toast("nome inválido: 2-32 caracteres, sem acento nem espaço", "erro");
       return;
     }
     setCriando(true);
@@ -136,9 +136,9 @@ export function Gavetas({ operador, tenant, usuario, onAbrirUsuario, onVoltar, o
       const r = await post<{ nome: string; chave: string; aviso?: string }>("/usuarios", { nome, papel: novoUsuarioPapel });
       setChaveGerada({ nome: r.nome, chave: r.chave });
       await carregar();
-      toast(r.aviso && r.aviso.includes("DESFEITA") ? "recriado: exclusão desfeita, dados voltaram" : `usuário ${r.nome} criado`);
+      toast(r.aviso && r.aviso.includes("DESFEITA") ? "recriado: exclusão desfeita, dados voltaram" : `usuário ${r.nome} criado`, "sucesso");
     } catch (e) {
-      toast("criar: " + (e as Error).message);
+      toast("criar: " + (e as Error).message, "erro");
     } finally {
       setCriando(false);
     }
@@ -148,10 +148,10 @@ export function Gavetas({ operador, tenant, usuario, onAbrirUsuario, onVoltar, o
   async function apagarConta(nome: string) {
     try {
       const r = await del<RemoverUsuarioResp>(`/usuarios/${encodeURIComponent(nome)}`);
-      toast(`login de ${r.nome} desligado; os dados somem em ${r.carencia_dias} dia(s) — recriar o nome desfaz`);
+      toast(`login de ${r.nome} desligado; os dados somem em ${r.carencia_dias} dia(s) — recriar o nome desfaz`, "sucesso");
       await carregar();
     } catch (e) {
-      toast("apagar: " + (e as Error).message);
+      toast("apagar: " + (e as Error).message, "erro");
     }
   }
 
@@ -171,7 +171,7 @@ export function Gavetas({ operador, tenant, usuario, onAbrirUsuario, onVoltar, o
       }
     } catch (e) {
       setDados(null);
-      toast("gavetas: " + (e as Error).message);
+      toast("gavetas: " + (e as Error).message, "erro");
     } finally {
       setCarregando(false);
     }
@@ -244,9 +244,9 @@ export function Gavetas({ operador, tenant, usuario, onAbrirUsuario, onVoltar, o
         `/gavetas/${encodeURIComponent(memoria)}/export.zip?${qs({ tenant: operador ? t : undefined })}`,
         slug(memoria || "gaveta") + ".zip",
       );
-      toast("zip gerado ✓");
+      toast("zip gerado ✓", "sucesso");
     } catch (e) {
-      toast((e as Error).message);
+      toast((e as Error).message, "erro");
     }
   }
 
@@ -258,10 +258,10 @@ export function Gavetas({ operador, tenant, usuario, onAbrirUsuario, onVoltar, o
       const r = await del<{ chunks_apagados: number; fontes_apagadas: number }>(
         `/gavetas/${encodeURIComponent(memoria)}?${qs({ tenant: operador ? t : undefined })}`,
       );
-      toast(`gaveta apagada: ${r.chunks_apagados} chunks, ${r.fontes_apagadas} fontes`);
+      toast(`gaveta apagada: ${r.chunks_apagados} chunks, ${r.fontes_apagadas} fontes`, "sucesso");
       void carregar();
     } catch (e) {
-      toast((e as Error).message);
+      toast((e as Error).message, "erro");
     }
   }
 
@@ -269,18 +269,18 @@ export function Gavetas({ operador, tenant, usuario, onAbrirUsuario, onVoltar, o
   async function criarGaveta(t: string) {
     const memoria = novoNome.trim();
     if (!memoria) {
-      toast("digite o nome da gaveta");
+      toast("digite o nome da gaveta", "erro");
       return;
     }
     setCriando(true);
     try {
       await post("/gavetas", { memoria, tenant: operador ? t : undefined });
-      toast(`gaveta "${memoria}" criada`);
+      toast(`gaveta "${memoria}" criada`, "sucesso");
       setNovaAberta(false);
       setNovoNome("");
       void carregar();
     } catch (e) {
-      toast("não deu para criar: " + (e as Error).message);
+      toast("não deu para criar: " + (e as Error).message, "erro");
     } finally {
       setCriando(false);
     }
@@ -298,10 +298,11 @@ export function Gavetas({ operador, tenant, usuario, onAbrirUsuario, onVoltar, o
       toast(
         `${r.docs_arquivados_agora} documento(s) arquivado(s) agora · ` +
           `${r.ativos} ativo(s) · ${r.arquivados} arquivado(s)`,
+        "sucesso",
       );
       void carregar();
     } catch (e) {
-      toast("não deu para arquivar: " + (e as Error).message);
+      toast("não deu para arquivar: " + (e as Error).message, "erro");
     }
   }
 
@@ -459,7 +460,7 @@ export function Gavetas({ operador, tenant, usuario, onAbrirUsuario, onVoltar, o
                       className="btn"
                       onClick={() => {
                         void navigator.clipboard?.writeText(chaveGerada.chave);
-                        toast("chave copiada");
+                        toast("chave copiada", "sucesso");
                       }}
                     >
                       copiar

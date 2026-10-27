@@ -37,7 +37,7 @@ export function Buscar({
       setResp(r);
     } catch (e) {
       setResp(null);
-      toast("busca: " + (e as Error).message);
+      toast("busca: " + (e as Error).message, "erro");
     } finally {
       setBuscando(false);
     }

@@ -403,7 +403,7 @@ export function Chat({
       }
       semear(chave, linhas);
     } catch (e) {
-      toast("histórico: " + (e as Error).message);
+      toast("histórico: " + (e as Error).message, "erro");
     }
     /* v3.3: fechou a aba no meio e voltou? A tarefa viva do servidor entra na tela
        (pergunta empurrada + bolha escrevendo desde o parcial, religando sozinha).
@@ -613,9 +613,9 @@ export function Chat({
         document.execCommand("copy");
         sujo.remove();
       }
-      toast(brinde);
+      toast(brinde, "sucesso");
     } catch {
-      toast("o navegador nao deixou copiar — selecione o texto e copie");
+      toast("o navegador nao deixou copiar — selecione o texto e copie", "erro");
     }
   }
 
@@ -646,7 +646,7 @@ export function Chat({
     const id = pedirParada(chave);
     if (!id) return;
     void post(`/chat/tarefa/${encodeURIComponent(id)}/cancelar${tenantParam ? "?" + qs({ tenant: tenantParam }) : ""}`, {}).catch((e) => {
-      toast("parar: " + (e as Error).message);
+      toast("parar: " + (e as Error).message, "erro");
     });
   }
 
@@ -663,7 +663,7 @@ export function Chat({
       descartarUltimos(chave, Number(r.removidas ?? 2));
       enviarNaConversa(chave, p, memoria, tenantParam, transportar);
     } catch (e) {
-      toast("regenerar: " + (e as Error).message);
+      toast("regenerar: " + (e as Error).message, "erro");
     }
   }
 
@@ -696,7 +696,7 @@ export function Chat({
       apararAteSid(chave, sid);
       enviarNaConversa(chave, texto, memoria, tenantParam, transportar);
     } catch (e) {
-      toast("reenviar: " + (e as Error).message);
+      toast("reenviar: " + (e as Error).message, "erro");
     }
   }
 
@@ -704,7 +704,7 @@ export function Chat({
   function repetirUltima() {
     const alvo = [...msgs].reverse().find((m) => m.papel === "user");
     if (!alvo) {
-      toast("nenhuma pergunta para repetir");
+      toast("nenhuma pergunta para repetir", "erro");
       return;
     }
     enviarNaConversa(chave, alvo.texto, memoria, tenantParam, transportar);
@@ -717,7 +717,7 @@ export function Chat({
       .map((m) => `${m.papel === "user" ? "**você**" : "**minirag**"}${m.when ? ` · ${fmtHora(m.when)}` : ""}\n\n${m.texto}\n`)
       .join("\n---\n\n");
     if (!corpo) {
-      toast("nada para exportar ainda");
+      toast("nada para exportar ainda", "erro");
       return;
     }
     const blob = new Blob([`# conversa${memoria ? ` — ${memoria}` : ""} (minirag)\n\n${corpo}`], { type: "text/markdown;charset=utf-8" });
@@ -735,7 +735,7 @@ export function Chat({
     const SR = (window as unknown as { SpeechRecognition?: any; webkitSpeechRecognition?: any });
     const Fabrica = SR.SpeechRecognition ?? SR.webkitSpeechRecognition;
     if (!Fabrica) {
-      toast("seu navegador não tem ditado por voz (funciona no Chrome/Edge)");
+      toast("seu navegador não tem ditado por voz (funciona no Chrome/Edge)", "erro");
       return;
     }
     if (ditando) {
@@ -759,7 +759,7 @@ export function Chat({
       });
     };
     rec.onerror = (ev: any) => {
-      toast("ditado: " + String(ev?.error ?? "falhou") + " (o microfone pode estar bloqueado)");
+      toast("ditado: " + String(ev?.error ?? "falhou") + " (o microfone pode estar bloqueado)", "erro");
       setDitando(false);
     };
     rec.onend = () => setDitando(false);
@@ -781,9 +781,9 @@ export function Chat({
     try {
       await del("/chat?" + qs({ memoria, ...(tenantParam ? { tenant: tenantParam } : {}) }));
       limparConversa(chave);
-      toast("conversa apagada");
+      toast("conversa apagada", "sucesso");
     } catch (e) {
-      toast("apagar: " + (e as Error).message);
+      toast("apagar: " + (e as Error).message, "erro");
     }
   }
 
@@ -1095,7 +1095,7 @@ export function Chat({
                 aria-expanded={ajustesAberto}
                 onClick={() => setAjustesAberto((v) => !v)}
               >
-                <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true">
+                <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true">
                   <circle cx="12" cy="12" r="3" />
                   <path d="M19.4 15a1.65 1.65 0 0 0 .33 1.82l.06.06a2 2 0 1 1-2.83 2.83l-.06-.06a1.65 1.65 0 0 0-1.82-.33 1.65 1.65 0 0 0-1 1.51V21a2 2 0 1 1-4 0v-.09a1.65 1.65 0 0 0-1-1.51 1.65 1.65 0 0 0-1.82.33l-.06.06a2 2 0 1 1-2.83-2.83l.06-.06a1.65 1.65 0 0 0 .33-1.82 1.65 1.65 0 0 0-1.51-1H3a2 2 0 1 1 0-4h.09a1.65 1.65 0 0 0 1.51-1 1.65 1.65 0 0 0-.33-1.82l-.06-.06a2 2 0 1 1 2.83-2.83l.06.06a1.65 1.65 0 0 0 1.82.33h.01a1.65 1.65 0 0 0 1-1.51V3a2 2 0 1 1 4 0v.09a1.65 1.65 0 0 0 1 1.51h.01a1.65 1.65 0 0 0 1.82-.33l.06-.06a2 2 0 1 1 2.83 2.83l-.06.06a1.65 1.65 0 0 0-.33 1.82v.01a1.65 1.65 0 0 0 1.51 1H21a2 2 0 1 1 0 4h-.09a1.65 1.65 0 0 0-1.51 1z" />
                 </svg>

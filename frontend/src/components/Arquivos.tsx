@@ -37,7 +37,7 @@ export function Arquivos({
   const carregar = useCallback(
     async (q: string, arquivados: boolean) => {
       if (!escopo.tenant) {
-        toast("escolha uma gaveta primeiro");
+        toast("escolha uma gaveta primeiro", "erro");
         onEscopoVazio();
         return;
       }
@@ -57,7 +57,7 @@ export function Arquivos({
         setTotal(d.total);
       } catch (e) {
         setDocs([]);
-        toast("docs: " + (e as Error).message);
+        toast("docs: " + (e as Error).message, "erro");
       } finally {
         setCarregando(false);
       }
@@ -109,14 +109,15 @@ export function Arquivos({
           (r.substituiu
             ? `♻ ${f.name}: substituiu "${r.doc_id}" — reindexando (job ${r.job_id})`
             : `⬆ ${f.name} (${r.tipo}): na fila — job ${r.job_id}, ${r.chunks_total} chunk[s]`) + dica,
+          "sucesso",
           6000,
         );
       } catch (e) {
         falha++;
-        toast(`⬆ ${f.name}: ${(e as Error).message}`, 7000);
+        toast(`⬆ ${f.name}: ${(e as Error).message}`, "erro", 7000);
       }
     }
-    if (lista.length > 1) toast(`upload: ${ok} enviado(s), ${falha} com erro`, 5000);
+    if (lista.length > 1) toast(`upload: ${ok} enviado(s), ${falha} com erro`, falha > 0 ? "erro" : "sucesso", 5000);
     /* o documento só passa a aparecer quando o worker cria a linha: recarrega
        agora e mais algumas vezes até a fila andar (senão a gaveta parece vazia) */
     const recarregar = () => void carregar(filtroRef.current, mostrarArq);
@@ -130,9 +131,9 @@ export function Arquivos({
         `/gavetas/${encodeURIComponent(escopo.memoria)}/export.zip?${qs({ tenant: operador ? escopo.tenant : undefined })}`,
         slug(escopo.memoria || "gaveta") + ".zip",
       );
-      toast("zip gerado ✓");
+      toast("zip gerado ✓", "sucesso");
     } catch (e) {
-      toast((e as Error).message);
+      toast((e as Error).message, "erro");
     }
   }
 
@@ -144,10 +145,10 @@ export function Arquivos({
       const r = await del<{ chunks_apagados: number; fontes_apagadas: number }>(
         `/gavetas/${encodeURIComponent(escopo.memoria)}?${qs({ tenant: operador ? escopo.tenant : undefined })}`,
       );
-      toast(`gaveta apagada: ${r.chunks_apagados} chunks, ${r.fontes_apagadas} fontes`);
+      toast(`gaveta apagada: ${r.chunks_apagados} chunks, ${r.fontes_apagadas} fontes`, "sucesso");
       onEscopoVazio();
     } catch (e) {
-      toast((e as Error).message);
+      toast((e as Error).message, "erro");
     }
   }
 
@@ -158,10 +159,10 @@ export function Arquivos({
         `/documents/${encodeURIComponent(doc.doc_id)}/arquivado?${qs({ memoria: escopo.memoria })}`,
         { arquivado: !arquivado, tenant: operador ? escopo.tenant : undefined },
       );
-      toast(arquivado ? "documento revivido ✓" : "documento arquivado ✓");
+      toast(arquivado ? "documento revivido ✓" : "documento arquivado ✓", "sucesso");
       void carregar(filtroRef.current, mostrarArq);
     } catch (e) {
-      toast((e as Error).message);
+      toast((e as Error).message, "erro");
     }
   }
 
@@ -172,10 +173,10 @@ export function Arquivos({
         `/docs/${encodeURIComponent(doc.doc_id)}?` +
           qs({ memoria: escopo.memoria, tenant: operador ? escopo.tenant : undefined }),
       );
-      toast(`apagado: ${r.chunks_apagados} chunks` + (r.fonte_apagada ? " + fonte" : ""));
+      toast(`apagado: ${r.chunks_apagados} chunks` + (r.fonte_apagada ? " + fonte" : ""), "sucesso");
       void carregar(filtroRef.current, mostrarArq);
     } catch (e) {
-      toast((e as Error).message);
+      toast((e as Error).message, "erro");
     }
   }
 
@@ -195,7 +196,7 @@ export function Arquivos({
         );
       }
     } catch (e) {
-      toast((e as Error).message, 6000);
+      toast((e as Error).message, "erro", 6000);
     }
   }
 
@@ -214,7 +215,7 @@ export function Arquivos({
   function criarNota() {
     const nome = nomeNota.trim().replace(/\s+/g, "-");
     if (!nome) {
-      toast("dê um nome à nota");
+      toast("dê um nome à nota", "erro");
       return;
     }
     setNovaNota(false);
@@ -474,8 +475,8 @@ export function Arquivos({
                         aria-label="copiar o doc_id"
                         onClick={() =>
                           void navigator.clipboard.writeText(doc.doc_id).then(
-                            () => toast("doc_id copiado ✓"),
-                            () => toast("copiar falhou — " + doc.doc_id),
+                            () => toast("doc_id copiado ✓", "sucesso"),
+                            () => toast("copiar falhou — " + doc.doc_id, "erro"),
                           )
                         }
                       >

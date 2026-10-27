@@ -14,6 +14,11 @@
   html {
     color-scheme: dark;
   }
+  /* T024 (27/10): o iOS pinta um véu cinza semitransparente sobre o elemento
+     no toque (o "botão com transparência" do ⚙). Desligado globalmente. */
+  * {
+    -webkit-tap-highlight-color: transparent;
+  }
   body {
     @apply bg-bg text-txt font-sans antialiased;
     font-size: 14px;
@@ -220,22 +225,34 @@
   }
 
   /* ---------------------------------------------------------------- toast */
-  .toast {
-    /* v3.23.1 — o aviso morava em bottom-5 e caía DENTRO do pé da conversa
-       (o campo de digitação). Medido no celular: toast 792–836px, pé 767–844px;
-       no desktop, toast 578 contra pé a partir de 550 — o texto aparecia por
-       baixo do campo, quase ilegível. Agora ele flutua ACIMA do pé (o pé tem
-       ~78px no celular e ~90px no desktop, mais a barra de gesto) e com z-index
-       acima dele, então nunca divide espaço com o que você está digitando. */
-    @apply pointer-events-none fixed left-1/2 z-[60] -translate-x-1/2
-      translate-y-3 rounded-campo border border-bordaforte bg-sup3 px-4 py-2.5
-      text-[14px] text-txt opacity-0 shadow-painel transition-all duration-200;
+  /* v3.23.1 — o aviso morava em bottom-5 e caía DENTRO do pé da conversa
+     (o campo de digitação). Medido no celular: toast 792–836px, pé 767–844px;
+     no desktop, toast 578 contra pé a partir de 550 — o texto aparecia por
+     baixo do campo, quase ilegível. Continua flutuando ACIMA do pé.
+     v3.25 (T025) — agora segue o gabarito do arquiteto
+     (arquiteto-sistema/references/notificacoes.md): sucesso = verde + ícone,
+     erro = vermelho + ícone, X fecha na hora, toasts empilham (máx. 3). */
+  .toast-pilha {
+    @apply pointer-events-none fixed left-1/2 z-[60] flex w-max max-w-[min(92vw,560px)]
+      -translate-x-1/2 flex-col items-center gap-2;
     bottom: calc(160px + env(safe-area-inset-bottom));
-    max-width: min(92vw, 560px);
-    text-align: center;
   }
-  .toast-ver {
-    @apply translate-y-0 opacity-100;
+  .toast {
+    @apply pointer-events-auto flex max-w-full items-center gap-2 rounded-campo
+      border px-4 py-2.5 text-[14px] shadow-painel;
+  }
+  .toast-neutro {
+    @apply border-bordaforte bg-sup3 text-txt;
+  }
+  .toast-sucesso {
+    @apply border-[rgba(63,185,80,.35)] bg-[color:var(--verde-suave)] text-verde-claro;
+  }
+  .toast-erro {
+    @apply border-[rgba(248,81,73,.35)] bg-[color:var(--vermelho-suave)] text-vermelho;
+  }
+  .toast-x {
+    @apply grid h-6 w-6 flex-none cursor-pointer place-items-center rounded-md opacity-60
+      hover:opacity-100;
   }
 }
 
@@ -981,7 +998,7 @@
   }
   .chat-ajustes-boto {
     @apply grid h-[48px] w-[48px] cursor-pointer place-items-center rounded-xl border
-      border-borda bg-sup2 text-txt2 hover:border-bordaforte hover:bg-sup3 hover:text-txt;
+      border-borda bg-sup2 text-txt hover:border-bordaforte hover:bg-sup3;
   }
   .chat-ajustes-boto[aria-expanded="true"] {
     @apply border-bordaforte bg-sup3 text-txt;

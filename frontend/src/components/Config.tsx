@@ -131,7 +131,7 @@ function Provider({ operador, tenant, onIrPainel }: { operador: boolean; tenant:
         setChave("");
       }
     } else {
-      toast("provider: " + (rProv.reason as Error).message);
+      toast("provider: " + (rProv.reason as Error).message, "erro");
     }
     if (rLista.status === "fulfilled") setLista(rLista.value.provedores);
     /* o chat precisa da lista mesmo se o config falhar; falha dela não derruba a tela */
@@ -210,10 +210,10 @@ function Provider({ operador, tenant, onIrPainel }: { operador: boolean; tenant:
       setP(r);
       setChave("");
       setFormPadraoAberto(false);
-      toast("provider salvo");
+      toast("provider salvo", "sucesso");
       await carregar();
     } catch (e) {
-      toast("salvar: " + (e as Error).message);
+      toast("salvar: " + (e as Error).message, "erro");
     } finally {
       setOcupado(false);
     }
@@ -238,13 +238,13 @@ function Provider({ operador, tenant, onIrPainel }: { operador: boolean; tenant:
         tenant: novo.paraTodos ? "global" : novo.escopoOrig,
         ...(novo.chave ? { chave: novo.chave } : {}),
       });
-      toast(editando ? "provedor atualizado" : "provedor cadastrado — descubra os modelos para o chat escolher");
+      toast(editando ? "provedor atualizado" : "provedor cadastrado — descubra os modelos para o chat escolher", "sucesso");
       setNovo({ nome: "", tipo: "openai", base_url: "", chave: "", modelo: "", paraTodos: true, escopoOrig: "global" });
       setEditando(null);
       setFormNomeadoAberto(false);
       await carregar();
     } catch (e) {
-      toast("salvar provedor: " + (e as Error).message);
+      toast("salvar provedor: " + (e as Error).message, "erro");
     } finally {
       setRodando(null);
     }
@@ -259,10 +259,11 @@ function Provider({ operador, tenant, onIrPainel }: { operador: boolean; tenant:
         r.modelos.length
           ? `${pr.nome}: ${r.modelos.length} modelo(s) descobertos`
           : (r.aviso ?? "descobrir modelos: o serviço não devolveu lista"),
+      r.modelos.length ? "sucesso" : "erro",
       );
       await carregar();
     } catch (e) {
-      toast("descobrir modelos: " + (e as Error).message);
+      toast("descobrir modelos: " + (e as Error).message, "erro");
     } finally {
       setRodando(null);
     }
@@ -272,10 +273,10 @@ function Provider({ operador, tenant, onIrPainel }: { operador: boolean; tenant:
     setRodando(pr.nome);
     try {
       await patch("/provedores/padrao", { id: pr.id });
-      toast(`"${pr.nome}" agora é o padrão — vale para quem não escolhe nada na conversa`);
+      toast(`"${pr.nome}" agora é o padrão — vale para quem não escolhe nada na conversa`, "sucesso");
       await carregar();
     } catch (e) {
-      toast("definir padrão: " + (e as Error).message);
+      toast("definir padrão: " + (e as Error).message, "erro");
     } finally {
       setRodando(null);
     }
@@ -298,7 +299,7 @@ function Provider({ operador, tenant, onIrPainel }: { operador: boolean; tenant:
       });
       await carregar();
     } catch (e) {
-      toast("ligar/desligar: " + (e as Error).message);
+      toast("ligar/desligar: " + (e as Error).message, "erro");
     } finally {
       setRodando(null);
     }
@@ -309,10 +310,10 @@ function Provider({ operador, tenant, onIrPainel }: { operador: boolean; tenant:
     setRodando(pr.nome);
     try {
       await del(`/provedores/${pr.id}`);
-      toast("provedor removido");
+      toast("provedor removido", "sucesso");
       await carregar();
     } catch (e) {
-      toast("remover: " + (e as Error).message);
+      toast("remover: " + (e as Error).message, "erro");
     } finally {
       setRodando(null);
     }
@@ -643,7 +644,7 @@ function Ferramentas({ operador, tenant, onControleMaquinas }: { operador: boole
       setControleMaq(rMcp.controle_maquinas !== false);
       onControleMaquinas?.(rMcp.controle_maquinas !== false);
     } catch (e) {
-      toast("servidores MCP: " + (e as Error).message);
+      toast("servidores MCP: " + (e as Error).message, "erro");
     }
   }, [operador, tenant, toast, onControleMaquinas]);
 
@@ -657,9 +658,9 @@ function Ferramentas({ operador, tenant, onControleMaquinas }: { operador: boole
       const r = await patch<{ controle_maquinas: boolean }>("/config/mcp/maquinas", { ativo: valor });
       setControleMaq(r.controle_maquinas);
       onControleMaquinas?.(r.controle_maquinas);
-      toast(valor ? "controle das máquinas ligado" : "controle das máquinas desligado — ninguém executa (chat, MCP e REST)");
+      toast(valor ? "controle das máquinas ligado" : "controle das máquinas desligado — ninguém executa (chat, MCP e REST)", "sucesso");
     } catch (e) {
-      toast("controle das máquinas: " + (e as Error).message);
+      toast("controle das máquinas: " + (e as Error).message, "erro");
     } finally {
       setRodandoMaq(false);
     }
@@ -682,9 +683,9 @@ function Ferramentas({ operador, tenant, onControleMaquinas }: { operador: boole
         mcp_interno: valor,
       });
       setP(r);
-      toast(valor ? "ferramentas do minirag ligadas no chat" : "ferramentas do minirag desligadas");
+      toast(valor ? "ferramentas do minirag ligadas no chat" : "ferramentas do minirag desligadas", "sucesso");
     } catch (e) {
-      toast("mcp interno: " + (e as Error).message);
+      toast("mcp interno: " + (e as Error).message, "erro");
     } finally {
       setRodando(null);
     }
@@ -696,10 +697,10 @@ function Ferramentas({ operador, tenant, onControleMaquinas }: { operador: boole
       await post<ServidorMcp>("/config/mcp", novo);
       setNovo({ nome: "", url: "", cabecalho: "" });
       setMostrarNovo(false);
-      toast("servidor MCP cadastrado");
+      toast("servidor MCP cadastrado", "sucesso");
       await carregar();
     } catch (e) {
-      toast("cadastrar: " + (e as Error).message);
+      toast("cadastrar: " + (e as Error).message, "erro");
     } finally {
       setRodando(null);
     }
@@ -711,10 +712,10 @@ function Ferramentas({ operador, tenant, onControleMaquinas }: { operador: boole
     try {
       const r = await post<TesteMcpResp>("/config/mcp/testar", { nome });
       setResultado(r);
-      toast(`${r.ferramentas} ferramenta(s) em ${r.nome} · ${r.ms} ms`);
+      toast(`${r.ferramentas} ferramenta(s) em ${r.nome} · ${r.ms} ms`, "sucesso");
       await carregar();
     } catch (e) {
-      toast("testar: " + (e as Error).message);
+      toast("testar: " + (e as Error).message, "erro");
     } finally {
       setRodando(null);
     }
@@ -726,7 +727,7 @@ function Ferramentas({ operador, tenant, onControleMaquinas }: { operador: boole
       await patch<ServidorMcp>(`/config/mcp/${encodeURIComponent(s.nome)}`, { ativo: !s.ativo });
       await carregar();
     } catch (e) {
-      toast("ligar/desligar: " + (e as Error).message);
+      toast("ligar/desligar: " + (e as Error).message, "erro");
     } finally {
       setRodando(null);
     }
@@ -737,10 +738,10 @@ function Ferramentas({ operador, tenant, onControleMaquinas }: { operador: boole
     setRodando(s.nome);
     try {
       await del(`/config/mcp/${encodeURIComponent(s.nome)}`);
-      toast("servidor removido");
+      toast("servidor removido", "sucesso");
       await carregar();
     } catch (e) {
-      toast("remover: " + (e as Error).message);
+      toast("remover: " + (e as Error).message, "erro");
     } finally {
       setRodando(null);
     }
@@ -926,9 +927,9 @@ function Conta({ nome, operador, onChaveNova }: { nome: string; operador: boolea
       const r = await post<{ chave: string; aviso: string }>(`/usuarios/${encodeURIComponent(nome)}/chave`);
       setNova(r.chave);
       onChaveNova(r.chave);
-      toast("chave trocada — guarde a nova");
+      toast("chave trocada — guarde a nova", "sucesso");
     } catch (e) {
-      toast("chave: " + (e as Error).message);
+      toast("chave: " + (e as Error).message, "erro");
     } finally {
       setOcupado(false);
     }
@@ -965,7 +966,7 @@ function Conta({ nome, operador, onChaveNova }: { nome: string; operador: boolea
               className="btn btn-mini ml-auto"
               onClick={() => {
                 void navigator.clipboard?.writeText(nova);
-                toast("chave copiada");
+                toast("chave copiada", "sucesso");
               }}
             >
               copiar
@@ -986,7 +987,7 @@ function Limites() {
   useEffect(() => {
     void get<ConfigResp>("/config")
       .then(setC)
-      .catch((e) => toast("config: " + (e as Error).message));
+      .catch((e) => toast("config: " + (e as Error).message, "erro"));
   }, [toast]);
 
   if (!c) return <div className="cartao dica">carregando…</div>;
@@ -1030,7 +1031,7 @@ function Esquecimento() {
           dias_carencia: String(r.esquecimento.dias_carencia),
         });
       })
-      .catch((e) => toast("config: " + (e as Error).message));
+      .catch((e) => toast("config: " + (e as Error).message, "erro"));
   }, [toast]);
 
   useEffect(() => {
@@ -1046,10 +1047,10 @@ function Esquecimento() {
         dias_excluir_arquivado: Number(form.dias_excluir_arquivado),
         dias_carencia: Number(form.dias_carencia),
       });
-      toast(`esquecimento salvo: arquiva em ${r.efetivos.dias_arquivar}d, apaga arquivado em ${r.efetivos.dias_excluir_arquivado}d, carência ${r.efetivos.dias_carencia}d`);
+      toast(`esquecimento salvo: arquiva em ${r.efetivos.dias_arquivar}d, apaga arquivado em ${r.efetivos.dias_excluir_arquivado}d, carência ${r.efetivos.dias_carencia}d`, "sucesso");
       carregar(); // prova de escrita: reler
     } catch (e) {
-      toast("salvar esquecimento: " + (e as Error).message);
+      toast("salvar esquecimento: " + (e as Error).message, "erro");
     } finally {
       setSalvando(false);
     }
@@ -1063,9 +1064,9 @@ function Esquecimento() {
       const extra = ex && (ex.usuarios_apagados.length || ex.docs_expurgados)
         ? ` · faxina: ${ex.usuarios_apagados.length} conta(s), ${ex.docs_expurgados} arquivado(s) apagado(s)`
         : "";
-      toast(`arquivados agora: ${r.docs_arquivados_agora}${extra}`);
+      toast(`arquivados agora: ${r.docs_arquivados_agora}${extra}`, "sucesso");
     } catch (e) {
-      toast("esquecimento: " + (e as Error).message);
+      toast("esquecimento: " + (e as Error).message, "erro");
     } finally {
       setRodando(false);
     }
@@ -1121,7 +1122,7 @@ function Sistema() {
   const [c, setC] = useState<ConfigResp | null>(null);
 
   useEffect(() => {
-    void get<HealthResp>("/health").then(setH).catch((e) => toast("health: " + (e as Error).message));
+    void get<HealthResp>("/health").then(setH).catch((e) => toast("health: " + (e as Error).message, "erro"));
     void get<ConfigResp>("/config").then(setC).catch(() => undefined);
   }, [toast]);
 
