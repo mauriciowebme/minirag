@@ -1,6 +1,6 @@
 # Próximos passos — minirag
 
-> **Última atualização:** 2026-10-25 · **Versão/Dono:** minirag 3.18.0-em-curso · Mauricio
+> **Última atualização:** 2026-10-27 · **Versão/Dono:** minirag 3.25.0 · Mauricio
 **Fonte**: varredura do chat contra a linha de base de harnesses maduros (Open WebUI, Hermes), medida no código em 25/10/2026 — tudo o que está aqui foi confirmado por leitura/grep, nada é opinião de memória. Análise é o Mauricio quem conduz; execução de qualquer T### exige OK explícito dele.
 
 **Decisão de escopo (25/10, Mauricio)**: não adotar harness pronto — o chat do minirag é a face do produto por tenant (gaveta, ferramentas, máquinas) e o duro já existe (streaming reanexável, fila, tarefa persistente, markdown, rastro). O caminho é roubar dos maduros o básico que falta. **Fora de linha de base, NÃO viram tarefa**: branch de conversa, 👍/👎, compartilhar por URL, slash commands, parâmetros por chat, TTS de leitura.
@@ -34,6 +34,8 @@
 | T021 | Buscar dentro do histórico | chat-srv + chat-ui | 🟡 Média | ✅ v3.18 | [#t021](#t021) |
 | T022 | Entrada por voz (microfone) | chat-ui | 🟢 Baixa | ✅ v3.18 | [#t022](#t022) |
 | T023 | Provedor escolhido na conversa + auto-descoberta de modelos | chat-srv + chat-ui | 🟡 Média | ✅ v3.19 | [#t023](#t023) |
+| T024 | Véu de toque iOS nos botões (⚙ "com transparência") | chat-ui | 🟢 Baixa | ✅ v3.25.0 | [#t024](#t024) |
+| T025 | Padronizar toast (sucesso verde / erro vermelho) | chat-ui | 🟡 Média | ✅ v3.25.0 | [#t025](#t025) |
 
 ---
 
@@ -304,6 +306,34 @@
 | **Descrição** | Cadastro de N provedores nomeados (tabela `provedores`, escopo próprio/global) com chave mascarada; a lista de modelos vem do próprio serviço (`GET /models`, fallback `/v1/models` e `/api/tags` do Ollama — padrão medido no Open WebUI e no Hermes), cacheada na linha com data. No chat, régua acima do composer escolhe provedor+modelo POR CONVERSA (memória do transporte); a resposta carrega selo "via X" gravado em `chat_mensagens`. Guarda: com cache descoberto, modelo fora da lista é 422. |
 | **Escopo** | Feito: serviço (`src/provedores.ts`), resolução no `resolverProvider`, colunas em `chat_tarefas`/`chat_mensagens`, rotas `/provedores`, tela em Configurações, régua no chat, bloco v3.19 na suíte (17 checagens). v3.19.1: seções de Configurações viraram **submenu do item pai no menu principal** (cobrado pelo dono 26/10; régua gravada em `arquiteto-sistema/references/navegacao-menu.md`). |
 | **Riscos** | Costeamento por provedor ainda não existe (o "tok" medido é do que saiu); lista de modelos de gateway com paginação pode cortar em 500. |
+
+<a id="t024"></a>
+### T024 — Véu de toque iOS nos botões (⚙ "com transparência")
+| Campo | Conteúdo |
+|---|---|
+| **Módulo** | chat-ui |
+| **Prioridade** | 🟢 Baixa — cosmético; medido ao vivo em 27/10 |
+| **Status** | ✅ v3.25.0 (executado em 27/10, suíte 26/26 verde) |
+| **Spec/Plano** | [docs/planos/002-rodada-pendencias-toque-toast.md](planos/002-rodada-pendencias-toque-toast.md) |
+| **Descrição** | Relato do dono (27/10, print do iPhone): "quando clico no botão de ajuste de conversa o botão vem com uma transparência". Medido ao vivo: o botão é 100% opaco nos dois estados (fundo `#161c25` fechado / `#1c2330` aberto, `opacity: 1`, sem alpha em cor). A causa é o **véu de toque do iOS**: o CSS não define `-webkit-tap-highlight-color` e o Safari do iPhone pinta um véu cinza semitransparente sobre o elemento no toque (afeta todos os botões; o ⚙ é o mais visível por ser o primeiro tocado). Fator secundário: o ícone da engrenagem (`Chat.tsx:1098`) é contorno fino `strokeWidth="1.8"`, que lê como "fantasma" ao lado dos ícones cheios. |
+| **Escopo** | Feito (27/10): (1) `-webkit-tap-highlight-color: transparent` global em `index.css`; (2) ícone ⚙ afirmado — `text-txt` no estado parado + `strokeWidth` 2. Validação: build verde + prova de tela (gear 48×48px, SVG no piso do chat). Faltou: confirmação no iPhone físico (emulador não pinta tap-highlight). |
+| **Arquivos afetados** | frontend/src/index.css, frontend/src/components/Chat.tsx (botão ⚙ em 1089–1102) |
+| **Dependências** | Nenhuma. |
+| **Riscos** | (1) muda o feedback de toque de TODO o app no iOS — validar no aparelho físico (emulador não pinta tap-highlight); (2) ícone mais grosso pode desalinhar visualmente com os demais ícones — conferir menu aberto e fechado. |
+
+<a id="t025"></a>
+### T025 — Padronizar toast (sucesso verde / erro vermelho)
+| Campo | Conteúdo |
+|---|---|
+| **Módulo** | chat-ui |
+| **Prioridade** | 🟡 Média — o dono aponta em 27/10; padrão já existe na skill do arquiteto |
+| **Status** | ✅ v3.25.0 (executado em 27/10; suíte 26/26 verde; **cores medidas ao vivo após corrigir o purge do Tailwind** — ver Escopo) |
+| **Spec/Plano** | [docs/planos/002-rodada-pendencias-toque-toast.md](planos/002-rodada-pendencias-toque-toast.md) |
+| **Descrição** | O toast do minirag é **cinza neutro para tudo** (medido: `Toast.tsx` tem só `toast(msg, ms?)`, sem tipo; `index.css` `.toast` tem cor única). Sucesso e erro se leem idênticos no relance. O padrão já existe e não é seguido: `arquiteto-sistema/references/notificacoes.md` (sucesso = verde + ícone; erro = vermelho + ícone; botão X; empilhamento). Medido 27/10: **104 call sites** em 11 componentes; `alert()` ausente ✓; `confirm()` só em ação destrutiva ✓ (regras que o app já cumpre). |
+| **Escopo** | Feito (27/10): parâmetro `tipo` (`neutro`/`sucesso`/`erro`, default `neutro`); cores/ícones da paleta do app (verde `#3fb950` / vermelho `#f85149`); botão **X**; **empilhamento** vertical; classificação dos 104 call sites. **Bug de render encontrado na validação final (27/10):** as classes `.toast-sucesso`/`.toast-erro`/`.toast-neutro` **sumiam do CSS compilado** — o Tailwind v3 faz purge das regras de `@layer components` cujo nome não aparece como literal no scan de conteúdo, e o `Toast.tsx` montava o nome por interpolação (`toast-${tipo}`), então as 3 variantes ficavam **sem cor** (só o `.toast` base, que é literal, sobrevivía). Medido: build limpo do Tailwind emitia `.toast`/`.toast-pilha`/`.toast-x` mas não as 3 variantes; ao vivo, `getComputedStyle` do toast dava bg/borda transparentes. **Correção:** mapa `CLASSE_TIPO` com os 3 nomes como literal em `Toast.tsx` (o scan os encontra e o Tailwind emite as regras). **Validação final (medida ao vivo):** toast de sucesso bg `rgba(63,185,80,.12)` + borda `rgba(63,185,80,.35)` + ícone ✓; toast de erro bg `rgba(248,81,73,.12)` + borda `rgba(248,81,73,.35)` + ícone ✓. Posição mantida (flutua acima do pé — desvio documentado na v3.23.1, medido). |
+| **Arquivos afetados** | frontend/src/components/Toast.tsx, frontend/src/index.css, 11 componentes (Gavetas, Painel, Editor, Jobs, Arquivos, Buscar, Maquinas, Config, Chat) |
+| **Dependências** | Nenhuma. |
+| **Riscos** | Muda o visual do feedback em TODO o app — validar com clique real (toast de sucesso e de erro) antes de publicar; call site sem tipo fica `neutro` (comportamento de hoje). |
 
 ---
 
