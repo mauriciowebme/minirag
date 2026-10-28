@@ -95,6 +95,14 @@ async function ingerir(
  *  só os blocos afetados pela mudança custa ~1min — é isso que se roda antes de pedir OK pro deploy.
  *  Bloco pulado aparece NOMINALMENTE no relatório final (regra 8 / verde falso é o pior defeito). */
 const FILTRO = (process.env.SO_BLOCOS ?? "").trim();
+/* v3.34 — `pkill -f X` casa com a PRÓPRIA linha do shell (`sh -c pkill -f X`) e mata quem o
+   executa: o docker exec volta 143 e o bloco morre no teardown, mesmo com o teste todo verde
+   (medido no container Debian trixie, procps-ng 4.0.4 — 6 blocos vermelhos por isso). O truque
+   do colchete faz o padrão não casar consigo mesmo: [m]aqfake não contém "maqfake". */
+const pkill = (padrao: string | number) => {
+  const s = String(padrao);
+  return `pkill -f "[${s[0]}]${s.slice(1)}"`;
+};
 const blocosRodados: string[] = [];
 const blocosPulados: string[] = [];
 function bloco(t: any, nome: string, fn: () => Promise<void>) {
@@ -353,7 +361,7 @@ test("minirag v2 — suíte completa", async (t) => {
     f.fechar("v1.8");
   });
 
-  await bloco(t, "MCP: JSON-RPC stateless com as 47 tools", async () => {
+  await bloco(t, "MCP: JSON-RPC stateless com as 49 tools", async () => {
     const f = fiscal();
     const H = { key: TESTKEY };
     const rpc = (id: unknown, method: string, params?: unknown, key: string | null = TESTKEY) =>
@@ -407,13 +415,16 @@ test("minirag v2 — suíte completa", async (t) => {
       "rodar_comando",
       "search",
       "upload_file",
+      /* v3.32: busca na web e leitura de página (entraram sem atualizar esta lista) */
+      "web_search",
+      "web_open",
       /* v3.8: vocabulário do túnel entra na superfície (20 tools) */
       "abrir", "area_transferencia", "buscar_arquivos", "editar_no_local", "estado_maquina",
       "eventos", "esperar_arquivo", "falar", "git_remoto", "grep_remoto",
       "janelas", "ler_arquivo", "listar_arquivos", "power", "processos",
       "rede", "rodar_lote", "servicos", "sessao", "escrever_arquivo",
     ].sort();
-    f.check("tools/list tem 47 tools (paridade com a REST)", JSON.stringify(nomes) === JSON.stringify(ESPERADAS.sort()), nomes.length);
+    f.check("tools/list tem 49 tools (paridade com a REST)", JSON.stringify(nomes) === JSON.stringify(ESPERADAS.sort()), nomes.length);
 
     r = await rpc(5, "tools/call", { name: "health" }, null);
     f.check("tools/call sem Bearer -> 401", r.status === 401 && "error" in (r.json ?? {}), r.texto.slice(0, 150));
@@ -2391,7 +2402,7 @@ await bloco(t, "v3.6: máquinas por usuário — hub WS, pareamento, run, escopo
     r = await call("GET", "/maquina/cliente/mac", { key: TESTKEY });
     f.check("plataforma fora de win|linux é 404", r.status === 404, r.texto.slice(0, 100));
 
-    execFileSync("docker", ["exec", CONTAINER, "sh", "-c", "pkill -f maqfake || true"]);
+    execFileSync("docker", ["exec", CONTAINER, "sh", "-c", `${pkill("maqfake")} || true`]);
     f.fechar("v3.6 maquinas");
   });
 
@@ -2881,7 +2892,7 @@ await bloco(t, "v3.6: máquinas por usuário — hub WS, pareamento, run, escopo
 
     /* volta o provider para inerte e derruba os falsos (não contaminar o freio final) */
     await call("PUT", "/config/provider", { key: OPKEY, corpo: { ativo: false, global: true } });
-    if (CONTAINER) execFileSync("docker", ["exec", CONTAINER, "sh", "-c", "pkill -f maqfake8 || pkill -f 9912 || true; pkill -f 9912 || true"]);
+    if (CONTAINER) execFileSync("docker", ["exec", CONTAINER, "sh", "-c", `${pkill("maqfake8")} || ${pkill("9912")} || true`]);
     f.fechar("v3.8 vocab e falas");
   });
 
@@ -3135,7 +3146,7 @@ await bloco(t, "v3.6: máquinas por usuário — hub WS, pareamento, run, escopo
     f.check("lista fica sem a linha apagada", !(r.json?.provedores ?? []).some((x: any) => x.nome === "sonda319"), r.texto.slice(0, 160));
 
     await call("DELETE", `/chat?memoria=${GAV}`, { key: TESTKEY });
-    if (CONTAINER) execFileSync("docker", ["exec", CONTAINER, "sh", "-c", `pkill -f ${PORTA} || true`]);
+    if (CONTAINER) execFileSync("docker", ["exec", CONTAINER, "sh", "-c", `${pkill(PORTA)} || true`]);
     f.fechar("v3.19 provedores");
   });
 
@@ -3230,7 +3241,7 @@ await bloco(t, "v3.6: máquinas por usuário — hub WS, pareamento, run, escopo
 
     await call("PUT", "/config/provider", { key: OPKEY, corpo: { ativo: false, global: true } });
     await call("DELETE", `/chat?memoria=${GAV}`, { key: TESTKEY });
-    execFileSync("docker", ["exec", CONTAINER, "sh", "-c", `pkill -f ${PORTF} || true`]);
+    execFileSync("docker", ["exec", CONTAINER, "sh", "-c", `${pkill(PORTF)} || true`]);
     f.fechar("v3.23 telas");
   });
 
@@ -3323,7 +3334,7 @@ await bloco(t, "v3.6: máquinas por usuário — hub WS, pareamento, run, escopo
 
     await call("PUT", "/config/provider", { key: OPKEY, corpo: { ativo: false, global: true } });
     await call("DELETE", `/chat?memoria=${GAV}`, { key: TESTKEY });
-    execFileSync("docker", ["exec", CONTAINER, "sh", "-c", `pkill -f ${PORTF} || true`]);
+    execFileSync("docker", ["exec", CONTAINER, "sh", "-c", `${pkill(PORTF)} || true`]);
     f.fechar("v3.24 código ao vivo");
   });
 
