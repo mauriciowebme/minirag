@@ -132,11 +132,13 @@ export async function salvarProvedor(user: Usuario, corpo: CorpoProvedor): Promi
   if (!Number.isFinite(temperatura) || temperatura < 0 || temperatura > 1) throw erro422("temperatura deve estar entre 0 e 1");
   const maxRodadas = corpo.max_rodadas === undefined ? 5 : Number(corpo.max_rodadas);
   if (!Number.isInteger(maxRodadas) || maxRodadas < 0 || maxRodadas > 60) throw erro422("max_rodadas deve ser 0–60");
-  const prompt = corpo.system_prompt === undefined ? "" : String(corpo.system_prompt);
-  if (prompt.length > 8000) throw erro422("instruções com no máximo 8000 caracteres");
 
   const anterior = await q<Linha>(`SELECT * FROM provedores WHERE escopo = $1 AND nome = $2`, [escopo, nome]);
   const l = anterior.rows[0];
+  /* v3.34: omitir as instruções ao EDITAR preserva as que já estavam (antes zerava sem avisar);
+     provedor novo sem instruções nasce vazio — `""` explícito também é conversa pura. */
+  const prompt = corpo.system_prompt === undefined ? String(l?.system_prompt ?? "") : String(corpo.system_prompt);
+  if (prompt.length > 8000) throw erro422("instruções com no máximo 8000 caracteres");
   const chave =
     corpo.chave === undefined || corpo.chave === null || corpo.chave === "***" ? String(l?.chave ?? "") : String(corpo.chave);
   const padraoDesejado = corpo.padrao === undefined ? Boolean(l?.padrao) : Boolean(corpo.padrao);

@@ -12,6 +12,7 @@
  *   - cada usuário pode ter a sua configuração; o operador grava o padrão global (escopo '*').
  */
 import { Usuario, log, tenantFor } from "./config";
+import { REGRAS_CASA } from "./regras";
 import { erro409, erro422 } from "./errors";
 import { q } from "./db";
 import { apertarRodada, custoDoPayload, type MsgChat, montarPayload } from "./compactar";
@@ -147,6 +148,19 @@ export async function initProvider(): Promise<void> {
   /* v3.23: telas geradas pelo agente (HTML+CSS+JS) viajam com a resposta */
   await q(`ALTER TABLE chat_mensagens ADD COLUMN IF NOT EXISTS telas JSONB`);
   await q(`CREATE INDEX IF NOT EXISTS chat_tenant_idx ON chat_mensagens (tenant, memoria, id)`);
+  /* v3.34 — as instruções da casa passam a viver no CAMPO EDITÁVEL (Configurações), não no
+     código: quem abre a tela vê exatamente o que o modelo recebe. Só preenche o que está vazio
+     ou o resquício da v3.33 ("Seu nome é Clauricio!") — prompt personalizado não é tocado. */
+  await q(
+    `UPDATE provider_config SET system_prompt = $1, atualizado_em = now()
+      WHERE btrim(system_prompt) = '' OR btrim(system_prompt) = 'Seu nome é Clauricio!'`,
+    [REGRAS_CASA],
+  );
+  /* a tabela de provedores nomeados pode nascer depois desta — só mexe se ela já existir */
+  const temProvedores = await q<{ t: string | null }>(`SELECT to_regclass('provedores')::text AS t`);
+  if (temProvedores.rows[0]?.t) {
+    await q(`UPDATE provedores SET system_prompt = $1, atualizado_em = now() WHERE btrim(system_prompt) = ''`, [REGRAS_CASA]);
+  }
 }
 
 /** Janela de contexto efetiva: o que o operador digitou > o que a detecção achou > padrão. */
@@ -278,6 +292,8 @@ export async function verProvider(user: Usuario, tenantArg?: string | null) {
     temperatura: l ? Number(l.temperatura) : 0.2,
     system_prompt: l?.system_prompt ?? "",
     tem_system_prompt: Boolean(l?.system_prompt?.trim()),
+    /** v3.34: o texto padrão da casa, para o botão "restaurar instruções padrão" da tela */
+    regras_padrao: REGRAS_CASA,
     mcp_interno: Boolean(l?.mcp_interno ?? false),
     max_rodadas: l ? Number(l.max_rodadas ?? RODADAS_PADRAO) : RODADAS_PADRAO,
     memoria_turnos: l ? Number(l.memoria_turnos ?? MEMORIA_PADRAO) : MEMORIA_PADRAO,
@@ -343,6 +359,9 @@ export async function salvarProvider(
     throw erro422("temperatura deve estar entre 0 e 1");
   }
 
+  /* v3.34: sem regra embutida — provider novo sem instruções continua nascendo vazio (conversa
+     pura). As regras da casa são o VALOR INICIAL do campo para quem já existia + o botão
+     "restaurar instruções padrão"; quem apaga o campo escolhe conversa pura. */
   const systemPrompt =
     body.system_prompt === undefined ? linhaAnterior?.system_prompt ?? "" : String(body.system_prompt);
   if (systemPrompt.length > LIMITE_PROMPT) {
@@ -686,9 +705,11 @@ export async function testarProvider(user: Usuario, body: Record<string, unknown
  *  pensamento com o tempo dele, fala de caminho, ferramenta com o tempo dela. A resposta
  *  final NÃO entra aqui: ela é a própria bolha. */
 export type SegmentoRastro =
-  | { tipo: "pensamento"; texto: string; ms: number }
-  | { tipo: "narracao"; texto: string }
-  | { tipo: "ferramenta"; servidor: string; nome: string; ok: boolean; ms: number };
+  /** `em` (v3.34): ms desde o começo do turno em que o passo ACONTECEU — a tela ordena por ele,
+   *  nunca pela ordem de chegada (é o que garante a trilha cronológica ao vivo e ao reabrir). */
+  | { tipo: "pensamento"; texto: string; ms: number; em?: number }
+  | { tipo: "narracao"; texto: string; em?: number }
+  | { tipo: "ferramenta"; servidor: string; nome: string; ok: boolean; ms: number; em?: number };
 
 /** Evento do chat com streaming (rota /chat/stream). */
 export type EventoChat =
@@ -696,6 +717,8 @@ export type EventoChat =
   /** v3.13: pedaço do raciocínio do modelo (estilo Open WebUI) — mostrado ao vivo, recolhido no fim */
   | { tipo: "raciocinio"; texto: string }
   | { tipo: "descartar" }
+  /** v3.34: a ferramenta COMEÇOU (linha viva "Consultando X… Ns" enquanto ela roda) */
+  | { tipo: "ferramenta_inicio"; nome: string }
   | { tipo: "ferramenta"; servidor: string; nome: string; ok: boolean; ms: number }
   | { tipo: "fala"; texto: string }
   /** v3.23: tela gerada (HTML+CSS+JS) — o card com preview funcional aparece ao vivo */
@@ -808,18 +831,21 @@ export async function responderChat(
      crus; se for a ferramenta de tela, o campo `html` já desescapado é emitido em pedaços
      (só o que ainda não foi mostrado). O dono pediu: "quero ver o streaming digitando o código". */
   const parciais = new Map<number, { nome: string; bruto: string; emitido: number }>();
+  /* v3.34: o relógio do turno começa AQUI — cada linha do rastro grava `em` (ms desde este
+     instante) para a tela poder ordenar a trilha pelo que aconteceu, não pela chegada. */
+  const inicio = Date.now();
+  const decorrido = (de = Date.now()): number => Math.max(0, de - inicio);
   let bloco: { texto: string; inicio: number } | null = null;
   const fecharBloco = (): void => {
     if (!bloco) return;
     const texto = bloco.texto.trim();
     const ms = Math.max(0, Date.now() - bloco.inicio);
-    if (texto) rastro.push({ tipo: "pensamento", texto, ms });
+    if (texto) rastro.push({ tipo: "pensamento", texto, ms, em: decorrido(bloco.inicio) });
     bloco = null;
   };
   /* v3.13: o raciocínio do modelo (reasoning_content/thinking) vai para a tela AO VIVO e
      fica gravado na mensagem — o Open WebUI faz assim ("Thinking…" → "Thought for Ns"). */
   let pensamento = "";
-  const inicio = Date.now();
   let texto = "";
   let rodadas = 0;
   let aviso: string | null = null;
@@ -924,7 +950,7 @@ export async function responderChat(
       /* sem streaming não dá para medir quanto tempo foi pensamento: grava sem tempo e a
          tela escreve "Pensou" em vez de "Pensou por Ns" — não invento número que não medi */
       const bruto = String(r.pensamento).trim();
-      if (bruto) rastro.push({ tipo: "pensamento", texto: bruto, ms: 0 });
+      if (bruto) rastro.push({ tipo: "pensamento", texto: bruto, ms: 0, em: decorrido() });
     }
     fecharBloco();
     if (!pedidas.length) {
@@ -938,7 +964,7 @@ export async function responderChat(
     const falaRodada = String(r.texto ?? "").trim();
     if (falaRodada) {
       falas.push(falaRodada);
-      rastro.push({ tipo: "narracao", texto: falaRodada });
+      rastro.push({ tipo: "narracao", texto: falaRodada, em: decorrido() });
       emitir?.({ tipo: "fala", texto: falaRodada });
     } else if (emitir && saiuTexto) emitir({ tipo: "descartar" });
     if (rodadas > cfg.max_rodadas) {
@@ -961,6 +987,9 @@ export async function responderChat(
       } catch {
         args = { argumento_nao_entendido: String(c.function?.arguments ?? "").slice(0, 200) };
       }
+      /* v3.34: avisa a tela ANTES de executar — a linha viva "Consultando X… Ns" aparece
+         enquanto a ferramenta roda (antes, a linha só nascia no fim e a trilha parecia parada) */
+      emitir?.({ tipo: "ferramenta_inicio", nome });
       const antes = Date.now();
       const exec = await executarFerramenta(nome, args, user, pacote, { memoria });
       const duracao = Date.now() - antes;
@@ -972,7 +1001,7 @@ export async function responderChat(
         resumo: resumirSaida(exec.saida, exec.ok),
         ms: duracao,
       });
-      rastro.push({ tipo: "ferramenta", servidor: exec.servidor, nome: exec.nome, ok: exec.ok, ms: duracao });
+      rastro.push({ tipo: "ferramenta", servidor: exec.servidor, nome: exec.nome, ok: exec.ok, ms: duracao, em: decorrido(antes) });
       emitir?.({ tipo: "ferramenta", servidor: exec.servidor, nome: exec.nome, ok: exec.ok, ms: exec.ms });
       /* v3.23: tela gerada aparece na hora, sem esperar o fim do turno */
       if (exec.tela) {
