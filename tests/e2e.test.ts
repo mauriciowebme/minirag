@@ -1262,8 +1262,14 @@ test("minirag v2 — suíte completa", async (t) => {
     let job = await esperarJob(TESTKEY, r.json?.job_id);
     f.check("documento da v2.8 indexado", job.status === "concluido", job);
 
-    const provedor = (corpo: Record<string, unknown>) =>
-      call("PUT", "/config/provider", {
+    const provedor = async (corpo: Record<string, unknown>) => {
+      /* v3.35: as instruções são da CONTA (linha do escopo), não do provider. O chat deste bloco
+         roda como `teste`, então o texto tem que ser gravado no escopo dele — o PUT do provider
+         continua gravando a linha global, e as duas pontas ficam iguais. */
+      if (corpo.system_prompt !== undefined) {
+        await call("PUT", "/config/instrucoes", { key: OPKEY, corpo: { texto: String(corpo.system_prompt), tenant: "teste" } });
+      }
+      return call("PUT", "/config/provider", {
         key: OPKEY,
         corpo: {
           tipo: "litellm",
@@ -1281,6 +1287,7 @@ test("minirag v2 — suíte completa", async (t) => {
           ...corpo,
         },
       });
+    };
 
     /* ---- 1. provider é o único pré-requisito; sem prompt = conversa pura ---- */
     r = await provedor({});
@@ -1582,7 +1589,11 @@ test("minirag v2 — suíte completa", async (t) => {
     const fluxoRes = await fluxo(TESTKEY, { pergunta: "qual o total da nota da Beta?", memoria: GAV });
     f.check("content-type é text/event-stream", /text\/event-stream/.test(fluxoRes.ctype), fluxoRes.ctype);
     const tipos = fluxoRes.eventos.map((e) => e.tipo);
-    f.check("pedaços chegaram um a um (>=2 delta)", fluxoRes.eventos.filter((e) => e.tipo === "delta").length >= 2, tipos.join(","));
+    /* v3.35: o texto da rodada que pede ferramenta é NARRAÇÃO — ele nasce no rastro, não na
+       bolha. Prova: nenhum delta antes do evento `fala` (antes, os pedaços dele apareciam). */
+    const posFala9 = tipos.indexOf("fala");
+    const posDelta9 = tipos.indexOf("delta");
+    f.check("o texto da rodada não passa pela bolha antes da ferramenta (v3.35)", posDelta9 === -1 || posDelta9 > posFala9, tipos.join(","));
     f.check("a fala do caminho virou balão próprio antes da resposta (v3.8)", tipos.includes("fala") && !tipos.includes("descartar"), tipos.join(","));
     f.check("a chamada de ferramenta aparece ainda durante o fluxo", tipos.indexOf("ferramenta") < tipos.indexOf("fim") && tipos.includes("ferramenta"), tipos.join(","));
     f.check("o fluxo termina com fim", tipos[tipos.length - 1] === "fim", tipos[tipos.length - 1]);
@@ -2787,6 +2798,12 @@ await bloco(t, "v3.6: máquinas por usuário — hub WS, pareamento, run, escopo
     const tool = trilha.find((s) => s.tipo === "ferramenta") ?? {};
     f.check("a linha da ferramenta diz qual foi, se deu certo e quanto demorou", tool.nome === "list_gavetas" && tool.servidor === "minirag" && tool.ok === true && Number(tool.ms) >= 0, JSON.stringify(tool).slice(0, 140));
     f.check("a fala de caminho está na trilha (não foi engolida pela resposta)", trilha.some((s) => s.tipo === "narracao" && /vou ver as gavetas/.test(String(s.texto))), String(trilha.find((s) => s.tipo === "narracao")?.texto ?? "").slice(0, 60));
+    /* v3.35 — a narração NASCE no rastro: nenhum pedaço dela pode ter passado como delta */
+    const deltasV315 = rod.eventos.filter((e: any) => e.tipo === "delta").map((e: any) => String(e.texto ?? "")).join("");
+    const evFala315 = rod.eventos.filter((e: any) => e.tipo === "fala");
+    f.check("NARRAÇÃO NUNCA PASSA PELA BOLHA: nenhum delta carrega o texto da fala", !deltasV315.includes("vou ver as gavetas"), deltasV315.slice(0, 120) || "(nenhum delta)");
+    f.check("a fala chega como evento próprio, antes da ferramenta", evFala315.length === 1 && /vou ver as gavetas/.test(String(evFala315[0].texto)), JSON.stringify(evFala315).slice(0, 160));
+    f.check("a RESPOSTA continua fluindo como delta (o que não é fala digita)", deltasV315.includes("PRONTO-V315"), deltasV315.slice(-80));
     f.check("a resposta final NÃO é uma etapa do rastro", !trilha.some((s) => /PRONTO-V315/.test(String(s.texto ?? ""))) && String(fim.dados?.resposta ?? "").includes("PRONTO-V315"), String(fim.dados?.resposta ?? "").slice(0, 60));
 
     r = await call("GET", `/chat?memoria=${GAV}&limit=10`, { key: OPKEY });
@@ -3075,8 +3092,9 @@ await bloco(t, "v3.6: máquinas por usuário — hub WS, pareamento, run, escopo
       "if(u.indexOf('models')>=0){res.setHeader('content-type','application/json');return res.end(JSON.stringify({data:[{id:'sonda-a'},{id:'sonda-b'}]}));}",
       "let j={};try{j=JSON.parse(b||'{}')}catch(e){}",
       "const m=j.messages||[];",
+      "const sys=(m[0]&&m[0].role==='system')?String(m[0].content):'';",
       "res.setHeader('content-type','application/json');",
-      "res.end(JSON.stringify({choices:[{message:{role:'assistant',content:'sonda:'+String(j.model||'?')+'|q'+m.length}}]}));",
+      "res.end(JSON.stringify({choices:[{message:{role:'assistant',content:'sonda:'+String(j.model||'?')+'|q'+m.length+'|sys:'+sys.slice(0,40)}}]}));",
       "});});",
       `s.listen(${PORTA},'127.0.0.1');setTimeout(()=>process.exit(0),200000);`,
     ].join("");
@@ -3107,8 +3125,20 @@ await bloco(t, "v3.6: máquinas por usuário — hub WS, pareamento, run, escopo
     const pv = (r.json?.provedores ?? []).find((x: any) => x.nome === "sonda319") ?? {};
     f.check("cache de modelos grava na linha (com data)", (pv.modelos ?? []).length === 2 && typeof pv.modelos_em === "string", JSON.stringify(pv).slice(0, 220));
 
+    /* v3.35 — as instruções são da CONTA: campo único, fora do provider, valem para todos os
+       modelos (inclusive os nomeados, que não guardam mais prompt na própria linha) */
+    const antes335 = await call("GET", "/config/provider?tenant=teste", { key: OPKEY });
+    const promptAntes335 = String(antes335.json?.system_prompt ?? "");
+    r = await call("PUT", "/config/instrucoes", { key: OPKEY, corpo: { texto: "PROMPT-DA-CONTA-335", tenant: "teste" } });
+    f.check("operador grava as instruções do cliente (campo único da conta)", r.status === 200 && r.json?.system_prompt === "PROMPT-DA-CONTA-335" && r.json?.escopo === "teste", r.texto.slice(0, 160));
+    r = await call("GET", "/config/provider?tenant=teste", { key: OPKEY });
+    f.check("a releitura devolve o texto da CONTA (prova de escrita)", r.json?.system_prompt === "PROMPT-DA-CONTA-335" && r.json?.tem_system_prompt === true, r.texto.slice(0, 160));
+    r = await call("PUT", "/config/instrucoes", { key: TESTKEY, corpo: { texto: "tentativa do comum" } });
+    f.check("usuário comum NÃO troca as instruções da conta (403)", r.status === 403, r.texto.slice(0, 120));
+
     r = await call("POST", "/chat", { key: TESTKEY, corpo: { pergunta: "oi sonda", memoria: GAV, provedor: "sonda319", modelo: "sonda-b" } });
     f.check("resposta VEIO do provedor escolhido (modelo pedido no lugar do cadastrado)", r.status === 200 && String(r.json?.resposta).includes("sonda:sonda-b"), r.texto.slice(0, 200));
+    f.check("o provedor NOMEADO recebe as instruções da CONTA no system", /sys:PROMPT-DA-CONTA-335/.test(String(r.json?.resposta)), r.texto.slice(0, 220));
     f.check("o fim diz quem respondeu", r.json?.provedor === "sonda319", r.texto.slice(0, 200));
 
     r = await call("GET", `/chat?memoria=${GAV}`, { key: TESTKEY });
@@ -3145,6 +3175,7 @@ await bloco(t, "v3.6: máquinas por usuário — hub WS, pareamento, run, escopo
     r = await call("GET", "/provedores", { key: TESTKEY });
     f.check("lista fica sem a linha apagada", !(r.json?.provedores ?? []).some((x: any) => x.nome === "sonda319"), r.texto.slice(0, 160));
 
+    await call("PUT", "/config/instrucoes", { key: OPKEY, corpo: { texto: promptAntes335, tenant: "teste" } });
     await call("DELETE", `/chat?memoria=${GAV}`, { key: TESTKEY });
     if (CONTAINER) execFileSync("docker", ["exec", CONTAINER, "sh", "-c", `${pkill(PORTA)} || true`]);
     f.fechar("v3.19 provedores");
