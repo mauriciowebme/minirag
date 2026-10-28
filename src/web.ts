@@ -10,6 +10,7 @@
  */
 import { lookup } from "node:dns/promises";
 import { isIP } from "node:net";
+import { renderizar } from "./navegador";
 
 const UA =
   "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/124.0 Safari/537.36";
@@ -247,13 +248,21 @@ function ipInterno(ip: string) {
 }
 
 /** web_open: baixa a página e devolve texto limpo. Bloqueia endereço interno. */
-export async function abrirPagina(urlBruta: string): Promise<{
+const POUCO_TEXTO = 250;
+
+export async function abrirPagina(
+  urlBruta: string,
+  opcoes: { js?: boolean } = {},
+): Promise<{
   url: string;
   titulo: string;
   texto: string;
   truncado: boolean;
   bytes: number;
+  renderizado: boolean;
+  ms: number;
 }> {
+  const t0 = Date.now();
   const cru = (urlBruta ?? "").trim();
   let u: URL;
   try {
@@ -283,7 +292,28 @@ export async function abrirPagina(urlBruta: string): Promise<{
   const tituloBruto = /<title[^>]*>([\s\S]{0,300}?)<\/title>/i.exec(r.texto)?.[1] ?? "";
   const og = /property=["']og:title["'][^>]*content=["']([^"']{1,300})["']/i.exec(r.texto)?.[1] ?? "";
   const titulo = limparEspacos(entidades(og || tituloBruto));
-  const texto = htmlParaTexto(r.texto);
+  let texto = htmlParaTexto(r.texto);
+  let renderizado = false;
+
+  /* v3.33: site que monta o conteúdo por JS entrega HTML oco ao curl — muito markup e
+   * pouco texto. Página pequena e simples (ex.: example.com, 577 bytes) NÃO paga o
+   * navegador: só renderiza com js:true, ou quando o HTML tem corpo para uma SPA. */
+  const sinalDeJs = /id=["'](root|app|__next)["']|__NEXT_DATA__|window\.__(NUXT|INITIAL_STATE)/i.test(r.texto);
+  const valeRenderizar = opcoes.js === true || texto.length < POUCO_TEXTO || (texto.length < 900 && sinalDeJs);
+  const htmlGordo = r.bytes > 3000;
+  if (valeRenderizar && htmlGordo && process.env.MINIRAG_NAVEGADOR !== "0") {
+    try {
+      const nav = await renderizar(u.toString());
+      if (nav.texto.length > texto.length) {
+        texto = nav.texto;
+        renderizado = true;
+      }
+    } catch (e) {
+      if (opcoes.js === true) throw new Error(`nao consegui renderizar a pagina: ${(e as Error).message}`);
+      /* sem navegador: devolve o que o curl trouxe, e o texto vazio fala por si */
+    }
+  }
+
   const truncado = texto.length > MAX_TEXTO;
   return {
     url: u.toString(),
@@ -291,5 +321,7 @@ export async function abrirPagina(urlBruta: string): Promise<{
     texto: truncado ? texto.slice(0, MAX_TEXTO) + "\n[... cortado]" : texto,
     truncado,
     bytes: r.bytes,
+    renderizado,
+    ms: Date.now() - t0,
   };
 }

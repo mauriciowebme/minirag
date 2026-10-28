@@ -88,8 +88,11 @@ WORKDIR /app
 # poppler roda o PDF escaneado (o Python do embedder chama pdftoppm).
 # curl é o cliente HTTP da busca web: o Brave recusa o handshake TLS do Node (429),
 # mas aceita o do curl — ver src/web.ts.
+# chromium (+381 MB) é o navegador do web_open para site que só existe com JavaScript;
+# fonts-liberation evita texto invisível. MINIRAG_NAVEGADOR=0 desliga sem rebuild.
 RUN apt-get update \
-    && apt-get install -y --no-install-recommends poppler-utils curl ca-certificates \
+    && apt-get install -y --no-install-recommends \
+        poppler-utils curl ca-certificates chromium fonts-liberation \
     && rm -rf /var/lib/apt/lists/*
 
 # deps Python + modelo vindos do estágio 1 (mesmas camadas, sem reinstalar)

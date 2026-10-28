@@ -280,11 +280,12 @@ export const TOOLS: Tool[] = [
   {
     name: "web_open",
     description:
-      "Abre uma URL da internet e devolve o TEXTO da página (sem menu, sem script), até 12000 caracteres. Use depois do web_search para ler a fonte que interessou, ou quando o usuário mandar um link.",
+      "Abre uma URL da internet e devolve o TEXTO da página (sem menu, sem script), até 12000 caracteres. Se o site monta o conteúdo por JavaScript, isso é detectado sozinho e a página é renderizada num navegador (fica 2 a 15s). Use depois do web_search para ler a fonte que interessou, ou quando o usuário mandar um link.",
     inputSchema: {
       type: "object",
       properties: {
         url: { type: "string", description: "endereço http(s) da página" },
+        js: { type: "boolean", description: "força a renderização por navegador (padrão: só quando o texto vier vazio)" },
       },
       required: ["url"],
     },
@@ -702,7 +703,7 @@ async function executarTool(
         site: args.site === undefined ? undefined : String(args.site),
       });
     case "web_open":
-      return abrirPagina(String(args.url ?? ""));
+      return abrirPagina(String(args.url ?? ""), { js: args.js === true });
     case "search":
       if (typeof args.query !== "string" || !args.query.trim()) {
         throw new Error("parametros invalidos: campo obrigatorio: query");
