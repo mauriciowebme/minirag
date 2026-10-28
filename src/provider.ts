@@ -270,6 +270,38 @@ export async function resolverProvider(
   };
 }
 
+/** v3.35 — instruções do modelo são da CONTA, não do modelo: o texto vale para qualquer
+ *  provider escolhido na conversa. Mora na linha do ESCOPO em `provider_config` (a linha do
+ *  provider nomeado não carrega prompt próprio). Linha própria, mesmo vazia, vence a global —
+ *  apagar o campo é escolha de "conversa pura", não herança silenciosa. */
+export async function lerInstrucoes(tenant: string): Promise<string> {
+  const r = await q<{ escopo: string; system_prompt: string }>(
+    `SELECT escopo, system_prompt FROM provider_config WHERE escopo IN ($1, $2)
+     ORDER BY (escopo = $1) DESC LIMIT 1`,
+    [tenant, GLOBAL],
+  );
+  return String(r.rows[0]?.system_prompt ?? "");
+}
+
+/** Grava SÓ as instruções (a tela salva esse campo sozinho, sem tocar no provider). */
+export async function salvarInstrucoes(
+  user: Usuario,
+  body: { texto?: unknown; tenant?: unknown },
+): Promise<{ escopo: string; system_prompt: string; tem_system_prompt: boolean; regras_padrao: string }> {
+  const escopo = tenantFor(user, typeof body.tenant === "string" ? body.tenant : null);
+  const texto = String(body.texto ?? "");
+  if (texto.length > LIMITE_PROMPT) {
+    throw erro422(`as instruções do modelo têm no máximo ${LIMITE_PROMPT} caracteres`);
+  }
+  await q(
+    `INSERT INTO provider_config (escopo, base_url, modelo, system_prompt)
+     VALUES ($1, '', '', $2)
+     ON CONFLICT (escopo) DO UPDATE SET system_prompt = EXCLUDED.system_prompt, atualizado_em = now()`,
+    [escopo, texto],
+  );
+  return { escopo, system_prompt: texto, tem_system_prompt: Boolean(texto.trim()), regras_padrao: REGRAS_CASA };
+}
+
 /** O que o painel pode ver: tudo menos a chave em claro. */
 export async function verProvider(user: Usuario, tenantArg?: string | null) {
   const tenant = tenantFor(user, tenantArg);
@@ -281,6 +313,8 @@ export async function verProvider(user: Usuario, tenantArg?: string | null) {
   const usaPropria = tenant !== GLOBAL && (completa(propria.rows[0]) || !global.rows[0]);
   const l = (usaPropria ? propria.rows[0] : global.rows[0]) ?? propria.rows[0] ?? global.rows[0] ?? null;
   const plano = planoDeJanela(l);
+  /* v3.35: a instrução mostrada é a da CONTA (não a da linha que por acaso serve o chat) */
+  const instrucoes = await lerInstrucoes(tenant);
   return {
     configurado: Boolean(l?.ativo && l?.base_url && l?.modelo),
     escopo: l?.escopo ?? null,
@@ -290,8 +324,8 @@ export async function verProvider(user: Usuario, tenantArg?: string | null) {
     base_url: l?.base_url ?? "",
     modelo: l?.modelo ?? "",
     temperatura: l ? Number(l.temperatura) : 0.2,
-    system_prompt: l?.system_prompt ?? "",
-    tem_system_prompt: Boolean(l?.system_prompt?.trim()),
+    system_prompt: instrucoes,
+    tem_system_prompt: Boolean(instrucoes.trim()),
     /** v3.34: o texto padrão da casa, para o botão "restaurar instruções padrão" da tela */
     regras_padrao: REGRAS_CASA,
     mcp_interno: Boolean(l?.mcp_interno ?? false),
@@ -738,6 +772,13 @@ export type EventoChat =
 const MARCA_PENSO = /^(thinking|thought|reasoning|analysis|reflex[\u00e3a]o|racioc[\u00edi]nio|vou |deixa eu |primeiro |agora vou)/i;
 const LIMITE_RASCUNHO = 160;
 
+/* v3.35 — a NARRAÇÃO nasce dentro do rastro. O texto do começo da rodada fica RETIDO: se a
+ * rodada pedir ferramenta, ele é narração e entra na trilha sem nunca ter aparecido na bolha.
+ * Narração é uma frase de até 12 palavras; o que passar do limite (ou demorar demais sem pedir
+ * ferramenta) é resposta e passa a fluir normalmente. */
+const LIMITE_RETIDO = 140;
+const ESPERA_RETIDO_MS = 1200;
+
 /** o texto desta rodada é rascunho de raciocínio? (com ferramenta na mesa, bloco longo também) */
 function textoDeRaciocinio(texto: string, pedindoFerramenta: boolean): boolean {
   const t = String(texto ?? "").trim();
@@ -785,6 +826,9 @@ export async function responderChat(
       "chat desligado: configure um provider em Configurações (tipo, URL, modelo e chave). A Busca continua funcionando.",
     );
   }
+  /* v3.35 — a instrução é da CONTA, não do modelo: vale para o provider nomeado escolhido na
+     conversa tanto quanto para o padrão da casa (antes, escolher um nomeado zerava as regras). */
+  cfg.system_prompt = await lerInstrucoes(tenant);
 
   const pacote = await pacoteDeFerramentas(cfg.mcp_interno);
   const toolsTokens = custoDoPayload([], pacote.specs.length ? pacote.specs : undefined);
@@ -853,6 +897,11 @@ export async function responderChat(
      ferramenta, porque rascunho de rodada não é resposta) — é o que sobrevive ao "parar".
      `fontes` (T004): nomes de documento que a ferramenta de busca devolveu nesta resposta. */
   let emitido = "";
+  /* v3.35: `retido` é o começo da rodada que ainda não foi para a tela — pode virar narração
+     (vai para o rastro) ou resposta (é liberado e passa a fluir). `liberado` fecha a decisão. */
+  let retido = "";
+  let retidoInicio = 0;
+  let liberado = false;
   const fontes = new Set<string>();
   /* embrulho único da saída: caminho normal e caminho cancelado dizem a mesma coisa */
   const empacotar = (respostaTexto: string, avisoTexto: string | null, cancelada: boolean) => ({
@@ -886,6 +935,9 @@ export async function responderChat(
   for (;;) {
     if (opts.sinal?.aborted) throw new Error("cancelado-pelo-usuario");
     emitido = "";
+    retido = "";
+    retidoInicio = 0;
+    liberado = false;
     parciais.clear(); /* v3.24: argumentos são por rodada — índice 0 de uma rodada ≠ da outra */
     rodadas++;
     const usaFerramentas = pacote.specs.length > 0 && cfg.max_rodadas > 0;
@@ -929,6 +981,20 @@ export async function responderChat(
         : undefined,
       onDelta: emitir
         ? (t) => {
+            /* v3.35 — retém o começo da rodada: se ela pedir ferramenta, esse texto é
+               NARRAÇÃO e vai direto para o rastro, sem nunca ter passado pela bolha. */
+            if (!liberado) {
+              if (!retido) retidoInicio = Date.now();
+              retido += t;
+              if (retido.length > LIMITE_RETIDO || Date.now() - retidoInicio > ESPERA_RETIDO_MS) {
+                saiuTexto = true;
+                liberado = true;
+                emitido += retido;
+                emitir({ tipo: "delta", texto: retido });
+                retido = "";
+              }
+              return;
+            }
             saiuTexto = true;
             emitido += t;
             emitir({ tipo: "delta", texto: t });
@@ -954,6 +1020,12 @@ export async function responderChat(
     }
     fecharBloco();
     if (!pedidas.length) {
+      /* v3.35: era resposta, não narração — o que estava retido sai agora e segue fluindo */
+      if (emitir && !liberado && retido) {
+        saiuTexto = true;
+        emitir({ tipo: "delta", texto: retido });
+        retido = "";
+      }
       texto = r.texto;
       break;
     }

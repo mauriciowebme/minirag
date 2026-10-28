@@ -53,6 +53,7 @@ import {
   responderChat,
   truncarParaRegenerar,
   salvarProvider,
+  salvarInstrucoes,
   testarProvider,
   verProvider,
 } from "./provider";
@@ -738,6 +739,14 @@ export function criarApp(): FastifyInstance {
     const u = usuario(req);
     exigirOperador(u);
     return salvarProvider(u, corpo(req) as Parameters<typeof salvarProvider>[1]);
+  });
+
+  /* v3.35 — instruções do modelo são da CONTA (valem para todos os providers e modelos), não
+   * um campo de cada provider. Rota própria para o card da tela salvar só isso. */
+  app.put("/config/instrucoes", async (req) => {
+    const u = usuario(req);
+    exigirOperador(u);
+    return salvarInstrucoes(u, corpo(req) as Parameters<typeof salvarInstrucoes>[1]);
   });
 
   app.post("/config/provider/testar", async (req) => {
