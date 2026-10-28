@@ -22,6 +22,12 @@ parecidos com a pergunta, com uma nota de 0 a 1.
 
 ---
 ---
+## v3.36.0 (28/10) — Cada conta decide o que ela oferece como servidor MCP
+- **O que você vê:** item novo no menu, **MCP** (🔌), disponível para todo usuário. A página mostra o endereço do serviço, o cabeçalho de autorização, **a lista do que aquela conta pode usar** — com um interruptor por ferramenta — e o bloco pronto para colar no agente (JSON do `mcpServers`).
+- **Por que:** pedido do dono (28/10) — "se o usuário quiser usar como servidor MCP ele pode, e as ferramentas que o admin colocou como permitidas é o que ele vai conseguir usar", e isso não podia ficar escondido no chat.
+- **Como funciona:** duas camadas novas (`src/mcp_acesso.ts`). (1) **Interruptor do admin** em Configurações → Ferramentas: "contas liberadas para usar o MCP", nasce ligado para não calar os agentes que já conversam; desligado, só o operador usa o MCP. (2) **Lista do próprio usuário**, que guarda apenas o que está **desligado** — ferramenta nova nasce liberada, sem migração nem aprovação. O papel continua acima de tudo: as 5 ferramentas de operador nunca são liberadas por interruptor, e as 20 de máquina continuam dependendo do controle de máquinas. O `tools/list`, o pacote de ferramentas do chat e a recusa no ato da chamada passam a respeitar as duas camadas, e a recusa diz qual delas barrou.
+- **Como é provado:** suíte completa **27/27 verde** (26 blocos rodados, 0 pulados), com o bloco novo `v3.36` em 15 checagens: as 5 de operador marcadas como `papel` no catálogo da conta comum, ferramenta desligada some do `tools/list` e a chamada é recusada com o motivo, religar devolve, comum não desliga o MCP de todos (403), operador desliga para todos e a conta comum fica sem ferramentas (403 na chamada) enquanto o operador continua entrando. De quebra, `v3.13.1` trocou 45 s de espera fixa por verificação em laço: **68,9 s → 39,2 s**.
+
 ## v3.35.1 (28/10) — O campo das instruções mostra o texto que está em uso
 - **O que você vê:** ao abrir Configurações → Providers, o cartão de instruções já aparece **com o texto que está valendo** (antes abria vazio, mesmo com as regras gravadas). E o que você apaga fica apagado: o sistema não volta a preencher o campo sozinho.
 - **Por que:** o dono viu o campo vazio e o modelo respondendo o nome — "de onde ele está tirando isso?". O texto existia (552 caracteres), mas a tela não o mostrava; e havia um preenchimento automático a cada subida do container que regravava as regras em todo campo vazio, quebrando a regra "vazio = conversa pura".
@@ -270,7 +276,7 @@ parecidos com a pergunta, com uma nota de 0 a 1.
 
 ## v3.8 (23/10) — o túnel inteiro na boca do agente + falas que ficam na tela
 
-- **Vocabulário do túnel como ferramentas**: 20 nomes (`listar_arquivos`, `ler_arquivo`, `escrever_arquivo`, `buscar_arquivos`, `grep_remoto`, `editar_no_local`, `estado_maquina`, `processos`, `janelas`, `area_transferencia`, `falar`, `abrir`, `servicos`, `eventos`, `rede`, `esperar_arquivo`, `power`, `rodar_lote`, `sessao`, `git_remoto`) montados no servidor (`src/maquinas_tools.ts`: tabela nome→comando, PowerShell/sh por SO) e expostos no MCP, no chat e no REST da mesma porta — 46 tools no `tools/list`; o cliente Node não muda por verbo novo.
+- **Vocabulário do túnel como ferramentas**: 20 nomes (`listar_arquivos`, `ler_arquivo`, `escrever_arquivo`, `buscar_arquivos`, `grep_remoto`, `editar_no_local`, `estado_maquina`, `processos`, `janelas`, `area_transferencia`, `falar`, `abrir`, `servicos`, `eventos`, `rede`, `esperar_arquivo`, `power`, `rodar_lote`, `sessao`, `git_remoto`) montados no servidor (`src/maquinas_tools.ts`: tabela nome→comando, PowerShell/sh por SO) e expostos no MCP, no chat e no REST da mesma porta — 46 tools no `tools/list` naquela versão (**49** hoje); o cliente Node não muda por verbo novo.
 - **Governança**: `power` (qualquer ação) e `git_remoto` (commit, push, checkout) exigem `confirmar=true` — sem isso a chamada morre em 409 sem nada executar; serial por host; `sessao` abre/lista/fecha processo em segundo plano na máquina; `falar` fala texto (máx. 600 chars) via SAPI no Windows ou espeak no Linux.
 - **Escrita de arquivo na máquina**: canal `GET /maquina/u?k=…` — os bytes ficam no servidor no máximo 5 minutos; a chave só serve para a máquina cujo host casa com ela e vale enquanto não expira (não é de uso único).
 - **Chat**: as falas de caminho da rodada viram balões próprios na tela, voltam no histórico (`chat_mensagens.falas`); teto de `max_rodadas` subiu de 10 para **60** (validação, MCP e Configurações).
@@ -1249,10 +1255,14 @@ mesma porta, mesma chave Bearer, mesmas gavetas (`memoria`). É a porta
 que agentes de IA (ex.: o Hermes) usam; a REST continua intacta pro
 IA_GO.
 
+O guia completo — quem pode conectar, o que cada conta recebe, o que o
+operador controla e a receita para cadastrar o minirag num cliente — está
+em [`docs/mcp.md`](docs/mcp.md).
+
 **Fluxo do cliente MCP:**
 1. `initialize` → servidor devolve `protocolVersion`, `capabilities.tools`, `serverInfo`.
 2. `notifications/initialized` → aceito (202, sem corpo).
-3. `tools/list` → **21 ferramentas**, espelho das rotas REST (argumentos com os mesmos nomes dos corpos):
+3. `tools/list` → **49 ferramentas** (medido em 28/10/2026), espelho das rotas REST (argumentos com os mesmos nomes dos corpos):
    - **documentos**: `search`, `ingest` (texto), `ingest_status`, `list_docs`, `delete_doc`
    - **arquivo original**: `upload_file` (`nome` + `conteudo_base64`, até 15 MB), `get_file` (devolve o binário em base64)
    - **edição**: `edit_doc` (texto novo + reindexação), `rename_doc` (doc_id/título/mover), `archive_doc`
