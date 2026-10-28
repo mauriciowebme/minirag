@@ -582,13 +582,13 @@
 |---|---|
 | **Módulo** | ferramentas (MCP) |
 | **Prioridade** | 🟡 Média — site que monta conteúdo por JS vinha oco |
-| **Status** | ✅ v3.33.0 (build verde; medido no container) |
+| **Status** | ✅ v3.33.1 (build verde; medido no container) |
 | **Spec/Plano** | Dono (27/10): "acho que o 2 seria melhor porque não depende de externos. Dá pra testar pra ver se funciona bem?" — opção 2 = chromium no próprio container. |
 | **Descrição** | O `web_open` tenta o curl; se o texto vier com menos de 400 chars (ou se vier `js:true`), abre a mesma URL no chromium headless e fica com o texto maior. O navegador é único, reaproveitado entre chamadas e desligado quando para. |
 | **Escopo** | `src/navegador.ts`: CDP na mão sobre o WebSocket nativo do Node (nenhum pacote npm), fila de uma página por vez, teto de 20s por página (devolve o que já carregou), reinício ao passar de 40 páginas ou 800 MB de RSS, desligamento após 3 min ocioso, perfil em /tmp. SSRF: host interno barrado na URL **e** em cada requisição da página (sub-recurso e redirecionamento) via `Fetch.requestPaused`. `MINIRAG_NAVEGADOR=0` desliga sem rebuild; `MINIRAG_CHROMIUM` troca o binário. |
 | **Arquivos afetados** | src/navegador.ts (novo), src/web.ts (fallback), src/mcp.ts (param `js`), Dockerfile (chromium + fonts-liberation) |
 | **Dependências** | T039 (web_search/web_open). |
-| **Riscos** | **Peso**: +381 MB de imagem e ~270 MB de RSS parado, 350-620 MB navegando. **Tempo**: 3-4s por página comum; portal cheio de anúncio estoura o teto e volta com o que carregou (medido: g1, 15,6s). **Estabilidade**: `--single-process` é mais leve, mas uma página que trava derruba o navegador — o cliente reinicia na chamada seguinte. **Sem interação**: não clica nem rola; site que exige clique continua fora do alcance. |
+| **Riscos** | **Bloqueio de IP**: portal grande (investing, UOL) devolve 403/"Access Denied" para IP de datacenter no curl **e** no chromium, por mais tempo que se espere — o `web_open` tenta o navegador e, se nem ele passar, responde erro honesto em vez de devolver 3 caracteres. **Peso**: +381 MB de imagem e ~270 MB de RSS parado, 350-620 MB navegando. **Tempo**: 3-4s por página comum; portal cheio de anúncio estoura o teto e volta com o que carregou (medido: g1, 15,6s). **Estabilidade**: `--single-process` é mais leve, mas uma página que trava derruba o navegador — o cliente reinicia na chamada seguinte. **Sem interação**: não clica nem rola; site que exige clique continua fora do alcance. |
 
 ## Lotes recomendados (executados — saíram na v3.18)
 
