@@ -101,6 +101,7 @@ export type Vista =
   | "buscar"
   | "jobs"
   | "maquinas"
+  | "mcp"
   | "config"
   | "arquivos"
   | "editor";
@@ -332,7 +333,24 @@ export type ServidorMcp = {
   erro: string | null;
   atualizado_em: string;
 };
-export type ServidoresResp = { servidores: ServidorMcp[]; controle_maquinas?: boolean };
+export type ServidoresResp = { servidores: ServidorMcp[]; controle_maquinas?: boolean; usuarios_habilitado?: boolean };
+
+/** v3.36 — a tela MCP: o que ESTA conta alcança hoje. */
+export type McpFerramenta = {
+  nome: string;
+  descricao: string;
+  grupo: string;
+  permitida: boolean;
+  ajustavel: boolean;
+  motivo: "papel" | "maquinas" | "desligada" | "servidor_desligado" | null;
+};
+export type McpCatalogoResp = {
+  caminho: string;
+  habilitado: boolean;
+  papel: "operador" | "usuario";
+  controle_maquinas: boolean;
+  ferramentas: McpFerramenta[];
+};
 export type TesteMcpResp = {
   nome: string;
   url: string;

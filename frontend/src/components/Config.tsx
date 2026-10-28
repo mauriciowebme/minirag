@@ -679,6 +679,8 @@ function Ferramentas({ operador, tenant, onControleMaquinas }: { operador: boole
   const [rodando, setRodando] = useState<string | null>(null);
   const [controleMaq, setControleMaq] = useState(true);
   const [rodandoMaq, setRodandoMaq] = useState(false);
+  const [mcpUsuarios, setMcpUsuarios] = useState(true);
+  const [rodandoMcpUsuarios, setRodandoMcpUsuarios] = useState(false);
   const [resultado, setResultado] = useState<TesteMcpResp | null>(null);
 
   const carregar = useCallback(async () => {
@@ -691,6 +693,7 @@ function Ferramentas({ operador, tenant, onControleMaquinas }: { operador: boole
       const rMcp = await get<ServidoresResp>("/config/mcp");
       setServidores(rMcp.servidores);
       setControleMaq(rMcp.controle_maquinas !== false);
+      setMcpUsuarios(rMcp.usuarios_habilitado !== false);
       onControleMaquinas?.(rMcp.controle_maquinas !== false);
     } catch (e) {
       toast("servidores MCP: " + (e as Error).message, "erro");
@@ -712,6 +715,19 @@ function Ferramentas({ operador, tenant, onControleMaquinas }: { operador: boole
       toast("controle das máquinas: " + (e as Error).message, "erro");
     } finally {
       setRodandoMaq(false);
+    }
+  }
+
+  async function ligarMcpUsuarios(valor: boolean) {
+    setRodandoMcpUsuarios(true);
+    try {
+      const r = await patch<{ usuarios_habilitado: boolean }>("/config/mcp/usuarios", { ativo: valor });
+      setMcpUsuarios(r.usuarios_habilitado);
+      toast(valor ? "contas liberadas para usar o MCP" : "MCP restrito ao operador", "sucesso");
+    } catch (e) {
+      toast("MCP para contas: " + (e as Error).message, "erro");
+    } finally {
+      setRodandoMcpUsuarios(false);
     }
   }
 
@@ -837,6 +853,32 @@ function Ferramentas({ operador, tenant, onControleMaquinas }: { operador: boole
           <p className="dica mt-2 mb-0" id="mcpControleMaquinasAviso">
             Controle desligado: a ferramenta de executar some do chat e da lista MCP, e o servidor recusa qualquer ordem —
             para voltar, marque de novo.
+          </p>
+        )}
+      </div>
+
+      {/* v3.36 — o dono decide se as contas comuns podem usar o minirag como SERVIDOR MCP
+          (aba MCP do menu). Ligado por padrão para não calar os agentes que já conversam. */}
+      <div className="cartao">
+        <h2 className="mb-1 text-[13px] font-semibold text-txt2">Usar o minirag como servidor MCP</h2>
+        <p className="dica mt-0 mb-3">
+          ligado, cada conta pode apontar o agente dela para o endereço MCP do minirag (aba <b>MCP</b> do menu) e
+          escolher, na tela, quais ferramentas quer liberar. As ferramentas de operador continuam só do operador, e
+          ferramenta nova nasce liberada. Desligado, <b>só o operador</b> usa o MCP. {operador ? "" : "Só o operador liga e desliga."}
+        </p>
+        <label className="check">
+          <input
+            id="mcpUsuariosHabilitado"
+            type="checkbox"
+            checked={mcpUsuarios}
+            disabled={!operador || rodandoMcpUsuarios}
+            onChange={(e) => void ligarMcpUsuarios(e.target.checked)}
+          />
+          deixar as contas usarem o minirag como servidor MCP
+        </label>
+        {!mcpUsuarios && (
+          <p className="dica mt-2 mb-0" id="mcpUsuariosAviso">
+            Desligado: as contas comuns recebem 403 no MCP; o operador continua entrando para poder reverter.
           </p>
         )}
       </div>

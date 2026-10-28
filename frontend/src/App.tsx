@@ -10,6 +10,7 @@ import { Painel } from "./components/Painel";
 import { Chat } from "./components/Chat";
 import { Config, SECOES_CFG, type Aba } from "./components/Config";
 import { Maquinas } from "./components/Maquinas";
+import { Mcp } from "./components/Mcp";
 import { get, qs } from "./services/api";
 import type { GavetasResp, HealthResp, ProviderResp, Vista } from "./types";
 
@@ -20,6 +21,8 @@ const MENU: { id: Vista; rotulo: string; icone: string }[] = [
   { id: "chat", rotulo: "Chat", icone: "💬" },
   { id: "painel", rotulo: "Painel", icone: "▦" },
   { id: "maquinas", rotulo: "Máquinas", icone: "🖥" },
+  /* v3.36 — onde o usuário vê que a conta dele pode ser servidor MCP e escolhe o que liberar */
+  { id: "mcp", rotulo: "MCP", icone: "🔌" },
   { id: "buscar", rotulo: "Buscar", icone: "⌕" },
   { id: "jobs", rotulo: "Fila", icone: "≡" },
   { id: "gavetas", rotulo: "Gavetas", icone: "👤" },
@@ -32,7 +35,7 @@ const DENTRO_DO_CAMINHO = new Set<Vista>(["gavetas", "arquivos", "editor"]);
    O app é servido na raiz e o hash diz onde o usuário está: sobrevive ao F5,
    funciona no voltar/avançar e o link pode ser copiado com a tela certa. */
 const VISTAS_TODAS: Vista[] = [
-  "chat", "painel", "maquinas", "buscar", "jobs", "gavetas", "config", "arquivos", "editor",
+  "chat", "painel", "maquinas", "mcp", "buscar", "jobs", "gavetas", "config", "arquivos", "editor",
 ];
 
 function vistaDoHash(): Vista | null {
@@ -44,7 +47,7 @@ function vistaDoHash(): Vista | null {
    Chat, Buscar e Fila. Painel, Usuários/Gavetas e Configurações são do admin.
    A parede de verdade está na API (dashboard/config gravam exigem operador);
    o filtro aqui é a consequência visual, não a segurança. */
-const VISTAS_DO_COMUM: Vista[] = ["chat", "maquinas", "buscar", "jobs"];
+const VISTAS_DO_COMUM: Vista[] = ["chat", "maquinas", "mcp", "buscar", "jobs"];
 
 const TITULOS: Record<Vista, string> = {
   painel: "Painel",
@@ -55,6 +58,7 @@ const TITULOS: Record<Vista, string> = {
   buscar: "Buscar",
   jobs: "Fila",
   maquinas: "Máquinas",
+  mcp: "MCP",
   config: "Configurações",
 };
 
@@ -465,6 +469,7 @@ export default function App() {
           )}
 
           {vista === "maquinas" && <Maquinas operador={operador} />}
+          {vista === "mcp" && <Mcp versao={versao} />}
           {vista === "buscar" && <Buscar escopo={{ tenant, memoria }} operador={operador} onAbrirEditor={(id) => abrirEditor(id)} />}
 
           {vista === "jobs" && <Jobs tenant={tenant} nome={nome} operador={operador} />}
