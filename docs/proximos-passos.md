@@ -51,6 +51,7 @@
 | T038 | Respiro entre a tela gerada e a conclusão | chat-ui | 🟢 Baixa | ✅ v3.31.2 | [#t038](#t038) |
 | T039 | Busca na web (`web_search`) e leitura de página (`web_open`) | ferramentas | 🟡 Média | ✅ v3.32.0 | [#t039](#t039) |
 | T040 | Renderizar JavaScript no `web_open` (chromium/CDP, sem npm) | ferramentas | 🟡 Média | ✅ v3.33.0 | [#t040](#t040) |
+| T041 | Rastro cronológico, narração obrigatória e instruções editáveis | chat-srv + chat-ui | 🟠 Alta | ✅ v3.34.0 | [#t041](#t041) |
 
 ---
 
@@ -589,6 +590,19 @@
 | **Arquivos afetados** | src/navegador.ts (novo), src/web.ts (fallback), src/mcp.ts (param `js`), Dockerfile (chromium + fonts-liberation) |
 | **Dependências** | T039 (web_search/web_open). |
 | **Riscos** | **Bloqueio de IP**: portal grande (investing, UOL) devolve 403/"Access Denied" para IP de datacenter no curl **e** no chromium, por mais tempo que se espere — o `web_open` tenta o navegador e, se nem ele passar, responde erro honesto em vez de devolver 3 caracteres. **Peso**: +381 MB de imagem e ~270 MB de RSS parado, 350-620 MB navegando. **Tempo**: 3-4s por página comum; portal cheio de anúncio estoura o teto e volta com o que carregou (medido: g1, 15,6s). **Estabilidade**: `--single-process` é mais leve, mas uma página que trava derruba o navegador — o cliente reinicia na chamada seguinte. **Sem interação**: não clica nem rola; site que exige clique continua fora do alcance. |
+
+<a id="t041"></a>
+### T041 — Rastro na ordem cronológica, narração obrigatória e instruções editáveis
+| Campo | Conteúdo |
+|---|---|
+| **Módulo** | chat-srv + chat-ui |
+| **Prioridade** | 🟠 Alta — o dono comparou com o IA_GO em 27/10: "no nosso não tem no rastro a narração igual no rastro do IAGO" e "quero que fique na ordem cronológica" |
+| **Status** | ✅ v3.34.0 |
+| **Spec/Plano** | Pedido do dono (27/10), confirmado item a item antes de começar: "Pode fazer e publicar quando acabar". |
+| **Descrição** | (1) Cada linha do rastro leva `em` = ms desde o início do turno; a tela ordena por ele (nunca pela ordem de chegada), então pensamento → narração → ferramenta nunca invertem. (2) A ferramenta ganha linha VIVA: o servidor avisa `ferramenta_inicio` antes de executar e a tela mostra "Consultando X… Ns" enquanto ela roda. (3) O cabeçalho passa a mostrar o tempo do TURNO (medido pelo servidor), não a soma dos trechos. (4) O aviso solto vira "Preparando…" e só existe antes do primeiro sinal; com rastro na tela não aparece nada solto. (5) Cabeçalho com 40px de toque no celular (medido 29px a 390px na v3.33). (6) As instruções da casa (raciocínio em português + narração obrigatória de até 12 palavras antes de cada ferramenta, no FIM do prompt) passam a viver no campo editável de Configurações, com botão "restaurar instruções padrão" — o servidor não acrescenta nada por trás. |
+| **Escopo** | `src/provider.ts` (tipo `SegmentoRastro` com `em`, evento `ferramenta_inicio`, seed das instruções), `src/provedores.ts` (editar sem reenviar o prompt não zera mais), `src/regras.ts` (novo: texto padrão), `frontend/src/lib/conversa.ts` (linha viva + ordenação por `em` + `ms` do turno), `frontend/src/components/Chat.tsx` (trilha ordenada, linha viva, "Preparando…", tempo do turno), `frontend/src/index.css` (40px no celular), `frontend/src/components/Config.tsx` (contagem + restaurar padrão), `frontend/src/types.ts`. |
+| **Dependências** | T184 do IA_GO (fonte do bloco de instrução final). |
+| **Riscos** | **Idioma**: a regra de raciocínio em português é instrução de prompt, não garantia — modelo pequeno pode escorregar; a medição é o rastro. **Narração**: regra obrigatória reduz, mas o modelo pode narrar em toda rodada (ruído) ou esquecer; se virar ruído, encurtar o exemplo. **Prompt editável**: quem apagar o campo perde narração e idioma — o botão de restaurar existe para isso. |
 
 ## Lotes recomendados (executados — saíram na v3.18)
 

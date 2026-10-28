@@ -106,3 +106,17 @@ que o segredo some da tela, não que a escrita é idempotente.
 v1.8 33 · MCP 27 · v1.10 24 · arquivos 20 · imagem/OCR 10 · v2.7 33 · v2.8 39 · v2.9 29 ·
 v3.0 31 · v3.1 3 · v3.2 9 · v3.3 17 · v3.4 11 · v3.5 19 · v3.6 30 · v3.7 14 · v3.9 7 ·
 v3.13.1 9 · v3.15 10 · v3.8 11 · v3.18 36 · v3.19 17 · v3.23 12 · v3.24 5 · rate-limit 2.
+
+## 10. O que a suíte NÃO prova do rastro (T041/v3.34)
+
+A trilha do turno tem contrato no bloco `v3.15` (linhas, ordem, tipos), mas três coisas só se
+provam olhando a tela com o navegador de verdade:
+
+| O que | Como foi medido |
+|---|---|
+| **Ordem cronológica por `em`** | turno real com 2 ferramentas: `em` de cada linha não-decrescente, e a tela desenha nessa ordem mesmo se os eventos chegarem trocados |
+| **Linha viva da ferramenta** | `ferramenta_inicio` abre "Consultando X… Ns" e o evento de fim fecha a MESMA linha (não cria outra) |
+| **40px de toque no celular** | `getBoundingClientRect()` do cabeçalho a 390px de largura |
+| **"Preparando…" antes do 1º sinal** | nenhum texto solto enquanto o provedor não manda nada; some quando o rastro existe |
+
+Se um dia isso puder rodar sem navegador, vira bloco da suíte.
