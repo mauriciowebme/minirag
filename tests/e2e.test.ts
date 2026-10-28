@@ -424,7 +424,10 @@ test("minirag v2 — suíte completa", async (t) => {
       "janelas", "ler_arquivo", "listar_arquivos", "power", "processos",
       "rede", "rodar_lote", "servicos", "sessao", "escrever_arquivo",
     ].sort();
-    f.check("tools/list tem 49 tools (paridade com a REST)", JSON.stringify(nomes) === JSON.stringify(ESPERADAS.sort()), nomes.length);
+    /* v3.36 — a lista passou a dizer a verdade da CONTA: as 5 de operador saem para o comum */
+    const SO_OPERADOR_336 = ["listar_usuarios", "criar_usuario", "apagar_usuario", "esquecimento", "gerir_mcp"];
+    const ESPERADAS_COMUM = ESPERADAS.filter((n) => !SO_OPERADOR_336.includes(n)).sort();
+    f.check("tools/list da conta comum traz as 44 (as 5 de operador ficam fora)", JSON.stringify(nomes) === JSON.stringify(ESPERADAS_COMUM), `${nomes.length}: ${nomes.filter((n: string) => !ESPERADAS_COMUM.includes(n)).join(",")}`);
 
     r = await rpc(5, "tools/call", { name: "health" }, null);
     f.check("tools/call sem Bearer -> 401", r.status === 401 && "error" in (r.json ?? {}), r.texto.slice(0, 150));
@@ -585,6 +588,51 @@ test("minirag v2 — suíte completa", async (t) => {
     f.check("REST /search continua funcionando", rest.json?.items !== undefined, rest.status);
 
     f.fechar("MCP");
+  });
+
+
+  /* v3.36 — o minirag como servidor MCP ganha dono: o admin libera o uso por conta e cada
+     usuário escolhe o que quer expor; ferramenta nova nasce liberada. */
+  await bloco(t, "v3.36: MCP por conta — interruptor do admin e lista do próprio usuário", async () => {
+    const f = fiscal();
+    const lista = async (key: string) => {
+      const r = await call("POST", "/mcp", { key, corpo: { jsonrpc: "2.0", id: 1, method: "tools/list" } });
+      return (r.json?.result?.tools ?? []).map((x: any) => x.name) as string[];
+    };
+
+    let r = await call("GET", "/mcp/catalogo", { key: TESTKEY });
+    const cats = (r.json?.ferramentas ?? []) as any[];
+    const soOp = cats.filter((x) => x.motivo === "papel").map((x) => x.nome).sort();
+    f.check("catálogo da conta comum marca as 5 de operador como 'papel'", r.status === 200 && soOp.join(",") === "apagar_usuario,criar_usuario,esquecimento,gerir_mcp,listar_usuarios", soOp.join(","));
+    f.check("as demais nascem liberadas (nenhuma desligada de fábrica)", cats.filter((x) => x.motivo === "desligada").length === 0, cats.filter((x) => x.motivo === "desligada").length);
+    f.check("ferramenta de operador não é ajustável pelo comum", cats.filter((x) => x.motivo === "papel" && x.ajustavel === true).length === 0, "ajustável indevido");
+
+    r = await call("PUT", "/mcp/ferramentas", { key: TESTKEY, corpo: { ferramenta: "search", permitida: false } });
+    f.check("usuário desliga uma ferramenta na própria conta", r.status === 200 && r.json?.permitida === false && r.json?.motivo === "desligada", r.texto.slice(0, 160));
+    f.check("desligada some do tools/list", !(await lista(TESTKEY)).includes("search"), "search ainda listada");
+    r = await call("POST", "/mcp", { key: TESTKEY, corpo: { jsonrpc: "2.0", id: 7, method: "tools/call", params: { name: "search", arguments: { query: "oi" } } } });
+    f.check("chamada da desligada é recusada com o motivo", r.status === 403 && /desligada na sua tela MCP/.test(r.texto), r.texto.slice(0, 160));
+
+    r = await call("PUT", "/mcp/ferramentas", { key: TESTKEY, corpo: { ferramenta: "search", permitida: true } });
+    f.check("religar devolve a ferramenta", r.status === 200 && (await lista(TESTKEY)).includes("search"), r.texto.slice(0, 160));
+    r = await call("PUT", "/mcp/ferramentas", { key: TESTKEY, corpo: { ferramenta: "nao_existe_336", permitida: false } });
+    f.check("ferramenta inexistente: 404", r.status === 404, r.status);
+
+    r = await call("PATCH", "/config/mcp/usuarios", { key: TESTKEY, corpo: { ativo: false } });
+    f.check("usuário comum não desliga o MCP de todos (403)", r.status === 403, r.status);
+    r = await call("PATCH", "/config/mcp/usuarios", { key: OPKEY, corpo: { ativo: false } });
+    f.check("operador desliga o MCP das contas", r.status === 200 && r.json?.usuarios_habilitado === false, r.texto.slice(0, 160));
+    f.check("com o MCP desligado a conta comum não vê ferramenta nenhuma", (await lista(TESTKEY)).length === 0, (await lista(TESTKEY)).length);
+    f.check("o operador continua entrando (para poder reverter)", (await lista(OPKEY)).length === 49, (await lista(OPKEY)).length);
+    r = await call("POST", "/mcp", { key: TESTKEY, corpo: { jsonrpc: "2.0", id: 8, method: "tools/call", params: { name: "health", arguments: {} } } });
+    f.check("chamada da conta comum com MCP desligado: 403 com o motivo", r.status === 403 && /desligado/.test(r.texto), r.texto.slice(0, 160));
+
+    r = await call("PATCH", "/config/mcp/usuarios", { key: OPKEY, corpo: { ativo: true } });
+    f.check("religado, a conta comum volta a ver as 44", r.status === 200 && (await lista(TESTKEY)).length === 44, (await lista(TESTKEY)).length);
+    r = await call("GET", "/config/mcp", { key: OPKEY });
+    f.check("a config do admin mostra o interruptor", r.json?.usuarios_habilitado === true, JSON.stringify(r.json).slice(0, 120));
+
+    f.fechar("v3.36 MCP por conta");
   });
 
   await bloco(t, "v1.10: renomear/mover, arquivar, zip, gaveta, jobs", async () => {
@@ -2678,7 +2726,9 @@ await bloco(t, "v3.6: máquinas por usuário — hub WS, pareamento, run, escopo
 
     /* 1) handshake pendurado: o laço TEM que continuar remarcando (na 3.13.0 morria na 1ª) */
     execD(`nohup node /tmp/maq3131.js --url http://127.0.0.1:8123 --conf /tmp/c3131.json --token ${token3131} --host maq3131 --sem-janela >/tmp/c3131.out 2>&1 & sleep 1; echo ok`);
-    await dormir(45000);
+    /* 45 s fixos só para ver a 2ª tentativa (o laço remarca a cada 15 s): vira espera com prazo —
+       sai assim que a 2ª aparece (~16 s) e mantém os 45 s de folga se a máquina estiver lenta. */
+    await ate(async () => (leLog().match(/conectando em/g) || []).length >= 2, 45000);
     const l1 = leLog();
     const tentativas = (l1.match(/conectando em/g) || []).length;
     f.check("v3.13.1 soquete pendurado: o relógio dos 15 s larga o soquete e o laço remarca (≥2 em 45 s)", tentativas >= 2 && l1.includes("reconecto em"), `tentativas=${tentativas}`);
@@ -2686,7 +2736,7 @@ await bloco(t, "v3.6: máquinas por usuário — hub WS, pareamento, run, escopo
     f.check("v3.13.1 com o hub engolindo, a máquina não aparece online", !(await online("maq3131")), String(await online("maq3131")));
 
     /* 2) zumbi na porta: o segundo clique no exe novo assume em vez de se matar */
-    execD(`nohup node /tmp/maq3131.js --url http://127.0.0.1:8123 --conf /tmp/c3131.json --token ${token3131} --host maq3131 --sem-janela >/tmp/c3131b.out 2>&1 & sleep 8; echo ok`);
+    execD(`nohup node /tmp/maq3131.js --url http://127.0.0.1:8123 --conf /tmp/c3131.json --token ${token3131} --host maq3131 --sem-janela >/tmp/c3131b.out 2>&1 & sleep 2; echo ok`);
     const assumiu = await ate(async () => leLog().includes("peço que ele saia e eu assumo"), 25000);
     const umSo = await ate(async () => vivos() === "1", 15000);
     f.check("v3.13.1 o instance novo vê o vizinho vivo-sem-conexão e assume a porta", assumiu, leLog().split("\n").slice(-2).join(" | ").slice(0, 200));
