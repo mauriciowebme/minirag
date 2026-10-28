@@ -472,15 +472,29 @@ function Provider({ operador, tenant, onIrPainel }: { operador: boolean; tenant:
             <textarea
               id="provPrompt"
               className="campo mt-1"
-              rows={5}
+              rows={8}
               value={prompt}
               placeholder="ex.: você é meu assistente de notas fiscais; responda curto, em tabela, citando o documento."
               onChange={(e) => setPrompt(e.target.value)}
             />
+            {/* v3.34: o campo é a VERDADE — o servidor não acrescenta instrução por trás.
+                As regras da casa (raciocínio em português + narração antes de cada ferramenta)
+                nascem escritas aqui e podem ser editadas ou apagadas como qualquer texto. */}
             <span className="dica mt-1 block" id="provPromptDica">
-              vazio = nenhuma instrução (o modelo conversa puro, sem citar fonte). Não há regra embutida pelo sistema.
-              {p?.tem_system_prompt ? ` · em uso: ${prompt.length} caracteres` : ""}
+              é exatamente o que o modelo recebe — o sistema não acrescenta instrução por trás. Vazio = conversa pura.
+              {` · ${prompt.length} caracteres`}
+              {p?.tem_system_prompt ? " · em uso" : ""}
             </span>
+            {p?.regras_padrao && prompt.trim() !== p.regras_padrao.trim() ? (
+              <button
+                type="button"
+                className="btn btn-mini mt-1"
+                id="provPromptPadrao"
+                onClick={() => setPrompt(p.regras_padrao ?? "")}
+              >
+                restaurar instruções padrão
+              </button>
+            ) : null}
           </label>
           <div className="grade-2 !gap-3">
             <label className="rotulo m-0">
