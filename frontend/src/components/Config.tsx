@@ -114,13 +114,16 @@ function Provider({ operador, tenant, onIrPainel }: { operador: boolean; tenant:
     if (rProv.status === "fulfilled") {
       const r = rProv.value;
       setP(r);
+      /* v3.35.1: o cartão das instruções mostra o que o SERVIDOR tem, não o que sobrou de um
+         clique anterior. Antes, o estado do campo só nascia dentro do form do provider — com o
+         campo fora dali (v3.35), a tela abria vazia mesmo com texto gravado. */
+      setPrompt(r.system_prompt ?? "");
       /* se o form do padrão estiver aberto, sincroniza com o que voltou do servidor */
       if (formPadraoAberto) {
         setTipo(r.tipo === "ollama" ? "ollama" : "openai");
         setBaseUrl(r.base_url);
         setModelo(r.modelo);
         setTemperatura(String(r.temperatura));
-        setPrompt(r.system_prompt ?? "");
         setRodadas(String(r.max_rodadas));
         setMemoria(String(r.memoria_turnos ?? 12));
         setVerbatim(String(r.verbatim_turnos ?? 4));
