@@ -19,7 +19,7 @@ export type Aba = "provider" | "ferramentas" | "conta" | "limites" | "esquecimen
    v3.21.1: "Provider do chat" + "Provedores nomeados" viraram UMA seção —
    provider único com tabela (a linha 1 é o padrão da casa). */
 export const SECOES_CFG: [Aba, string][] = [
-  ["provider", "Provider"],
+  ["provider", "Providers"],
   ["ferramentas", "Ferramentas (MCP)"],
   ["conta", "Conta e chave"],
   ["limites", "Limites"],
@@ -167,7 +167,6 @@ function Provider({ operador, tenant, onIrPainel }: { operador: boolean; tenant:
       base_url: baseUrl,
       modelo,
       temperatura: Number(temperatura),
-      system_prompt: prompt,
       max_rodadas: Number(rodadas),
       memoria_turnos: Number(memoria),
       verbatim_turnos: Number(verbatim),
@@ -214,6 +213,24 @@ function Provider({ operador, tenant, onIrPainel }: { operador: boolean; tenant:
       await carregar();
     } catch (e) {
       toast("salvar: " + (e as Error).message, "erro");
+    } finally {
+      setOcupado(false);
+    }
+  }
+
+  /** v3.35 — as instruções são da conta: salvam sozinhas, sem tocar no provider */
+  async function salvarInstrucoes(texto: string) {
+    setOcupado(true);
+    try {
+      const r = await put<{ system_prompt: string; tem_system_prompt: boolean }>("/config/instrucoes", {
+        texto,
+        ...(operador && tenant ? { tenant } : {}),
+      });
+      setP((atual) => (atual ? { ...atual, system_prompt: r.system_prompt, tem_system_prompt: r.tem_system_prompt } : atual));
+      toast("instruções salvas", "sucesso");
+      await carregar();
+    } catch (e) {
+      toast("salvar instruções: " + (e as Error).message, "erro");
     } finally {
       setOcupado(false);
     }
@@ -322,11 +339,53 @@ function Provider({ operador, tenant, onIrPainel }: { operador: boolean; tenant:
   return (
     <div className="cartao">
       <h2 className="mb-1 text-[13px] font-semibold text-txt2">
-        Provider
+        Providers
         <span className="sub2 block font-normal">
           crie, edite e apague providers — no chat você escolhe o <b>provider</b> e o <b>modelo</b> de cada conversa
         </span>
       </h2>
+
+      {/* v3.35 — a instrução é da CONTA, não do modelo: fica FORA do formulário do provider
+          justamente porque vale para todos eles (antes morava dentro de cada um). */}
+      <div className="mt-3 rounded-[10px] border border-borda p-3" id="cardInstrucoes">
+        <div className="rotulo m-0">instruções do modelo (system prompt)</div>
+        <span className="sub2 block font-normal">
+          valem para <b>todos</b> os providers e modelos desta conta — é exatamente o que o modelo recebe
+        </span>
+        <textarea
+          id="provPrompt"
+          className="campo mt-2 w-full"
+          rows={8}
+          value={prompt}
+          disabled={!operador}
+          placeholder="ex.: seu nome é Clauricio; responda curto, citando o documento."
+          onChange={(e) => setPrompt(e.target.value)}
+        />
+        <span className="dica mt-1 block" id="provPromptDica">
+          {`${prompt.length} caracteres`}
+          {p?.tem_system_prompt ? " · em uso" : " · vazio = conversa pura"}
+        </span>
+        {operador ? (
+          <div className="mt-2 flex flex-wrap gap-2">
+            <button type="button" className="btn btn-mini" id="provPromptSalvar" onClick={() => void salvarInstrucoes(prompt)} disabled={ocupado}>
+              {ocupado ? "salvando…" : "salvar instruções"}
+            </button>
+            {p?.regras_padrao && prompt.trim() !== p.regras_padrao.trim() ? (
+              <button
+                type="button"
+                className="btn btn-mini"
+                id="provPromptPadrao"
+                onClick={() => {
+                  setPrompt(p.regras_padrao ?? "");
+                  void salvarInstrucoes(p.regras_padrao ?? "");
+                }}
+              >
+                restaurar instruções padrão
+              </button>
+            ) : null}
+          </div>
+        ) : null}
+      </div>
 
       <table className="tabela mt-3" id="listaProviders">
         <thead>
@@ -467,35 +526,8 @@ function Provider({ operador, tenant, onIrPainel }: { operador: boolean; tenant:
             />
             <span className="dica mt-1 block">guardada no servidor; a tela só vê os 4 últimos caracteres</span>
           </label>
-          <label className="rotulo m-0">
-            instruções do modelo (system prompt)
-            <textarea
-              id="provPrompt"
-              className="campo mt-1"
-              rows={8}
-              value={prompt}
-              placeholder="ex.: você é meu assistente de notas fiscais; responda curto, em tabela, citando o documento."
-              onChange={(e) => setPrompt(e.target.value)}
-            />
-            {/* v3.34: o campo é a VERDADE — o servidor não acrescenta instrução por trás.
-                As regras da casa (raciocínio em português + narração antes de cada ferramenta)
-                nascem escritas aqui e podem ser editadas ou apagadas como qualquer texto. */}
-            <span className="dica mt-1 block" id="provPromptDica">
-              é exatamente o que o modelo recebe — o sistema não acrescenta instrução por trás. Vazio = conversa pura.
-              {` · ${prompt.length} caracteres`}
-              {p?.tem_system_prompt ? " · em uso" : ""}
-            </span>
-            {p?.regras_padrao && prompt.trim() !== p.regras_padrao.trim() ? (
-              <button
-                type="button"
-                className="btn btn-mini mt-1"
-                id="provPromptPadrao"
-                onClick={() => setPrompt(p.regras_padrao ?? "")}
-              >
-                restaurar instruções padrão
-              </button>
-            ) : null}
-          </label>
+          {/* v3.35: as instruções do modelo saíram daqui — são da CONTA, não deste provider.
+              O campo único vive no card "instruções do modelo", acima da tabela. */}
           <div className="grade-2 !gap-3">
             <label className="rotulo m-0">
               temperatura
@@ -690,7 +722,6 @@ function Ferramentas({ operador, tenant, onControleMaquinas }: { operador: boole
         base_url: p.base_url,
         modelo: p.modelo,
         temperatura: p.temperatura,
-        system_prompt: p.system_prompt,
         max_rodadas: p.max_rodadas,
         ativo: p.ativo,
         global: operador && p.origem === "global",
