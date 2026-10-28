@@ -208,6 +208,8 @@ export type ProviderResp = {
   temperatura: number;
   system_prompt: string;
   tem_system_prompt: boolean;
+  /** v3.34: texto padrão da casa para o botão "restaurar instruções padrão" */
+  regras_padrao?: string;
   mcp_interno: boolean;
   max_rodadas: number;
   memoria_turnos: number;

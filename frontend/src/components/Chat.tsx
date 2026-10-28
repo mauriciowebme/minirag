@@ -136,6 +136,8 @@ function Rastro({
   aberto,
   travado,
   onToggle,
+  ms,
+  inicio,
 }: {
   segmentos: SegmentoRastro[];
   vivo: boolean;
@@ -143,18 +145,31 @@ function Rastro({
   aberto: boolean;
   travado?: boolean;
   onToggle: (atual: boolean) => void;
+  /** v3.34: duração do turno medida pelo servidor (é o tempo do cabeçalho) */
+  ms?: number;
+  /** v3.34: quando o turno começou (relógio andando enquanto ele vive) */
+  inicio?: number;
 }) {
   const corpo = useRef<HTMLDivElement | null>(null);
   const colado = useRef(true);
-  const ultimo = segmentos[segmentos.length - 1];
+  /* v3.34 — CRONOLOGIA: a trilha é ordenada pelo instante em que cada passo aconteceu (`em`),
+     nunca pela ordem de chegada. Mensagem antiga, sem `em`, mantém a ordem gravada. */
+  /* sem memo: a trilha é MUTADA no lugar (push/Object.assign) enquanto o turno corre, então a
+     referência do array não muda e um `useMemo` devolveria a ordem velha. Ordenar 5-30 linhas
+     a cada quadro não custa nada. */
+  const trilha = segmentos.every((s) => typeof s.em === "number")
+    ? [...segmentos].sort((a, b) => (a.em as number) - (b.em as number))
+    : segmentos;
+  const ultimo = trilha[trilha.length - 1];
   const pensando = vivo && ultimo?.tipo === "pensamento" && ultimo.vivo === true;
+  const ferramentando = vivo && trilha.some((s) => s.tipo === "ferramenta" && s.vivo);
   const [ticoque, setTicoque] = useState(0);
 
   useEffect(() => {
-    if (!pensando) return;
+    if (!pensando && !ferramentando) return;
     const t = setInterval(() => setTicoque((v) => v + 1), 1000);
     return () => clearInterval(t);
-  }, [pensando]);
+  }, [pensando, ferramentando]);
 
   /* o pensamento cresce POR DENTRO do bloco, que tem altura própria com rolagem: enquanto
      escreve, o bloco fica colado na última linha que chegou. Se você subir lá dentro para
@@ -172,10 +187,17 @@ function Rastro({
     pensando && ultimo?.tipo === "pensamento" && ultimo.inicio
       ? Math.max(0, Math.round((Date.now() - ultimo.inicio) / 1000))
       : 0;
+  /* v3.34: o tempo do cabeçalho é o do TURNO (medido pelo servidor ao fechar; relógio andando
+     enquanto ele vive). Antes somava só os trechos e anunciava "3s" num turno de 40s. */
   void ticoque; // é o que faz o relógio do bloco ao vivo andar
-  const segsMs = segmentos.reduce((a, s) => a + ("ms" in s ? s.ms : 0), 0);
-  const total = Math.max(1, Math.round((segsMs + segundosVivos * 1000) / 1000));
-  const posTools = segmentos.map((s, i) => (s.tipo === "ferramenta" ? i : -1)).filter((i) => i >= 0);
+  /* turno medido pelo servidor > relógio andando > soma dos trechos (mensagem antiga, sem `ms`) */
+  const somaMs = trilha.reduce((a, s) => a + ("ms" in s ? s.ms : 0), 0);
+  const total = ms && ms > 0
+    ? Math.max(1, Math.round(ms / 1000))
+    : inicio
+      ? Math.max(1, Math.round((Date.now() - inicio) / 1000))
+      : Math.max(1, Math.round(somaMs / 1000));
+  const posTools = trilha.map((s, i) => (s.tipo === "ferramenta" ? i : -1)).filter((i) => i >= 0);
 
   return (
     <div className="rastro" data-testid="rastroBloco">
@@ -196,14 +218,14 @@ function Rastro({
       >
         <span>
           <b>Rastro do turno</b>
-          {` · ${segmentos.length} etapa${segmentos.length === 1 ? "" : "s"} · ${total}s`}
+          {` · ${trilha.length} etapa${trilha.length === 1 ? "" : "s"} · ${total}s`}
         </span>
         <span className="ml-auto">{aberto ? "▴" : "▾"}</span>
       </button>
 
       {aberto ? (
         <div className="rastro-corpo" data-testid="rastroCorpo">
-          {segmentos.map((s, i) => {
+          {trilha.map((s, i) => {
             if (s.tipo === "narracao") {
               return (
                 <div className="rastro-linha rastro-narra" key={`n${i}`} data-testid="rastroNarracao">
@@ -214,6 +236,17 @@ function Rastro({
             }
             if (s.tipo === "ferramenta") {
               const d = detalhes[posTools.indexOf(i)] as FerramentaLinha | undefined;
+              /* v3.34: linha VIVA — aparece quando a ferramenta começa e conta o tempo dela
+                 (antes a linha só nascia no fim e a trilha parecia parada/torta ao vivo) */
+              if (s.vivo) {
+                const seg = s.inicio ? Math.max(0, Math.round((Date.now() - s.inicio) / 1000)) : 0;
+                return (
+                  <div className="rastro-linha rastro-tool" key={`f${i}`} data-testid="rastroFerramentaViva">
+                    <i className="rastro-ponto rastro-ponto-azul animate-pulse" />
+                    <span>{`Consultando ${rotuloFerramenta(s)}… ${seg}s`}</span>
+                  </div>
+                );
+              }
               return (
                 <div className="rastro-linha rastro-tool" key={`f${i}`} data-testid="rastroFerramenta">
                   <i className="rastro-ponto rastro-ponto-azul" />
@@ -923,6 +956,8 @@ export function Chat({
                       segmentos={m.rastro}
                       vivo={Boolean(m.escrevendo)}
                       detalhes={m.ferramentas}
+                      ms={m.ms}
+                      inicio={m.inicio}
                       aberto={rastroAberto(Boolean(m.escrevendo), m.texto, produzindo(m))}
                       travado={emProcesso(Boolean(m.escrevendo), m.texto, produzindo(m))}
                       onToggle={alternarRastro}
@@ -963,9 +998,12 @@ export function Chat({
                     </div>
                   )}
                   {m.escrevendo && !m.texto && !(m.codigo || (m.telas && m.telas.length > 0)) ? (
-                    m.raciocinio ? null : (
+                    /* v3.34: o aviso solto só existe ANTES do primeiro sinal — e ele diz a
+                       verdade ("Preparando…"), não "pensando…" (o modelo ainda nem começou).
+                       Com rastro na tela, nada solto: o status mora dentro da trilha. */
+                    m.raciocinio || (m.rastro && m.rastro.length) ? null : (
                       <span className="sub2" id="chatPensando">
-                        pensando… {espera}s
+                        Preparando… {espera}s
                         {naFila > 0 ? ` · ${naFila} na fila` : ""}
                       </span>
                     )

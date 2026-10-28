@@ -24,6 +24,8 @@ export type EventoTransporte =
   | { tipo: "descartar" }
   /** v3.8: fala de caminho da rodada — mostra e FICA (pedido do dono) */
   | { tipo: "fala"; texto: string }
+  /** v3.34: a ferramenta COMEÇOU — abre a linha viva "Consultando X… Ns" na trilha */
+  | { tipo: "ferramenta_inicio"; nome: string }
   | { tipo: "ferramenta"; servidor: string; nome: string; ok: boolean; ms: number }
   /** v3.23: tela pronta — o card com preview funcional entra na bolha na hora */
   | { tipo: "tela"; tela: Tela }
@@ -46,9 +48,11 @@ export type FerramentaLinha = { servidor: string; nome: string; ok: boolean; ms:
  *  `vivo`/`inicio` só existem na tela enquanto o passo está acontecendo: o servidor devolve
  *  a trilha pronta, com o tempo medido, e ela substitui a montagem ao vivo no `fim`. */
 export type SegmentoRastro =
-  | { tipo: "pensamento"; texto: string; ms: number; vivo?: boolean; inicio?: number }
-  | { tipo: "narracao"; texto: string }
-  | { tipo: "ferramenta"; servidor: string; nome: string; ok: boolean; ms: number };
+  /** `em` (v3.34): ms desde o começo do turno em que o passo aconteceu — a trilha é ordenada
+   *  por ele (cronologia de verdade), com `vivo`/`inicio` só do que está acontecendo agora. */
+  | { tipo: "pensamento"; texto: string; ms: number; vivo?: boolean; inicio?: number; em?: number }
+  | { tipo: "narracao"; texto: string; em?: number }
+  | { tipo: "ferramenta"; servidor: string; nome: string; ok: boolean; ms: number; vivo?: boolean; inicio?: number; em?: number };
 
 export type Linha = {
   id: string;
@@ -88,6 +92,10 @@ export type Linha = {
   telas?: Tela[];
   /** v3.24: o código da tela enquanto o modelo escreve (o HTML nasce à vista) */
   codigo?: string;
+  /** v3.34: duração do turno medida pelo servidor — é o tempo do cabeçalho do rastro */
+  ms?: number;
+  /** v3.34: quando esta bolha começou a ser escrita (epoch ms) — relógio do turno ao vivo */
+  inicio?: number;
 };
 
 export type Estado = {
@@ -131,12 +139,33 @@ function acrescentar(b: Linha, s: SegmentoRastro): void {
   (b.rastro ??= []).push(s);
 }
 
+/** v3.34: a ferramenta terminou — fecha a linha que estava viva em vez de criar outra
+ *  (antes a linha só nascia no fim; agora ela existe enquanto roda e é completada aqui) */
+function fecharFerramenta(b: Linha, servidor: string, nome: string, ok: boolean, ms: number): boolean {
+  const r = b.rastro ?? [];
+  for (let i = r.length - 1; i >= 0; i--) {
+    const s = r[i];
+    if (s.tipo === "ferramenta" && s.vivo) {
+      Object.assign(s, { servidor, nome, ok, ms, vivo: false });
+      return true;
+    }
+  }
+  return false;
+}
+
+/** v3.34: a trilha é cronológica — ordena por `em` quando todas as linhas têm o instante;
+ *  mensagem antiga (sem `em`) mantém a ordem que veio do servidor. */
+function ordenarRastro(trilha: SegmentoRastro[]): SegmentoRastro[] {
+  if (!trilha.every((s) => typeof s.em === "number")) return trilha;
+  return [...trilha].sort((a, b) => (a.em as number) - (b.em as number));
+}
+
 /** a trilha autoritativa do servidor tem o tempo medido de cada passo; sem ela (servidor
  *  mais velho), fica a montagem ao vivo da tela */
 function adotarRastro(b: Linha, r: Record<string, unknown>): boolean {
   const trilha = Array.isArray(r.rastro) ? (r.rastro as SegmentoRastro[]) : [];
   if (!trilha.length) return false;
-  b.rastro = trilha.map((s) => ({ ...s }));
+  b.rastro = ordenarRastro(trilha.map((s) => ({ ...s })));
   return true;
 }
 
@@ -296,7 +325,7 @@ export async function reativar(
   const agora = new Date().toISOString();
   c.msgs.push(
     { id: proximoId(), papel: "user", texto: tarefa.pergunta, ferramentas: [], when: agora },
-    { id: vivoId, papel: "assistant", texto: tarefa.parcial, ferramentas: [], escrevendo: true, when: agora },
+    { id: vivoId, papel: "assistant", texto: tarefa.parcial, ferramentas: [], escrevendo: true, when: agora, inicio: Date.now() },
   );
   c.tarefaId = tarefa.id; // v3.18: quem reanexou uma tarefa viva também pode pará-la
   notifica(chave);
@@ -335,14 +364,29 @@ export async function reativar(
           /* v3.15: a fala de caminho virou LINHA DO RASTRO (o jeito do IA_GO) — a trilha do
              turno conta a história no mesmo lugar, em vez de soltar balão no meio da tela */
           fecharPensamento(bolha);
-          acrescentar(bolha, { tipo: "narracao", texto: txt });
+          acrescentar(bolha, { tipo: "narracao", texto: txt, em: Math.max(0, Date.now() - c.inicio) });
           bruto = ""; base = 0; bolha.texto = "";
         }
+      } else if (e.tipo === "ferramenta_inicio") {
+        /* v3.34: a linha nasce quando a ferramenta COMEÇA ("Consultando X… Ns") e é fechada no
+           evento de fim — a trilha não fica parada enquanto a ferramenta roda */
+        if (bolha.raciocinio && bolha.raciocinioFim === undefined) bolha.raciocinioFim = Math.max(0, Date.now() - c.inicio);
+        fecharPensamento(bolha);
+        acrescentar(bolha, {
+          tipo: "ferramenta", servidor: "?", nome: String(e.nome), ok: true, ms: 0,
+          vivo: true, inicio: Date.now(), em: Math.max(0, Date.now() - c.inicio),
+        });
       } else if (e.tipo === "ferramenta") {
         if (bolha.raciocinio && bolha.raciocinioFim === undefined) bolha.raciocinioFim = Math.max(0, Date.now() - c.inicio);
         fecharPensamento(bolha);
-        acrescentar(bolha, { tipo: "ferramenta", servidor: String(e.servidor), nome: String(e.nome), ok: Boolean(e.ok), ms: Number(e.ms) });
-        bolha.ferramentas.push({ servidor: String(e.servidor), nome: String(e.nome), ok: Boolean(e.ok), ms: Number(e.ms), args: {}, resumo: "" });
+        const servidor = String(e.servidor);
+        const nome = String(e.nome);
+        const ok = Boolean(e.ok);
+        const ms = Number(e.ms);
+        if (!fecharFerramenta(bolha, servidor, nome, ok, ms)) {
+          acrescentar(bolha, { tipo: "ferramenta", servidor, nome, ok, ms, em: Math.max(0, Date.now() - c.inicio) });
+        }
+        bolha.ferramentas.push({ servidor, nome, ok, ms, args: {}, resumo: "" });
       } else if (e.tipo === "tela") {
         /* v3.23: a tela chega pronta — o card entra na bolha sem esperar o fim */
         (bolha.telas ??= []).push(e.tela);
@@ -361,6 +405,9 @@ export async function reativar(
       const r = caixa.dados ?? saida ?? { resposta: bruto };
       bolha.texto = erro ? "não consegui responder: " + erro : String(r.resposta ?? bruto);
       if (!bolha.raciocinio && r.raciocinio) bolha.raciocinio = String(r.raciocinio);
+      /* v3.34: o tempo do cabeçalho é o do TURNO medido pelo servidor, não a soma dos trechos */
+      const msTurno = Number(r.ms ?? 0);
+      if (Number.isFinite(msTurno) && msTurno > 0) bolha.ms = msTurno;
       fecharPensamento(bolha);
       /* v3.15: a trilha do servidor manda (tem o tempo medido de cada passo) */
       const trilhou = adotarRastro(bolha, r);
@@ -424,7 +471,7 @@ async function bombeia(chave: string, memoria: string, tenant: string | undefine
 
   const vivoId = proximoId();
   c.vivo = vivoId;
-  c.msgs.push({ id: vivoId, papel: "assistant", texto: "", ferramentas: [], escrevendo: true, when: new Date().toISOString() });
+  c.msgs.push({ id: vivoId, papel: "assistant", texto: "", ferramentas: [], escrevendo: true, when: new Date().toISOString(), inicio: Date.now() });
   let bruto = "";
   let falou = false; // se os balões chegaram pelo stream, o `fim` nao re-insere (nem duplica)
   /* caixa mutável: o evento `fim` escreve aqui por dentro do closure */
@@ -452,18 +499,33 @@ async function bombeia(chave: string, memoria: string, tenant: string | undefine
           if (bolha.raciocinio && bolha.raciocinioFim === undefined) bolha.raciocinioFim = Math.max(0, Date.now() - c.inicio);
           /* v3.15: a fala de caminho virou LINHA DO RASTRO (o jeito do IA_GO) */
           fecharPensamento(bolha);
-          acrescentar(bolha, { tipo: "narracao", texto: txt });
+          acrescentar(bolha, { tipo: "narracao", texto: txt, em: Math.max(0, Date.now() - c.inicio) });
           bruto = "";
           bolha.texto = "";
         }
       } else if (e.tipo === "descartar") {
         bruto = "";
         bolha.texto = "";
+      } else if (e.tipo === "ferramenta_inicio") {
+        /* v3.34: a linha nasce quando a ferramenta COMEÇA ("Consultando X… Ns") e é fechada no
+           evento de fim — a trilha não fica parada enquanto a ferramenta roda */
+        if (bolha.raciocinio && bolha.raciocinioFim === undefined) bolha.raciocinioFim = Math.max(0, Date.now() - c.inicio);
+        fecharPensamento(bolha);
+        acrescentar(bolha, {
+          tipo: "ferramenta", servidor: "?", nome: String(e.nome), ok: true, ms: 0,
+          vivo: true, inicio: Date.now(), em: Math.max(0, Date.now() - c.inicio),
+        });
       } else if (e.tipo === "ferramenta") {
         if (bolha.raciocinio && bolha.raciocinioFim === undefined) bolha.raciocinioFim = Math.max(0, Date.now() - c.inicio);
         fecharPensamento(bolha);
-        acrescentar(bolha, { tipo: "ferramenta", servidor: String(e.servidor), nome: String(e.nome), ok: Boolean(e.ok), ms: Number(e.ms) });
-        bolha.ferramentas.push({ servidor: String(e.servidor), nome: String(e.nome), ok: Boolean(e.ok), ms: Number(e.ms), args: {}, resumo: "" });
+        const servidor = String(e.servidor);
+        const nome = String(e.nome);
+        const ok = Boolean(e.ok);
+        const ms = Number(e.ms);
+        if (!fecharFerramenta(bolha, servidor, nome, ok, ms)) {
+          acrescentar(bolha, { tipo: "ferramenta", servidor, nome, ok, ms, em: Math.max(0, Date.now() - c.inicio) });
+        }
+        bolha.ferramentas.push({ servidor, nome, ok, ms, args: {}, resumo: "" });
       } else if (e.tipo === "tela") {
         /* v3.23: a tela chega pronta — o card entra na bolha sem esperar o fim */
         (bolha.telas ??= []).push(e.tela);
@@ -482,6 +544,9 @@ async function bombeia(chave: string, memoria: string, tenant: string | undefine
       const r = caixa.dados ?? saida ?? { resposta: bruto, ferramentas: [] };
       bolha.texto = erro ? "não consegui responder: " + erro : String(r.resposta ?? bruto);
       if (!bolha.raciocinio && r.raciocinio) bolha.raciocinio = String(r.raciocinio);
+      /* v3.34: o tempo do cabeçalho é o do TURNO medido pelo servidor, não a soma dos trechos */
+      const msTurno = Number(r.ms ?? 0);
+      if (Number.isFinite(msTurno) && msTurno > 0) bolha.ms = msTurno;
       fecharPensamento(bolha);
       /* v3.15: a trilha do servidor manda (tem o tempo medido de cada passo) */
       const trilhou = adotarRastro(bolha, r);

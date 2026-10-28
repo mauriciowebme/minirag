@@ -511,6 +511,13 @@
   .rastro-cab:hover {
     @apply border-bordaforte text-txt2;
   }
+  /* v3.34: no celular o cabeçalho é a ÚNICA porta para abrir a trilha — alvo de toque de 40px
+     (medido em 29px a 390px na v3.33) */
+  @media (max-width: 640px) {
+    .rastro-cab {
+      min-height: 40px;
+    }
+  }
   .rastro-cab b {
     @apply font-medium text-txt2;
   }
