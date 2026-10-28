@@ -33,7 +33,15 @@ import {
   definirHealth,
   listarServidores,
 } from "./ferramentas";
-import { mcpHandler } from "./mcp";
+import { mcpHandler, TOOLS } from "./mcp";
+import {
+  ajustavelPeloUsuario,
+  gravarMcpLiberadoParaTodos,
+  gravarPermissao,
+  grupoDaFerramenta,
+  mcpLiberadoParaTodos,
+  motivoDeBloqueio,
+} from "./mcp_acesso";
 import { contarUso, configPublica, dadosPainel } from "./dashboard";
 import {
   atualizarUsuario,
@@ -801,7 +809,11 @@ export function criarApp(): FastifyInstance {
 
   app.get("/config/mcp", async (req) => {
     usuario(req);
-    return { servidores: await listarServidores(), controle_maquinas: controleDeMaquinaAtivo() };
+    return {
+      servidores: await listarServidores(),
+      controle_maquinas: controleDeMaquinaAtivo(),
+      usuarios_habilitado: mcpLiberadoParaTodos(),
+    };
   });
 
   // interruptor GLOBAL do controle de máquina: desliga chat + MCP externo + REST de uma vez
@@ -839,6 +851,54 @@ export function criarApp(): FastifyInstance {
     exigirOperador(u);
     const b = corpo(req);
     return atualizarFerramentas(String(b.nome ?? ""), u);
+  });
+
+  /* v3.36 — interruptor do admin: "contas comuns podem usar o minirag como servidor MCP".
+     Desligado, só o operador continua entrando (senão ninguém conserta nada). */
+  app.patch("/config/mcp/usuarios", async (req) => {
+    const u = usuario(req);
+    exigirOperador(u);
+    const b = corpo(req);
+    if (typeof b.ativo !== "boolean") throw new HttpError(422, "ativo (true/false) é obrigatório");
+    await gravarMcpLiberadoParaTodos(b.ativo);
+    return { usuarios_habilitado: b.ativo };
+  });
+
+  /* v3.36 — a tela MCP do usuário: como conectar + o que ESTA conta alcança hoje. */
+  app.get("/mcp/catalogo", async (req) => {
+    const u = usuario(req);
+    return {
+      caminho: "/mcp",
+      habilitado: mcpLiberadoParaTodos() || u.operador,
+      papel: u.operador ? "operador" : "usuario",
+      controle_maquinas: controleDeMaquinaAtivo(),
+      ferramentas: TOOLS.map((t) => {
+        const motivo = motivoDeBloqueio(u.tenant, u.operador, t.name);
+        return {
+          nome: t.name,
+          descricao: t.description,
+          grupo: grupoDaFerramenta(t.name),
+          permitida: motivo === null,
+          ajustavel: ajustavelPeloUsuario(u.operador, t.name),
+          motivo,
+        };
+      }),
+    };
+  });
+
+  /* v3.36 — o próprio usuário liga/desliga o que quer liberar para os agentes dele. */
+  app.put("/mcp/ferramentas", async (req) => {
+    const u = usuario(req);
+    const b = corpo(req);
+    const nome = String(b.ferramenta ?? "").trim();
+    if (!TOOLS.some((t) => t.name === nome)) throw new HttpError(404, `ferramenta desconhecida: ${nome}`);
+    if (typeof b.permitida !== "boolean") throw new HttpError(422, "permitida (true/false) é obrigatório");
+    await gravarPermissao(u.tenant, u.operador, nome, b.permitida);
+    return {
+      ferramenta: nome,
+      permitida: b.permitida,
+      motivo: motivoDeBloqueio(u.tenant, u.operador, nome),
+    };
   });
 
   /* ------------------------------------------------------------------ chat */

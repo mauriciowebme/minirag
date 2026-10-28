@@ -23,6 +23,7 @@ import { criarUsuario, listarUsuarios, exigirOperador, removerUsuario } from "./
 import { escreverEsquecimento, lerEsquecimento } from "./esquecimento";
 import { alvoMaquina, criarPareamento, controleDeMaquinaAtivo, listarMaquinas, rodar } from "./maquinas";
 import { NOMES_MAQUINA_TOOLS, toolMaquina, wrapComando } from "./maquinas_tools";
+import { eDeMaquina, ferramentaPermitida, motivoDeBloqueio } from "./mcp_acesso";
 import { responderChat, salvarProvider, testarProvider, verProvider } from "./provider";
 import { montarTela } from "./telas";
 import { abrirPagina, buscarWeb } from "./web";
@@ -34,10 +35,19 @@ import {
   listarServidores,
 } from "./ferramentas";
 
-/** As ferramentas que o Chat pode chamar: todas do MCP, menos o próprio chat (recursivo). */
-export function toolsParaChat(): Tool[] {
-  // com o controle de maquinas desligado, nem o chat sonha que existe rodar_comando
-  return TOOLS.filter((t) => t.name !== "chat" && (controleDeMaquinaAtivo() || !eDaMaquinas(t.name)));
+/** As ferramentas que o Chat pode chamar: todas do MCP, menos o próprio chat (recursivo).
+    v3.36: com o usuário em mãos, o pacote obedece às mesmas regras do tools/list — o chat do
+    comum não recebe ferramenta de operador nem o que ele mesmo desligou na tela MCP. */
+export function toolsParaChat(user?: { tenant: string; operador?: boolean }): Tool[] {
+  return TOOLS.filter(
+    (t) =>
+      t.name !== "chat" &&
+      (controleDeMaquinaAtivo() || !eDeMaquina(t.name)) &&
+      /* o interruptor do admin vale para o MCP de fora; o chat da casa continua com as suas
+         (senão desligar o servidor MCP calaria o chat de todo mundo) */
+      (!user || motivoDeBloqueio(user.tenant, user.operador, t.name) === null ||
+        motivoDeBloqueio(user.tenant, user.operador, t.name) === "servidor_desligado"),
+  );
 }
 
 /** Executa uma ferramenta interna no MESMO processo — é o mesmo caminho do POST /mcp, sem HTTP. */
@@ -648,8 +658,7 @@ export const TOOLS: Tool[] = [
   },
 ];
 
-const CONJUNTO_MAQUINAS = new Set<string>(["rodar_comando", ...NOMES_MAQUINA_TOOLS]);
-const eDaMaquinas = (n: string): boolean => CONJUNTO_MAQUINAS.has(n);
+const eDaMaquinas = (n: string): boolean => eDeMaquina(n);
 
 const ok = (id: unknown, result: unknown) => ({ jsonrpc: "2.0", id, result });
 const falha = (id: unknown, code: number, message: string) => ({
@@ -893,7 +902,19 @@ export async function despachar(msg: any, deps: McpDeps): Promise<unknown | null
   if (method.startsWith("notifications/")) return null;
   if (method === "initialize") return ok(id, initialize(params));
   if (method === "ping") return ok(id, {});
-  if (method === "tools/list") return ok(id, { tools: controleDeMaquinaAtivo() ? TOOLS : TOOLS.filter((t) => !eDaMaquinas(t.name)) });
+  if (method === "tools/list") {
+    /* v3.36: a lista agora diz a verdade da CONTA, não só a do servidor — sai o que o papel
+       não alcança, o que o controle de máquinas desligou e o que o próprio usuário desligou. */
+    let user: Usuario;
+    try {
+      user = deps.autenticar();
+    } catch (e) {
+      const err = e as HttpError;
+      return comStatus(err.status ?? 401, falha(id, -32001, err.detail ?? String(e)));
+    }
+    const visiveis = TOOLS.filter((t) => ferramentaPermitida(user.tenant, user.operador, t.name));
+    return ok(id, { tools: visiveis });
+  }
 
   if (method === "tools/call") {
     let user: Usuario;
@@ -902,6 +923,17 @@ export async function despachar(msg: any, deps: McpDeps): Promise<unknown | null
     } catch (e) {
       const err = e as HttpError;
       return comStatus(err.status ?? 401, falha(id, -32001, err.detail ?? String(e)));
+    }
+    /* v3.36: a recusa daqui é só das duas camadas NOVAS (interruptor do admin e a lista do
+       próprio usuário). Papel e controle de máquinas continuam recusando dentro da ferramenta,
+       com a frase de sempre (o gate único não se duplica). */
+    const motivo = motivoDeBloqueio(user.tenant, user.operador, String(params.name ?? ""));
+    if (motivo === "desligada" || motivo === "servidor_desligado") {
+      const frase =
+        motivo === "servidor_desligado"
+          ? "o uso do MCP está desligado para contas comuns; fale com o operador"
+          : "esta ferramenta está desligada na sua tela MCP";
+      return comStatus(403, falha(id, -32001, frase));
     }
     try {
       const resultado = await executarTool(params.name, params.arguments ?? {}, user, deps);

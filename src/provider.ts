@@ -821,7 +821,7 @@ export async function responderChat(
      conversa tanto quanto para o padrão da casa (antes, escolher um nomeado zerava as regras). */
   cfg.system_prompt = await lerInstrucoes(tenant);
 
-  const pacote = await pacoteDeFerramentas(cfg.mcp_interno);
+  const pacote = await pacoteDeFerramentas(cfg.mcp_interno, { tenant, operador: user.operador });
   const toolsTokens = custoDoPayload([], pacote.specs.length ? pacote.specs : undefined);
 
   /* v3.0 — memória + orçamento. A conversa anterior volta para o modelo (por gaveta), e o payload

@@ -318,13 +318,17 @@ export type PacoteFerramentas = {
 };
 
 /** Ferramentas ativas agora: as do minirag (se o botão estiver ligado) + as dos servidores ativos. */
-export async function pacoteDeFerramentas(mcpInterno: boolean): Promise<PacoteFerramentas> {
+export async function pacoteDeFerramentas(
+  mcpInterno: boolean,
+  /** v3.36: quem está conversando — o pacote interno respeita papel e a lista da tela MCP */
+  user?: { tenant: string; operador?: boolean },
+): Promise<PacoteFerramentas> {
   const specs: PacoteFerramentas["specs"] = [];
   const rotas = new Map<string, { servidor: string; original: string }>();
 
   if (mcpInterno) {
     const { toolsParaChat } = await import("./mcp");
-    for (const t of toolsParaChat()) {
+    for (const t of toolsParaChat(user)) {
       specs.push({ type: "function", function: { name: t.name, description: t.description, parameters: t.inputSchema } });
       rotas.set(t.name, { servidor: "minirag", original: t.name });
     }

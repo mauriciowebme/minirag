@@ -16,6 +16,7 @@ import { initProvedores } from "./provedores";
 import { initFerramentas } from "./ferramentas";
 import { initMetricas } from "./dashboard";
 import { anexarHubMaquinas, initMaquinas } from "./maquinas";
+import { initMcpAcesso } from "./mcp_acesso";
 
 let filho: ChildProcess | null = null;
 let encerrando = false;
@@ -82,6 +83,7 @@ async function main(): Promise<void> {
   await initFerramentas(); // v2.8: servidores MCP que dão ferramentas ao chat
   await initMetricas();
   await initMaquinas(); // v3.6: máquinas por usuário (túnel absorvido)
+  await initMcpAcesso(); // v3.36: quem usa o minirag como servidor MCP e o que cada conta liberou
   const esq = await lerEsquecimento();
   log(
     `limites: content<=${CONFIG.maxContentChars} chars, query<=${CONFIG.maxQueryChars} chars, ` +
