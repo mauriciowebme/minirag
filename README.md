@@ -22,6 +22,12 @@ parecidos com a pergunta, com uma nota de 0 a 1.
 
 ---
 ---
+## v3.35.1 (28/10) — O campo das instruções mostra o texto que está em uso
+- **O que você vê:** ao abrir Configurações → Providers, o cartão de instruções já aparece **com o texto que está valendo** (antes abria vazio, mesmo com as regras gravadas). E o que você apaga fica apagado: o sistema não volta a preencher o campo sozinho.
+- **Por que:** o dono viu o campo vazio e o modelo respondendo o nome — "de onde ele está tirando isso?". O texto existia (552 caracteres), mas a tela não o mostrava; e havia um preenchimento automático a cada subida do container que regravava as regras em todo campo vazio, quebrando a regra "vazio = conversa pura".
+- **Como funciona:** o carregamento da seção agora alimenta o campo com o que o servidor devolve (`setPrompt` saiu do caminho do formulário e passou a rodar sempre); o `UPDATE` do boot foi removido de `initProvider`. `src/regras.ts` continua existindo só como semente do botão "restaurar instruções padrão" — nada entra no campo por baixo.
+- **Como é provado:** typecheck + build limpos; suíte completa verde; e o teste visual com texto gravado: abrir a tela e ver os 552 caracteres no campo, apagar, salvar, recarregar e continuar vazio.
+
 ## v3.35.0 (28/10) — As instruções são da conta, e a narração nasce dentro do rastro
 - **O que você vê:** (1) o submenu virou **Providers** — plural, porque a seção gerencia vários; (2) o campo "instruções do modelo (system prompt)" saiu do formulário de cada provider e virou um **card próprio no topo da seção**, avisando que vale para todos os providers e modelos da conta; (3) a **narração** do agente passou a ser escrita **dentro do rastro do turno**, ao lado do "Pensou por Ns" — ela nunca mais aparece na bolha de resposta e depois "pula" para o rastro.
 - **Por que:** pedido do dono (28/10) — o system prompt é a voz do assistente, não do modelo, então não pode morar dentro da linha de um provider; e o print do turno mostrou a fala nascendo na bolha e só depois sendo jogada para dentro do rastro ("o ideal era ele já escrever direto dentro do rastro, assim como já faz com o pensamento").
