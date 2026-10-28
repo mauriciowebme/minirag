@@ -449,6 +449,11 @@ export function Chat({
           ...(m.raciocinio ? { raciocinio: String(m.raciocinio) } : {}),
           ...(Array.isArray(m.fontes) && m.fontes.length ? { fontes: m.fontes.map(String) } : {}),
           ...(m.custo ? { custo: m.custo as Record<string, unknown> } : {}),
+          /* v3.34.1: o tempo do TURNO fica gravado no custo da mensagem — reabrir a conversa
+             mantem o mesmo numero do cabeçalho (antes caia na soma dos trechos) */
+          ...(Number((m.custo as Record<string, unknown> | null | undefined)?.ms ?? 0) > 0
+            ? { ms: Number((m.custo as Record<string, unknown>).ms) }
+            : {}),
           ...(m.provedor ? { provedor: String(m.provedor) } : {}),
           ...(m.modelo ? { modelo: String(m.modelo) } : {}),
           /* v3.23: o card da tela gerada volta ao reabrir a conversa */

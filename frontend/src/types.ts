@@ -295,7 +295,7 @@ export type ChatHistorico = {
     quando: string;
     /** v3.18 (T004/T018): de onde a resposta veio e quanto custou */
     fontes?: string[];
-    custo?: { tok_in?: number; tok_out?: number } | null;
+    custo?: { tok_in?: number; tok_out?: number; ms?: number } | null;
     /** v3.19: quem respondeu (nome do provedor; ausente = padrão da casa) */
     provedor?: string;
     modelo?: string;
