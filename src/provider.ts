@@ -148,19 +148,10 @@ export async function initProvider(): Promise<void> {
   /* v3.23: telas geradas pelo agente (HTML+CSS+JS) viajam com a resposta */
   await q(`ALTER TABLE chat_mensagens ADD COLUMN IF NOT EXISTS telas JSONB`);
   await q(`CREATE INDEX IF NOT EXISTS chat_tenant_idx ON chat_mensagens (tenant, memoria, id)`);
-  /* v3.34 — as instruções da casa passam a viver no CAMPO EDITÁVEL (Configurações), não no
-     código: quem abre a tela vê exatamente o que o modelo recebe. Só preenche o que está vazio
-     ou o resquício da v3.33 ("Seu nome é Clauricio!") — prompt personalizado não é tocado. */
-  await q(
-    `UPDATE provider_config SET system_prompt = $1, atualizado_em = now()
-      WHERE btrim(system_prompt) = '' OR btrim(system_prompt) = 'Seu nome é Clauricio!'`,
-    [REGRAS_CASA],
-  );
-  /* a tabela de provedores nomeados pode nascer depois desta — só mexe se ela já existir */
-  const temProvedores = await q<{ t: string | null }>(`SELECT to_regclass('provedores')::text AS t`);
-  if (temProvedores.rows[0]?.t) {
-    await q(`UPDATE provedores SET system_prompt = $1, atualizado_em = now() WHERE btrim(system_prompt) = ''`, [REGRAS_CASA]);
-  }
+  /* v3.35.1: o texto das regras da casa NÃO é mais injetado no boot. Antes, cada subida regravava
+     as regras em todo campo vazio — quem apagasse as instruções ("conversa pura") as via voltar
+     no próximo restart, sem ter salvo nada. `REGRAS_CASA` agora só serve de semente para o botão
+     "restaurar instruções padrão" da tela; nenhum texto entra no campo por baixo. */
 }
 
 /** Janela de contexto efetiva: o que o operador digitou > o que a detecção achou > padrão. */
