@@ -284,7 +284,11 @@ export async function abrirPagina(
   }
 
   const r = await baixar(u.toString());
-  if (r.status >= 400) throw new Error(`a pagina respondeu http ${r.status}`);
+  /* 403/429 no curl costuma ser bloqueio de robô, não conteúdo inexistente: o navegador
+   * tem outra impressão digital e muitas vezes passa. Então o erro fica guardado e quem
+   * decide é o resultado do chromium (quando disponível). */
+  const bloqueado = r.status >= 400;
+  if (bloqueado && process.env.MINIRAG_NAVEGADOR === "0") throw new Error(`a pagina respondeu http ${r.status}`);
   const tipo = r.ct.toLowerCase();
   if (tipo && !/text\/|html|xml|json/.test(tipo)) {
     throw new Error(`conteudo nao textual (${tipo}) — web_open le paginas, nao arquivos`);
@@ -299,9 +303,10 @@ export async function abrirPagina(
    * pouco texto. Página pequena e simples (ex.: example.com, 577 bytes) NÃO paga o
    * navegador: só renderiza com js:true, ou quando o HTML tem corpo para uma SPA. */
   const sinalDeJs = /id=["'](root|app|__next)["']|__NEXT_DATA__|window\.__(NUXT|INITIAL_STATE)/i.test(r.texto);
-  const valeRenderizar = opcoes.js === true || texto.length < POUCO_TEXTO || (texto.length < 900 && sinalDeJs);
+  const valeRenderizar =
+    bloqueado || opcoes.js === true || texto.length < POUCO_TEXTO || (texto.length < 900 && sinalDeJs);
   const htmlGordo = r.bytes > 3000;
-  if (valeRenderizar && htmlGordo && process.env.MINIRAG_NAVEGADOR !== "0") {
+  if (valeRenderizar && (htmlGordo || bloqueado) && process.env.MINIRAG_NAVEGADOR !== "0") {
     try {
       const nav = await renderizar(u.toString());
       if (nav.texto.length > texto.length) {
@@ -309,9 +314,17 @@ export async function abrirPagina(
         renderizado = true;
       }
     } catch (e) {
-      if (opcoes.js === true) throw new Error(`nao consegui renderizar a pagina: ${(e as Error).message}`);
+      if (opcoes.js === true && !bloqueado) throw new Error(`nao consegui renderizar a pagina: ${(e as Error).message}`);
+      if (bloqueado) throw new Error(`a pagina respondeu http ${r.status} e o navegador tambem nao passou`);
       /* sem navegador: devolve o que o curl trouxe, e o texto vazio fala por si */
     }
+  }
+
+  /* Bloqueio de robô não vira "página com 3 caracteres": quem lê precisa saber que falhou.
+   * Medido: invest·ing e UOL devolvem 403/“Access Denied” para IP de datacenter em curl E
+   * no chromium, por mais tempo que se espere. */
+  if (bloqueado && texto.length < 200) {
+    throw new Error(`a pagina bloqueou o acesso (http ${r.status}) — nem o navegador passou; procure a informacao em outra fonte`);
   }
 
   const truncado = texto.length > MAX_TEXTO;
