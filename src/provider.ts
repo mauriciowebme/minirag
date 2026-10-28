@@ -1048,7 +1048,7 @@ export async function responderChat(
     const parcial = emitido.trim();
     await gravarMensagens(
       tenant, memoria, pergunta, parcial, chamadas, falas, pensamento.trim(), rastro, [...fontes],
-      cfg.provedor, cfg.modelo, telas,
+      cfg.provedor, cfg.modelo, telas, Date.now() - inicio,
     );
     return empacotar(parcial, "parada pelo usuário — o que chegou ficou gravado", true);
   }
@@ -1065,7 +1065,7 @@ export async function responderChat(
         : "nenhuma ferramenta está ligada em Configurações → Ferramentas (MCP)");
   }
 
-  await gravarMensagens(tenant, memoria, pergunta, texto, chamadas, falas, pensamento.trim(), rastro, [...fontes], cfg.provedor, cfg.modelo, telas);
+  await gravarMensagens(tenant, memoria, pergunta, texto, chamadas, falas, pensamento.trim(), rastro, [...fontes], cfg.provedor, cfg.modelo, telas, Date.now() - inicio);
   return empacotar(texto, aviso, false);
 }
 
@@ -1082,6 +1082,7 @@ async function gravarMensagens(
   provedor: string | null = null,
   modelo = "",
   telas: Tela[] = [],
+  msTurno = 0,
 ): Promise<void> {
   await q(
     `INSERT INTO chat_mensagens (tenant, memoria, papel, texto, ferramentas) VALUES ($1, $2, 'user', $3, NULL)`,
@@ -1094,7 +1095,7 @@ async function gravarMensagens(
       JSON.stringify(rastro), JSON.stringify(fontes),
       /* v3.18 (T018): tok_out medido pela mesma régua do orçamento; tok_in fica por conta de quem
          chamou (a resposta pode ser parcial) — gravamos só o que temos aqui. */
-      JSON.stringify({ tok_out: custoDoPayload([{ content: resposta }]) }),
+      JSON.stringify({ tok_out: custoDoPayload([{ content: resposta }]), ...(msTurno > 0 ? { ms: msTurno } : {}) }),
       /* v3.19: quem respondeu (nome do provedor escolhido; null = padrão da casa) */
       provedor, modelo || "",
       /* v3.23: telas geradas neste turno */
