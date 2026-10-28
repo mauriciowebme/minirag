@@ -50,6 +50,7 @@
 | T037 | Piso com "nova conversa"; exportar no popover "ferramentas" | chat-ui | 🟢 Baixa | ✅ v3.31.1 | [#t037](#t037) |
 | T038 | Respiro entre a tela gerada e a conclusão | chat-ui | 🟢 Baixa | ✅ v3.31.2 | [#t038](#t038) |
 | T039 | Busca na web (`web_search`) e leitura de página (`web_open`) | ferramentas | 🟡 Média | ✅ v3.32.0 | [#t039](#t039) |
+| T040 | Renderizar JavaScript no `web_open` (chromium/CDP, sem npm) | ferramentas | 🟡 Média | ✅ v3.33.0 | [#t040](#t040) |
 
 ---
 
@@ -572,6 +573,22 @@
 | **Arquivos afetados** | src/web.ts (novo), src/mcp.ts (2 tools + dispatch + instructions), frontend/src/components/Chat.tsx (rótulos), Dockerfile (curl no estágio final) |
 | **Dependências** | T001 (MCP interno). |
 | **Riscos** | **429**: o Brave aceita curl e recusa o TLS do Node (fetch, node:https e http/2 levaram 429 com o mesmo user-agent) — por isso a imagem final instala curl e o `baixar()` usa curl, com fetch só de reserva. Sem curl o Brave falha e sobram os RSS de notícia. **Sem JS**: página que monta o conteúdo por JavaScript vem vazia em `web_open` — nesse caso diga que não deu, não invente. **Limite de uso**: raspagem de buscador público não tem contrato; se um dia bloquear de vez, trocar por chave (Brave/Tavily) é trocar o primeiro elo da cadeia. |
+
+---
+
+<a id="t040"></a>
+### T040 — Renderizar JavaScript no `web_open` (chromium headless via CDP)
+| Campo | Conteúdo |
+|---|---|
+| **Módulo** | ferramentas (MCP) |
+| **Prioridade** | 🟡 Média — site que monta conteúdo por JS vinha oco |
+| **Status** | ✅ v3.33.0 (build verde; medido no container) |
+| **Spec/Plano** | Dono (27/10): "acho que o 2 seria melhor porque não depende de externos. Dá pra testar pra ver se funciona bem?" — opção 2 = chromium no próprio container. |
+| **Descrição** | O `web_open` tenta o curl; se o texto vier com menos de 400 chars (ou se vier `js:true`), abre a mesma URL no chromium headless e fica com o texto maior. O navegador é único, reaproveitado entre chamadas e desligado quando para. |
+| **Escopo** | `src/navegador.ts`: CDP na mão sobre o WebSocket nativo do Node (nenhum pacote npm), fila de uma página por vez, teto de 20s por página (devolve o que já carregou), reinício ao passar de 40 páginas ou 800 MB de RSS, desligamento após 3 min ocioso, perfil em /tmp. SSRF: host interno barrado na URL **e** em cada requisição da página (sub-recurso e redirecionamento) via `Fetch.requestPaused`. `MINIRAG_NAVEGADOR=0` desliga sem rebuild; `MINIRAG_CHROMIUM` troca o binário. |
+| **Arquivos afetados** | src/navegador.ts (novo), src/web.ts (fallback), src/mcp.ts (param `js`), Dockerfile (chromium + fonts-liberation) |
+| **Dependências** | T039 (web_search/web_open). |
+| **Riscos** | **Peso**: +381 MB de imagem e ~270 MB de RSS parado, 350-620 MB navegando. **Tempo**: 3-4s por página comum; portal cheio de anúncio estoura o teto e volta com o que carregou (medido: g1, 15,6s). **Estabilidade**: `--single-process` é mais leve, mas uma página que trava derruba o navegador — o cliente reinicia na chamada seguinte. **Sem interação**: não clica nem rola; site que exige clique continua fora do alcance. |
 
 ## Lotes recomendados (executados — saíram na v3.18)
 
