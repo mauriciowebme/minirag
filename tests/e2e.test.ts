@@ -3175,6 +3175,29 @@ await bloco(t, "v3.6: máquinas por usuário — hub WS, pareamento, run, escopo
     r = await call("GET", "/provedores", { key: TESTKEY });
     f.check("lista fica sem a linha apagada", !(r.json?.provedores ?? []).some((x: any) => x.nome === "sonda319"), r.texto.slice(0, 160));
 
+    /* v3.35.1 — campo vazio é "conversa pura" e SOBREVIVE ao boot: antes, cada subida do
+       container regravava as regras da casa em todo campo vazio (UPDATE no initProvider),
+       então quem apagasse as instruções as via voltar sem ter salvo nada. */
+    await call("PUT", "/config/instrucoes", { key: OPKEY, corpo: { texto: "", tenant: "teste" } });
+    if (CONTAINER) {
+      execFileSync("docker", ["restart", CONTAINER], { stdio: "ignore" });
+      let subiu351 = 0;
+      for (let i = 0; i < 40; i++) {
+        try {
+          const p = await fetch(BASE + "/health");
+          if (p.status === 200) {
+            subiu351 = i + 1;
+            break;
+          }
+        } catch {
+          /* ainda subindo */
+        }
+        await dormir(2000);
+      }
+      const depoisBoot = await call("GET", "/config/provider?tenant=teste", { key: OPKEY });
+      f.check("v3.35.1: campo vazio sobrevive ao boot (nada entra por baixo)", subiu351 > 0 && String(depoisBoot.json?.system_prompt ?? "?") === "" && depoisBoot.json?.tem_system_prompt === false, `${subiu351 ? "subiu" : "não subiu"}: ${JSON.stringify(depoisBoot.json?.system_prompt ?? null).slice(0, 120)}`);
+    }
+
     await call("PUT", "/config/instrucoes", { key: OPKEY, corpo: { texto: promptAntes335, tenant: "teste" } });
     await call("DELETE", `/chat?memoria=${GAV}`, { key: TESTKEY });
     if (CONTAINER) execFileSync("docker", ["exec", CONTAINER, "sh", "-c", `${pkill(PORTA)} || true`]);
