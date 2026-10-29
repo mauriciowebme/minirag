@@ -22,6 +22,27 @@ parecidos com a pergunta, com uma nota de 0 a 1.
 
 ---
 ---
+## v3.43.0 (29/10) — o túnel passou a entregar o que promete (e o ✓ parou de mentir)
+
+O que você vê: `ler_arquivo` de print/foto/log volta a funcionar (até os 800 KB do
+contrato), o rastro mostra ✗ em comando que falhou e o erro de máquina sem git é uma
+frase curta em vez do XML do PowerShell.
+
+Por que: o "teto de ~39 KB do túnel" não era o WebSocket — era o CLIENTE. Ele matava a
+árvore do processo ao passar de 40.000 caracteres de stdout e, com `morto=true`, o
+`close` retornava sem resolver a Promise: o servidor esperava e estourava em -124,
+lendo como máquina muda. Quem lia 200 KB (padrão do `ler_arquivo`) falhava sempre.
+
+Como funciona: o cliente agora **trunca** a coleta em 8 MB (e diz `truncado: true`),
+nunca mata por tamanho; o servidor propaga o campo. `ok` passou a considerar `exit != 0`,
+`git` ausente vira 422 curto, `ler_arquivo` sem resposta vira 504 explicando que
+`timeout` não existe ali, e `comandos_log.exit` virou BIGINT (exit grande do Windows
+não derruba mais a auditoria).
+
+Como é provado: sonda ao vivo depois do deploy e do auto-update do cliente —
+`Write-Output ('x'*40000)` volta em ~1 s, `ler_arquivo` binário de 200 KB volta com
+`lidos=200000`, e o mesmo comando com `exit 1` aparece ✗ no rastro.
+
 ## v3.42.1 (29/10) — fala no meio: a tarefa achada pelo tenant certo
 
 O steering da 3.42.0 devolvia `404 tarefa não encontrada` com a resposta rodando na tela
