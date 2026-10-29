@@ -3606,6 +3606,70 @@ await bloco(t, "v3.6: máquinas por usuário — hub WS, pareamento, run, escopo
     f.fechar("v3.42 steering");
   });
 
+  /* v3.43 — a prova é o CLIENTE DE VERDADE, não um falso: o teto de ~39 KB que
+     quebrava o ler_arquivo do dono morava no handler de stdout do cliente
+     (40.000 chars -> matarArvore sem resolver a Promise). Um fake que responde
+     200 KB não pegaria isso; o binário embutido na imagem pega. */
+  await bloco(t, "v3.43: túnel entrega resposta grande (cliente REAL, sem teto de 40 KB)", async () => {
+    const f = fiscal();
+    const CONTAINER = process.env.CONTAINER ?? "";
+    const leJson = (r: any): any => {
+      const t = String(r?.json?.result?.content?.[0]?.text ?? "");
+      try { return JSON.parse(t); } catch { return {}; }
+    };
+    /* mata só o cliente deste bloco (a imagem slim pode não ter pkill) */
+    const MATAR = "const fs=require('fs');for(const d of fs.readdirSync('/proc')){if(!/^[0-9]+$/.test(d))continue;"
+      + "try{const c=fs.readFileSync('/proc/'+d+'/cmdline','utf8').split(String.fromCharCode(0)).join(' ');"
+      + "if(c.indexOf('minirag-cliente-linux')>=0&&c.indexOf('cli-real')>=0)process.kill(Number(d),'SIGKILL')}catch(e){}}";
+    const matar = () => {
+      try { execFileSync("docker", ["exec", CONTAINER, "node", "-e", MATAR]); } catch { /* já morreu */ }
+    };
+
+    matar();
+    await call("DELETE", "/maquinas/cli-real", { key: TESTKEY }); // rodada anterior pode ter deixado a máquina
+    const r0 = await call("POST", "/maquinas", { key: TESTKEY, corpo: { nome: "cli-real" } });
+    const par = String(r0.json?.token ?? "");
+    f.check("v3.43 pareamento do cliente real criado", Boolean(par), r0.texto.slice(0, 120));
+
+    execFileSync("docker", ["exec", CONTAINER, "sh", "-c", "head -c 800000 /dev/zero > /tmp/e2e-grande.bin"]);
+    execFileSync("docker", ["exec", "-d", CONTAINER, "/app/agente/bin/minirag-cliente-linux",
+      "--url", "http://127.0.0.1:8000", "--token", par, "--host", "cli-real", "--conf", "/tmp/e2e-cli-real.json"]);
+
+    let online = false;
+    for (let i = 0; i < 60; i++) {
+      const g = await call("GET", "/maquinas", { key: TESTKEY });
+      online = (g.json?.maquinas ?? []).some((m: any) => m.host === "cli-real" && m.online === true);
+      if (online) break;
+      await dormir(300);
+    }
+    f.check("v3.43 binário do cliente conectou (é ele que atende as chamadas abaixo)", online, online);
+
+    const ler = async (args: Record<string, unknown>, id: number) =>
+      leJson(await call("POST", "/mcp", { key: TESTKEY, corpo: { jsonrpc: "2.0", id, method: "tools/call",
+        params: { name: "ler_arquivo", arguments: { host: "cli-real", caminho: "/tmp/e2e-grande.bin", binario: true, ...args } } } }));
+
+    /* 200 KB era o caso que morria em 53 s (limite PADRÃO do ler_arquivo) */
+    const r1 = await ler({ limite: 200000 }, 950);
+    f.check("v3.43 ler_arquivo binário de 200 KB volta inteiro (antes: silêncio e -124)",
+      r1?.lidos === 200000 && Buffer.from(String(r1?.base64 ?? ""), "base64").length === 200000,
+      JSON.stringify({ lidos: r1?.lidos, b64: String(r1?.base64 ?? "").length }));
+
+    /* e sem `limite` (o padrão de 200.000 que o modelo usa) também */
+    const r2 = await ler({}, 951);
+    f.check("v3.43 sem 'limite' o padrão de 200 KB também passa", r2?.lidos === 200000, JSON.stringify({ lidos: r2?.lidos }));
+
+    /* o teto do contrato: 800 KB */
+    const r3 = await ler({ limite: 800000 }, 952);
+    f.check("v3.43 o teto de 800 KB do contrato é real",
+      r3?.lidos === 800000 && Buffer.from(String(r3?.base64 ?? ""), "base64").length === 800000,
+      JSON.stringify({ lidos: r3?.lidos, b64: String(r3?.base64 ?? "").length }));
+
+    matar();
+    execFileSync("docker", ["exec", CONTAINER, "sh", "-c", "rm -f /tmp/e2e-grande.bin /tmp/e2e-cli-real.json"]);
+    await call("DELETE", "/maquinas/cli-real", { key: TESTKEY });
+    f.fechar("v3.43 túnel grande");
+  });
+
   await bloco(t, "freio de força bruta (último: bloqueia o IP)", async () => {
     const f = fiscal();
     for (let i = 0; i < 10; i++) {
