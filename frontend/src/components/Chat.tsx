@@ -33,14 +33,20 @@ type TarefaStatus = { id: string; pergunta?: string; status: string; parcial: st
 /** v3.3: lê o stream de uma tarefa no servidor, RELIGANDO em queda de rede (até 3×, backoff).
  *  Queda de conexão ≠ falha: a tarefa vive no servidor; se o stream quebrar, consulta o
  *  estado e reanexa. Devolve os dados do `fim` (ou reconstrói do GET se terminou no vão). */
+/** v3.39.2: `tenant` é OBRIGATÓRIO na leitura quando o POST mandou um — a tarefa nasce
+ *  com o tenant do foco (operador) e `verTarefa` filtra por ele; sem o parâmetro o servidor
+ *  resolve o tenant do usuário, não acha a linha e devolve 404 "tarefa não encontrada"
+ *  (a resposta existe e aparece no refresh — o defeito era só na leitura). */
 async function bombearTarefa(
   id: string,
   onEvent: (e: EventoTransporte) => void,
+  tenant?: string,
 ): Promise<Record<string, unknown> | null> {
+  const busca = tenant ? "?" + qs({ tenant }) : "";
   let dados: Record<string, unknown> | null = null;
   for (let tentativa = 0; tentativa <= 3; tentativa++) {
     try {
-      await getStream(`/chat/tarefa/${id}/stream`, (e) => {
+      await getStream(`/chat/tarefa/${id}/stream${busca}`, (e) => {
         if (e.tipo === "fim") dados = e.dados as Record<string, unknown>;
         onEvent(e as EventoTransporte);
       });
@@ -50,7 +56,7 @@ async function bombearTarefa(
       /* rede/proxy caiu no meio: perguntar ao servidor o que houve, sem confiar no stream */
       let t: TarefaStatus | null = null;
       try {
-        t = await get<TarefaStatus>(`/chat/tarefa/${id}`);
+        t = await get<TarefaStatus>(`/chat/tarefa/${id}${busca}`);
       } catch {
         /* servidor inacessível também: tratar como rodando e tentar de novo */
       }
@@ -476,7 +482,7 @@ export function Chat({
         void reativar(
           chave,
           { id: String(viva.id), pergunta: String(viva.pergunta ?? ""), parcial: String(viva.parcial ?? "") },
-          bombearTarefa,
+          (id, ev) => bombearTarefa(id, ev, tenantParam),
         );
       }
     } catch {
@@ -646,7 +652,7 @@ export function Chat({
           throw e;
         }
       }
-      if (idTarefa) dados = await bombearTarefa(idTarefa, onEvent);
+      if (idTarefa) dados = await bombearTarefa(idTarefa, onEvent, pedido.tenant);
       const d = (dados ?? {}) as Record<string, unknown>;
       const aviso = textoCompacto(d.compactacao as Compactacao | undefined);
       if (aviso) d.compacto = aviso;

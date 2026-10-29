@@ -22,6 +22,12 @@ parecidos com a pergunta, com uma nota de 0 a 1.
 
 ---
 ---
+## v3.39.2 (29/10) — Chat do operador: a leitura da tarefa ia sem o tenant do foco
+- **O que você vê:** a resposta volta na hora, em vez de "não consegui responder: tarefa não encontrada". Antes, com operador em foco de um tenant, a bolha mostrava o erro e a resposta só aparecia ao recarregar a página.
+- **Por que:** o `POST /chat/tarefa` grava a linha com o tenant do foco, mas a leitura (`GET /chat/tarefa/:id/stream` e `GET /chat/tarefa/:id`) ia SEM `?tenant=`. `verTarefa` filtra por tenant e resolvia o tenant do próprio usuário, então a tarefa existia e terminava, mas a leitura devolvia 404.
+- **Como funciona:** `bombearTarefa` recebe o tenant e o repassa nas duas rotas de leitura; o `transportar` usa o mesmo `tenant` que foi no POST e o `reativar` usa o `tenantParam` da tela. O servidor não mudou.
+- **Como é provado:** em produção, `GET /chat/tarefa/<id>` sem tenant devolvia 404 e com `?tenant=operador` devolvia 200 com a resposta; depois do deploy, mensagem enviada no painel com operador em foco responde sem erro e sem refresh.
+
 ## v3.39.1 (29/10) — `rodar_comando` de volta ao ar: o Node reescrevia a linha do `cmd.exe`
 - **O que você vê:** comando volta a rodar nas máquinas Windows. Antes desta correção, qualquer chamada respondia `'"echo oi"' não é reconhecido como um comando interno` — a ferramenta estava fora do ar em todas as máquinas.
 - **Por que:** a 3.39.0 tentou preservar aspas de caminho com espaço chamando `cmd.exe /d /s /c "…"`. Só que o Node também embrulha em aspas o argumento que tem espaço, e a linha final chegava ao `cmd` com as aspas duplicadas e as internas escapadas com `\` — que o `cmd` não entende como escape.
