@@ -376,7 +376,7 @@ export async function executarFerramenta(
         const tela = r as Tela;
         return { servidor: "minirag", nome: rota.original, saida: resumoTela(tela), ok: true, ms: Date.now() - inicio, args: argsUsados, tela };
       }
-      return { servidor: "minirag", nome: rota.original, saida: paraTexto(r), ok: true, ms: Date.now() - inicio, args: argsUsados };
+      return { servidor: "minirag", nome: rota.original, saida: paraTexto(r), ok: okDaSaida(r), ms: Date.now() - inicio, args: argsUsados };
     }
     const l = await linhaServidor(rota.servidor);
     const ini = await chamarServidor(l.url, l.cabecalho, {
@@ -427,6 +427,18 @@ export function paraTexto(valor: unknown): string {
   texto = texto.replace(/"([A-Za-z0-9+/=]{240,})"/g, '":[arquivo em base64: $1 caracteres, não mostrei]"');
   if (texto.length > MAX_TEXTO_MODELO) texto = texto.slice(0, MAX_TEXTO_MODELO) + `\n… [cortado: ${texto.length} caracteres]`;
   return texto;
+}
+
+/** v3.43: `ok` é "o comando deu certo", não "o transporte respondeu".
+ *  Antes a tool devolvia `ok: true` mesmo com `exit: 1` e o rastro pintava ✓
+ *  verde num comando que falhou. Agora um `exit != 0` (ou `ok: false`) reprova. */
+export function okDaSaida(valor: unknown): boolean {
+  if (valor && typeof valor === "object") {
+    const o = valor as Record<string, unknown>;
+    if (o.ok === false) return false;
+    if (typeof o.exit === "number" && o.exit !== 0) return false;
+  }
+  return true;
 }
 
 /** O que vai para a tela e para o histórico: sem segredo, sem texto quilométrico. */
