@@ -42,9 +42,12 @@ type Ligacao = {
   user: string;
   httpBase: string; // host do upgrade que abriu o cano (canal de upload p/ ferramentas)
   desde: string; // ISO
-  pendente: ((r: { exit: number; stdout: string; stderr: string }) => void) | null;
+  pendente: ((r: RespostaMaquina) => void) | null;
   cauda: Promise<unknown>;
 };
+
+/** o que o cliente devolve por comando; `truncado` avisa que a coleta bateu o teto */
+export type RespostaMaquina = { exit: number; stdout: string; stderr: string; truncado?: boolean };
 
 const ligacoes = new Map<string, Ligacao>(); // chave `tenant|host`
 const chaveDe = (tenant: string, host: string) => `${tenant}|${host}`;
@@ -92,7 +95,7 @@ export async function initMaquinas(): Promise<void> {
        tenant    VARCHAR(64) NOT NULL,
        host      VARCHAR(128) NOT NULL,
        cmd       TEXT NOT NULL,
-       exit      INT,
+       exit      BIGINT,
        stdout    TEXT NOT NULL DEFAULT '',
        stderr    TEXT NOT NULL DEFAULT '',
        ms        INT NOT NULL DEFAULT 0,
@@ -101,6 +104,10 @@ export async function initMaquinas(): Promise<void> {
      )`,
   );
   await q(`ALTER TABLE comandos_log ALTER COLUMN origem TYPE VARCHAR(64)`);
+  /* v3.43: exit de processo nativo do Windows pode vir sem sinal (0x8004100C =
+     2147749900) e não cabe em INT — a auditoria inteira era perdida com
+     "value ... is out of range for type integer". BIGINT cobre qualquer exit. */
+  await q(`ALTER TABLE comandos_log ALTER COLUMN exit TYPE BIGINT`);
   await q(
     `CREATE TABLE IF NOT EXISTS chaves_cliente (
        token_hash   CHAR(64) PRIMARY KEY,
@@ -241,7 +248,7 @@ export async function rodar(
   origem: string,
   stdoutMax = 20000,
   background = false,
-): Promise<{ exit: number; stdout: string; stderr: string; ms: number; host: string }> {
+): Promise<{ exit: number; stdout: string; stderr: string; truncado: boolean; ms: number; host: string }> {
   if (typeof cmd !== "string" || !cmd.trim()) throw new HttpError(422, "cmd é obrigatório");
   /* T044: comandos montados pelo servidor (lote/sessão/env) chegam codificados em base64
      UTF-16LE e inflam ~11x — o teto tem de ser o do envelope, não o do texto do usuário. */
@@ -271,16 +278,16 @@ export async function rodar(
   if (resultado.exit === -1)
     throw new HttpError(503, `maquina reconectando (${stderr || "cliente caiu no meio do comando"}) — a chamada nao foi executada; tente de novo`);
   void u;
-  return { exit: resultado.exit, stdout, stderr, ms, host };
+  return { exit: resultado.exit, stdout, stderr, truncado: resultado.truncado === true, ms, host };
 }
 
 /** Serial por máquina (regra herdada do túnel: fila no mesmo host) + teto de tempo. */
 function fila(l: Ligacao, espera: number, cmd: string, bg = false) {
   const proximo = l.cauda.then(
     () =>
-      new Promise<{ exit: number; stdout: string; stderr: string }>((resolve) => {
+      new Promise<RespostaMaquina>((resolve) => {
         let feito = false;
-        const terminar = (r: { exit: number; stdout: string; stderr: string }) => {
+        const terminar = (r: RespostaMaquina) => {
           if (feito) return;
           feito = true;
           l.pendente = null;
@@ -540,7 +547,7 @@ async function receberOi(ws: WebSocket, oi: OiFrame, httpBase = ""): Promise<voi
       return;
     }
     if (r && typeof r.exit === "number" && lig.pendente) {
-      lig.pendente({ exit: r.exit, stdout: String(r.stdout ?? ""), stderr: String(r.stderr ?? "") });
+      lig.pendente({ exit: r.exit, stdout: String(r.stdout ?? ""), stderr: String(r.stderr ?? ""), truncado: r.truncado === true });
     }
   });
   ws.on("close", (codigo, motivoDaRede) => {

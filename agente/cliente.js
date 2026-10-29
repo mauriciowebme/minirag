@@ -208,6 +208,12 @@ function rodar(cmd, esperaSeg, bg) {
     let stdout = "";
     let stderr = "";
     let morto = false;
+    let truncado = false;
+    /* v3.43: teto de COLETA do cliente. Antes era 40.000 e matava a árvore sem
+       resolver a Promise — o servidor via silêncio e culpava o timeout (leitura
+       binária do print do dono morria em 53 s). Base64 de 6 MB cabe aqui. */
+    const TETO_STDOUT = 8 * 1024 * 1024;
+    const TETO_STDERR = 64 * 1024;
     const matarArvore = () => {
       morto = true;
       try {
@@ -221,10 +227,21 @@ function rodar(cmd, esperaSeg, bg) {
     const rel = setTimeout(() => {
       matarArvore();
       stderr += "\n[cliente: mata-árvore após " + teto + "s]";
-      resolve({ exit: -124, stdout: stdout.slice(0, 1500000), stderr: stderr.slice(0, 8000) });
+      resolve({ exit: -124, stdout: stdout.slice(0, TETO_STDOUT), stderr: stderr.slice(0, TETO_STDERR), truncado });
     }, teto * 1000);
-    filho.stdout && filho.stdout.on("data", (b) => { stdout += b; if (stdout.length > 40000) matarArvore(); });
-    filho.stderr && filho.stderr.on("data", (b) => { stderr += b; if (stderr.length > 16000) matarArvore(); });
+    /* v3.43: o teto de coleta TRUNCA, não mata. Até a 3.42.1 passar de 40.000 chars
+       chamava matarArvore(), que marcava morto=true e fazia o `close` retornar SEM
+       resolver a Promise: o servidor esperava até estourar (-124) e lia como máquina
+       muda. Era esse o "teto de ~39 KB do túnel" — nada a ver com o WebSocket.
+       Agora coleta até 8 MB (base64 de ~6 MB), marca truncado=true e responde. */
+    filho.stdout && filho.stdout.on("data", (b) => {
+      if (stdout.length >= TETO_STDOUT) { truncado = true; return; }
+      stdout += b;
+    });
+    filho.stderr && filho.stderr.on("data", (b) => {
+      if (stderr.length >= TETO_STDERR) return;
+      stderr += b;
+    });
     filho.on("error", (e) => {
       clearTimeout(rel);
       resolve({ exit: -1, stdout: "", stderr: String(e.message || e) });
@@ -232,7 +249,7 @@ function rodar(cmd, esperaSeg, bg) {
     filho.on("close", (code) => {
       clearTimeout(rel);
       if (morto) return; // o timeout já resolveu com -124
-      resolve({ exit: code == null ? -9 : code, stdout: stdout.slice(0, 1500000), stderr: stderr.slice(0, 8000) });
+      resolve({ exit: code == null ? -9 : code, stdout: stdout.slice(0, TETO_STDOUT), stderr: stderr.slice(0, TETO_STDERR), truncado });
     });
   });
 }

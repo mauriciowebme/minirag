@@ -172,7 +172,7 @@ async function exec(
   espera: number,
   stdoutMax = 20000,
   bg = false,
-): Promise<{ exit: number; stdout: string; stderr: string }> {
+): Promise<{ exit: number; stdout: string; stderr: string; truncado: boolean }> {
   const r = await rodar(ctx.u, ctx.alvo, ctx.host, cmd, espera, `${ctx.origem}:${ctx.tool}`, stdoutMax, bg);
   return r;
 }
@@ -244,7 +244,12 @@ async function lerArquivo(ctx: Ctx, args: Record<string, unknown>): Promise<unkn
         `base64 -w 0 "$t"; rm -f "$t"`,
     );
   }
-  const res = await exec(ctx, cmd, 45, 1_600_000);
+  const res = await exec(ctx, cmd, 45, 3_200_000);
+  /* v3.43: -124 aqui é SILÊNCIO, não demora. Antes a mensagem genérica mandava
+     "aumente timeout (max 900s)" — campo que o ler_arquivo não tem — e o modelo
+     repetia a mesma chamada pagando 53 s por tentativa. */
+  if (res.exit === -124)
+    throw new HttpError(504, `leitura sem resposta em 53s — reduza 'limite' (ex.: 200000) ou use 'offset'; nao existe 'timeout' nesta ferramenta`);
   if (res.exit !== 0) throw new HttpError(502, `leitura falhou (exit=${res.exit}): ${stderrLimpo(res)}`);
   const linhas = String(res.stdout).split("\n");
   const cab = (linhas[0] ?? "").trim().split(/\s+/);
@@ -257,6 +262,7 @@ async function lerArquivo(ctx: Ctx, args: Record<string, unknown>): Promise<unkn
   const out: Record<string, unknown> = {
     ok: true, host: ctx.host, caminho, tamanho_total: tamanho, offset, lidos,
     fim: offset + lidos >= tamanho,
+    ...(res.truncado ? { truncado: true } : {}),
   };
   if (binario) out.base64 = b64;
   else out.texto = dados.toString("utf8");
@@ -962,6 +968,10 @@ async function gitRemoto(ctx: Ctx, args: Record<string, unknown>): Promise<unkno
   const brutoErro = semRuidoPs(`${saida(ctx.so, res)}\n${stderrLimpo(res, 800)}`);
   if (/not a git repository|not a git dir|n[ãa]o [ée] um reposit[óo]rio/i.test(brutoErro))
     throw new HttpError(422, `git_remoto: '${repo}' nao e repositorio git (nenhum .git encontrado) — nada foi executado`);
+  /* v3.43: máquina SEM git instalado (DESKTOP-0NTAOUP) devolvia 502 com o CLIXML cru
+     ("&amp; : O termo 'git' não é reconhecido"). É ambiente, não servidor: 422 curto. */
+  if (/n[ãa]o [ée] reconhecid|not recognized|command not found/i.test(brutoErro))
+    throw new HttpError(422, `git_remoto: git nao esta instalado nesta maquina — nada foi executado`);
   if (res.exit !== 0) throw new HttpError(502, `git_remoto falhou (exit=${res.exit}): ${brutoErro.slice(0, 200)}`);
   let txt = saida(ctx.so, res);
   let exitCode = -1;
