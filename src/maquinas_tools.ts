@@ -405,50 +405,75 @@ async function editarNoLocal(ctx: Ctx, args: Record<string, unknown>): Promise<u
   if (typeof subs !== "string") throw new HttpError(422, "substituicao deve ser texto (vazio = apagar a busca)");
   const ra = Boolean(args.replace_all);
   const seca = Boolean(args.seca);
+  /* v3.40 — busca/substituição NÃO viajam mais dentro do comando. Antes eram embutidas no
+     PowerShell/Python montados aqui e esbarravam no teto de 4000 chars do transporte
+     (`origem` de tool de máquina não era "envelope"), o que empurrava o modelo a improvisar
+     com rodar_comando. Agora vão num pacote JSON pelo canal de upload — o mesmo do
+     escrever_arquivo, com teto de 16MB — e o comando remoto fica curto e fixo: baixa o
+     pacote e aplica. A API da tool continua igual (busca/substituicao como texto cru). */
+  const base = ctx.httpBase();
+  if (!base) throw new HttpError(500, "máquina conectou sem Host de retorno — sem canal de edição");
+  const pacote = Buffer.from(
+    JSON.stringify({ p: caminho, b: busca, s: subs, ra, seca }),
+    "utf8",
+  );
+  if (pacote.length > 16 * 1024 * 1024)
+    throw new HttpError(422, `texto de edição maior que 16MB (${pacote.length} bytes)`);
+  const chave = criarUpload(pacote, ctx.host);
+  const url = `${base}/maquina/u?k=${chave}&host=${encodeURIComponent(ctx.host)}`;
   let cmd: string;
   if (ctx.so === "windows") {
-    cmd = psOut(
-      "function Count-Of([string]$t, [string]$b) {\n" +
-      "  $n = 0; $i = 0\n" +
-      "  while (($i = $t.IndexOf($b, $i, [System.StringComparison]::Ordinal)) -ge 0) { $n = $n + 1; $i += $b.Length }\n" +
-      "  return $n }\n" +
-      `$p = '${pq(caminho)}'\n` + `$busca = '${pq(busca)}'\n` + `$subs = '${pq(subs)}'\n` +
-      `$RA = ${ra ? "$true" : "$false"}\n$SECA = ${seca ? "$true" : "$false"}\n` +
-      "if (-not (Test-Path -LiteralPath $p -PathType Leaf)) { throw 'arquivo nao existe' }\n" +
-      "$fi = Get-Item -LiteralPath $p\n" +
-      "if ($fi.Length -gt 16MB) { throw ('grande demais p/ edicao local: ' + $fi.Length + ' bytes (teto 16MB)') }\n" +
-      "$txt = [System.IO.File]::ReadAllText($p)\n" +
-      "if ($txt.Contains([char]0)) { throw 'parece binario (NUL no conteudo) — use escrever_arquivo' }\n" +
-      "$n = Count-Of $txt $busca\n" +
-      "$eol = ''\n" +
-      "if ($n -eq 0 -and $busca.Contains(\"`n\")) {\n" +
-      "  $busca = $busca.Replace(\"`n\", \"`r`n\"); $subs = $subs.Replace(\"`n\", \"`r`n\")\n" +
-      "  $n = Count-Of $txt $busca\n" +
-      "  if ($n -gt 0) { $eol = 'lf->crlf' }\n" +
-      "}\n" +
-      "if ($n -eq 0) { throw 'NAO ENCONTRADO: busca com 0 ocorrencias' }\n" +
-      "if ($n -gt 1 -and -not $RA) { throw ('MULTIPLOS: ' + $n + ' ocorrencias — use replace_all') }\n" +
-      "$novo = $txt.Replace($busca, $subs)\n" +
-      "if (-not $SECA) {\n" +
-      "  $enc = New-Object System.Text.UTF8Encoding($false)\n" +
-      "  [System.IO.File]::WriteAllText($p, $novo, $enc)\n" +
-      "}\n" +
-      "$d = (Get-Item -LiteralPath $p).Length\n" +
-      "$ini = 0; if ($novo.Length -gt 200) { $ini = [Math]::Max(0, [Math]::Min($novo.Length - 200, 200)) }\n" +
-      "$tam = [Math]::Min(200, $novo.Length - $ini)\n" +
-      "$tag = if ($SECA) { 'SECA local' } else { 'EDITADO local' }\n" +
-      "$out = $tag + ' ocorrencias=' + $n + ' bytes=' + $d + ' eol=' + $eol + [Environment]::NewLine + $novo.Substring($ini, $tam)\n",
+    cmd = psEncoded(
+      "$ErrorActionPreference='Stop'\n" +
+        "$tmp = Join-Path $env:TEMP ('minirag_ed_' + [guid]::NewGuid().ToString('N') + '.json')\n" +
+        `curl.exe -sS --fail --retry 2 -o $tmp '${pq(url)}'\n` +
+        "if ($LASTEXITCODE -ne 0) { Remove-Item $tmp -Force -ErrorAction SilentlyContinue; throw 'download do pacote de edicao falhou' }\n" +
+        "$d = Get-Content -LiteralPath $tmp -Raw -Encoding UTF8 | ConvertFrom-Json\n" +
+        "Remove-Item $tmp -Force\n" +
+        "$p = [string]$d.p; $busca = [string]$d.b; $subs = [string]$d.s\n" +
+        "$RA = [bool]$d.ra; $SECA = [bool]$d.seca\n" +
+        "function Count-Of([string]$t, [string]$b) {\n" +
+        "  $n = 0; $i = 0\n" +
+        "  while (($i = $t.IndexOf($b, $i, [System.StringComparison]::Ordinal)) -ge 0) { $n = $n + 1; $i += $b.Length }\n" +
+        "  return $n }\n" +
+        "if (-not (Test-Path -LiteralPath $p -PathType Leaf)) { throw 'arquivo nao existe' }\n" +
+        "$fi = Get-Item -LiteralPath $p\n" +
+        "if ($fi.Length -gt 16MB) { throw ('grande demais p/ edicao local: ' + $fi.Length + ' bytes (teto 16MB)') }\n" +
+        "$txt = [System.IO.File]::ReadAllText($p)\n" +
+        "if ($txt.Contains([char]0)) { throw 'parece binario (NUL no conteudo) — use escrever_arquivo' }\n" +
+        "$n = Count-Of $txt $busca\n" +
+        "$eol = ''\n" +
+        "if ($n -eq 0 -and $busca.Contains(\"`n\")) {\n" +
+        "  $busca = $busca.Replace(\"`n\", \"`r`n\"); $subs = $subs.Replace(\"`n\", \"`r`n\")\n" +
+        "  $n = Count-Of $txt $busca\n" +
+        "  if ($n -gt 0) { $eol = 'lf->crlf' }\n" +
+        "}\n" +
+        "if ($n -eq 0) { throw 'NAO ENCONTRADO: busca com 0 ocorrencias' }\n" +
+        "if ($n -gt 1 -and -not $RA) { throw ('MULTIPLOS: ' + $n + ' ocorrencias — use replace_all') }\n" +
+        "$novo = $txt.Replace($busca, $subs)\n" +
+        "if (-not $SECA) {\n" +
+        "  $enc = New-Object System.Text.UTF8Encoding($false)\n" +
+        "  [System.IO.File]::WriteAllText($p, $novo, $enc)\n" +
+        "}\n" +
+        "$d2 = (Get-Item -LiteralPath $p).Length\n" +
+        "$tag = if ($SECA) { 'SECA local' } else { 'EDITADO local' }\n" +
+        "Write-Output ($tag + ' ocorrencias=' + $n + ' bytes=' + $d2 + ' eol=' + $eol)\n",
     );
   } else {
     const code =
-      "import io,sys\n" +
-      `p=${JSON.stringify(caminho)}; b=${JSON.stringify(busca)}; s=${JSON.stringify(subs)}; ra=${ra}; seca=${seca}\n` +
+      "import io,json,sys,urllib.request\n" +
+      `d=json.loads(urllib.request.urlopen('${url}').read().decode('utf-8'))\n` +
+      "p,b,s,ra,seca=d['p'],d['b'],d['s'],d['ra'],d['seca']\n" +
       "t=io.open(p,encoding='utf-8',errors='strict').read()\n" +
       "n=t.count(b)\n" +
       "if n==0: sys.exit('NAO ENCONTRADO: busca com 0 ocorrencias')\n" +
       "if n>1 and not ra: sys.exit('MULTIPLOS: '+str(n)+' ocorrencias - use replace_all')\n" +
-      "if seca: print('SECA local ocorrencias='+str(n))\n" +
-      "else: io.open(p,'w',encoding='utf-8').write(t.replace(b,s)); print('EDITADO local ocorrencias='+str(n))";
+      "if seca:\n" +
+      "    print('SECA local ocorrencias='+str(n))\n" +
+      "else:\n" +
+      "    t=t.replace(b,s)\n" +
+      "    io.open(p,'w',encoding='utf-8').write(t)\n" +
+      "    print('EDITADO local ocorrencias='+str(n)+' bytes='+str(len(t.encode('utf-8'))))\n";
     cmd = shCmd("python3 -c " + sq(code));
   }
   const res = await exec(ctx, cmd, 60);

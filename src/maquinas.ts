@@ -245,7 +245,7 @@ export async function rodar(
   if (typeof cmd !== "string" || !cmd.trim()) throw new HttpError(422, "cmd é obrigatório");
   /* T044: comandos montados pelo servidor (lote/sessão/env) chegam codificados em base64
      UTF-16LE e inflam ~11x — o teto tem de ser o do envelope, não o do texto do usuário. */
-  const envelope = origem.startsWith("tool ") || /:(rodar_lote|rodar_comando)$/.test(origem);
+  const envelope = origem.startsWith("tool ") || /:(rodar_lote|rodar_comando|editar_no_local)$/.test(origem);
   const teto = envelope ? 60000 : 4000;
   if (cmd.length > teto) throw new HttpError(422, `cmd longo demais: ${cmd.length} chars (teto ${teto})`);
   if (!controleCache) throw new HttpError(409, "controle das maquinas DESLIGADO (Configuracoes > Ferramentas (MCP)) — nenhuma execucao aceita: chat, MCP ou REST");

@@ -22,6 +22,12 @@ parecidos com a pergunta, com uma nota de 0 a 1.
 
 ---
 ---
+## v3.40.0 (29/10) — `editar_no_local` sem teto de 4000 e botões de mensagem sempre visíveis
+- **O que você vê:** o agente edita arquivos grandes no PC sem trocar de ferramenta no meio do caminho; e os botões de copiar/regenerar/editar ficam sempre à vista em cada mensagem, sem precisar passar o mouse.
+- **Por que:** a busca e a substituição viajavam **dentro do comando** remoto. O transporte aplica teto de 4000 chars quando a origem não é "envelope", e `chat:editar_no_local` não era — o modelo via o 422 e improvisava com `rodar_comando`. Os botões, desde a v3.22, ficavam com `opacity: 0` e só apareciam no hover: quem não passava o mouse nunca descobria.
+- **Como funciona:** o texto da edição vai num pacote JSON pelo canal de upload (o mesmo do `escrever_arquivo`, teto 16MB) com `curl`; o comando remoto fica curto e fixo (baixa o pacote e aplica a troca com a mesma regra: `NAO ENCONTRADO`, `MULTIPLOS`, `replace_all`, `seca`, EOL LF↔CRLF, UTF-8 sem BOM). `editar_no_local` também entrou na lista de envelope do transporte, como rede de segurança. A API da tool não mudou.
+- **Como é provado:** busca de mais de 4000 chars aplicada por `editar_no_local` numa máquina real, com o resumo `EDITADO local ocorrencias=N bytes=...`; e o CSS servido sem `opacity: 0` na regra de `.msg .chat-acoes`.
+
 ## v3.39.4 (29/10) — Chat: a rolagem acompanha a escrita até o último pixel
 - **O que você vê:** com a resposta sendo escrita e você no fim, a tela desce o tempo todo; nada de sobrar um pedaço escondido embaixo. Se você subir para reler, ela para de puxar e só volta quando você voltar ao fim.
 - **Por que:** o auto-scroll só era disparado quando o TEXTO mudava de tamanho. Mudanças de altura que não mexem no texto (campo de digitação crescendo, rastro abrindo/fechando, tela entrando) não puxavam nada; e o `scrollTo` do próprio app gerava evento de `scroll` que podia ser lido como "o usuário saiu do fim", desligando o acompanhamento.

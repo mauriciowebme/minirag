@@ -1154,26 +1154,9 @@
   .chat-chip-seta {
     @apply flex-none text-[12px] text-txt3;
   }
-  /* v3.22 (preview aprovado) — ações de mensagem (copiar/regenerar/editar) invisíveis por
-     padrão: aparecem no hover (mouse), no focus (teclado) ou no toque (data-acao, via
-     toggle no onClick do .msg). A linha de falhas (tentar de novo) segue a mesma regra. */
-  .msg .chat-acoes,
-  .msg .chat-acoes-eu {
-    opacity: 0;
-    transition: opacity 0.12s ease;
-  }
-  @media (hover: hover) {
-    .msg:hover .chat-acoes,
-    .msg:hover .chat-acoes-eu,
-    .msg:focus-within .chat-acoes,
-    .msg:focus-within .chat-acoes-eu {
-      opacity: 1;
-    }
-  }
-  .msg[data-acao] .chat-acoes,
-  .msg[data-acao] .chat-acoes-eu {
-    opacity: 1;
-  }
+  /* v3.40 — ações de mensagem (copiar/regenerar/editar) ficam SEMPRE visíveis: esconder
+     atrás de hover fazia ninguém descobrir que existiam. Sem opacity 0, sem media hover e
+     sem o toggle por data-acao — o botão está lá desde que a mensagem chega. */
 }
 
 @media (max-width: 720px) {
