@@ -79,6 +79,8 @@ export type Linha = {
   raciocinioFim?: number;
   aviso?: string | null;
   compacto?: string;
+  /** v3.41: imagens que a pessoa colou neste turno (só na tela: o servidor grava texto) */
+  imagens?: AnexoImagem[];
   /** v3.18: hora ISO da mensagem (T012 — o servidor já mandava `quando`, a tela ignorava) */
   when?: string;
   /** v3.18 (T004): de quais documentos a resposta veio */
@@ -246,7 +248,10 @@ export function enviar(
 ): string {
   const c = pega(chave);
   const id = proximoId();
-  c.msgs.push({ id, papel: "user", texto, ferramentas: [], naFila: true, when: new Date().toISOString() });
+  c.msgs.push({
+    id, papel: "user", texto, ferramentas: [], naFila: true, when: new Date().toISOString(),
+    ...(imagens?.length ? { imagens } : {}),
+  });
   c.fila.push({ id, texto, ...(imagens?.length ? { imagens } : {}) });
   notifica(chave);
   void bombeia(chave, memoria, tenant, transportar);

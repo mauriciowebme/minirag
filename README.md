@@ -22,6 +22,12 @@ parecidos com a pergunta, com uma nota de 0 a 1.
 
 ---
 ---
+## v3.41.1 (29/10) — a foto aparece na bolha e entra por três caminhos
+- **O que você vê:** ao mandar uma imagem, ela fica **dentro da bolha da sua pergunta** (clique abre inteira) — igual ao assistente do IA_GO. E dá para trazer imagem de três jeitos: colar (Ctrl+V), arrastar e soltar no campo, ou o botão de clipe ao lado do microfone.
+- **Por que:** a v3.41.0 mandava a imagem para o modelo, mas a bolha só renderizava texto — a pessoa mandava e "não aparecia nada" na conversa. O `onPaste` também estava só no `textarea`, então colar com o foco fora dele não fazia nada.
+- **Como funciona:** `Linha` ganhou `imagens` (só na tela; o servidor continua gravando texto), `enviar` guarda os anexos na linha e a bolha desenha as miniaturas. O compositor inteiro ouve `paste` e `drop`, e o clipe abre um `input[type=file]` — os três chamam o mesmo `lerImagens`.
+- **Como é provado:** colar um print, arrastar outro e usar o clipe: os três mostram miniatura no campo, a bolha mostra a foto, e o turno chega ao provedor com `image_url`.
+
 ## v3.41.0 (29/10) — imagem no chat (colar e o modelo ver), ferramenta `analisar_imagem` e rastro sem nome cru
 - **O que você vê:** cola um print no campo do chat (Ctrl+V) e ele aparece como miniatura; a pergunta vai com a imagem e o modelo **olha** — descreve, compara, lê o que está na tela. Até 3 imagens por mensagem, 4 MB cada. E o rastro deixou de mostrar `Consultando rodar_comando`: agora lê "Rodando o comando na máquina", "Lendo o arquivo na máquina", "Escrevendo o arquivo na máquina".
 - **Por que:** o chat não tinha entrada de imagem nenhuma — o modelo só recebia texto; e o mapa de rótulos do rastro cobria as ferramentas do RAG mas nenhuma das 22 de máquina, então o nome técnico em snake_case vazava para a tela. O verbo era sempre "Consultando", mentindo em escrever/rodar/apagar.

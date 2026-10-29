@@ -1030,6 +1030,16 @@
   .chat-anexo img {
     @apply h-full w-full object-cover;
   }
+  /* v3.41 — foto enviada: fica na bolha da pergunta, com clique para abrir inteira */
+  .chat-bolha-imgs {
+    @apply mb-1.5 flex flex-wrap gap-1.5;
+  }
+  .chat-bolha-img {
+    @apply block h-28 max-w-[240px] overflow-hidden rounded-lg border border-borda;
+  }
+  .chat-bolha-img img {
+    @apply h-full w-full object-cover;
+  }
   .chat-anexo-x {
     @apply absolute right-0 top-0 grid h-4 w-4 cursor-pointer place-items-center rounded-bl-md border-0 bg-black/70 text-[11px] leading-none text-white;
   }

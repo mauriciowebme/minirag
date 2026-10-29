@@ -387,6 +387,7 @@ export function Chat({
   /* v3.41 — imagens coladas (Ctrl+V) no campo: vão junto com a pergunta e o modelo VÊ a imagem.
      Sem texto, a pergunta vira "Analise a imagem que colei." para o turno nunca ir vazio. */
   const [anexos, setAnexos] = useState<AnexoImagem[]>([]);
+  const arquivoRef = useRef<HTMLInputElement>(null);
   const colado = useRef(true);
   /* v3.39.4: marca que o PRÓXIMO evento de scroll foi disparado por nós (irParaOFim).
      Sem isso, o próprio scroll programático era lido como "o usuário saiu do fim" e
@@ -814,12 +815,10 @@ export function Chat({
     enviarNaConversa(chave, pedido, memoria, tenantParam, transportar, imgs.length ? imgs : undefined);
   }
 
-  /** v3.41 — Ctrl+V de imagem: lê os arquivos do clipboard e guarda como anexo (até 3). */
-  async function colarImagens(itens: DataTransferItem[]) {
+  /** v3.41 — imagem entra por COLAR, ARRASTAR ou pelo botão de clipe: um caminho só. */
+  async function lerImagens(files: File[]) {
     const novos: AnexoImagem[] = [];
-    for (const it of itens.slice(0, 3)) {
-      const f = it.getAsFile();
-      if (!f) continue;
+    for (const f of files.slice(0, 3)) {
       if (!/^image\/(png|jpeg|webp)$/.test(f.type)) {
         toast("imagem: só png, jpeg ou webp", "erro");
         continue;
@@ -1158,6 +1157,24 @@ export function Chat({
                 </>
               ) : (
                 <>
+                  {/* v3.41 — a foto que a pessoa mandou aparece na própria bolha (antes a
+                      imagem só existia no campo e sumia ao enviar; igual ao IA_GO) */}
+                  {m.imagens && m.imagens.length > 0 && (
+                    <div className="chat-bolha-imgs">
+                      {m.imagens.map((im, k) => (
+                        <a
+                          key={k}
+                          className="chat-bolha-img"
+                          href={`data:${im.mime};base64,${im.base64}`}
+                          target="_blank"
+                          rel="noreferrer"
+                          title="abrir a imagem"
+                        >
+                          <img src={`data:${im.mime};base64,${im.base64}`} alt="imagem enviada" />
+                        </a>
+                      ))}
+                    </div>
+                  )}
                   {m.texto}
                   {m.naFila && (
                     <button className="btn btn-mini ml-2" title="tirar da fila" onClick={() => tirarDaFila(m.id)}>
@@ -1388,6 +1405,26 @@ export function Chat({
                 /* no celular o alvo de toque e a pilula inteira (62px), nao a linha de 34px do campo */
                 if (e.target === e.currentTarget) campoRef.current?.focus();
               }}
+              /* v3.41 — os três jeitos de trazer imagem entram no compositor, não só no textarea:
+                 colar (Ctrl+V), arrastar e soltar, e o botão de clipe abaixo. */
+              onPaste={(e) => {
+                const itens = Array.from(e.clipboardData?.items ?? [])
+                  .filter((it) => it.type.startsWith("image/"))
+                  .map((it) => it.getAsFile())
+                  .filter((f): f is File => Boolean(f));
+                if (!itens.length) return;
+                e.preventDefault();
+                void lerImagens(itens);
+              }}
+              onDragOver={(e) => {
+                if (Array.from(e.dataTransfer?.types ?? []).includes("Files")) e.preventDefault();
+              }}
+              onDrop={(e) => {
+                const fs = Array.from(e.dataTransfer?.files ?? []).filter((f) => f.type.startsWith("image/"));
+                if (!fs.length) return;
+                e.preventDefault();
+                void lerImagens(fs);
+              }}
             >
               {anexos.length > 0 && (
                 <div className="chat-anexos" data-testid="chatAnexos">
@@ -1420,13 +1457,7 @@ export function Chat({
                 setPergunta(e.target.value);
                 ajustarAltura(e.currentTarget);
               }}
-              onPaste={(e) => {
-                /* v3.41 — print colado do clipboard entra como anexo, não como texto sujo */
-                const itens = Array.from(e.clipboardData?.items ?? []).filter((it) => it.type.startsWith("image/"));
-                if (!itens.length) return;
-                e.preventDefault();
-                void colarImagens(itens);
-              }}
+
               onKeyDown={(e) => {
                 /* v3.18 (T005): Enter QUE ACEITA AUTOCORREÇÃO do teclado não envia — no celular
                    isso mandava a pergunta pela metade (o evento vem com isComposing, e em teclado
@@ -1441,6 +1472,30 @@ export function Chat({
                 }
               }}
             />
+            {/* v3.41 — anexar imagem: mesma porta do Ctrl+V e do arrastar */}
+            <input
+              ref={arquivoRef}
+              type="file"
+              accept="image/png,image/jpeg,image/webp"
+              multiple
+              className="hidden"
+              onChange={(e) => {
+                const fs = Array.from(e.target.files ?? []);
+                e.target.value = "";
+                if (fs.length) void lerImagens(fs);
+              }}
+            />
+            <button
+              id="chatAnexar"
+              className="chat-acao-icone"
+              title="anexar imagem (ou cole com Ctrl+V, ou arraste)"
+              aria-label="anexar imagem"
+              onClick={() => arquivoRef.current?.click()}
+            >
+              <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round" aria-hidden="true">
+                <path d="M21 12.5l-8.5 8.5a5 5 0 0 1-7-7l9-9a3.5 3.5 0 0 1 5 5l-9 9a2 2 0 0 1-3-3l8-8" />
+              </svg>
+            </button>
             {/* v3.18 (T022): ditado por voz do próprio navegador */}
             <button
               id="chatMic"
