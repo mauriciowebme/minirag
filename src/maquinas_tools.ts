@@ -12,7 +12,8 @@
 import { randomBytes } from "node:crypto";
 import { HttpError } from "./errors";
 import type { Usuario } from "./config";
-import { rodar, alvoMaquina, soConectado, httpBaseDaMaquina } from "./maquinas";
+import { rodar, alvoMaquina, soConectado, httpBaseDaMaquina, criarRecebimento, consumirRecebimento } from "./maquinas";
+import { criarAnexo, lerAnexo, mimePorNome, MAX_ANEXO, type AnexoMeta } from "./anexos";
 import { q } from "./db";
 
 /* ------------------------------------------------------------------ chassis */
@@ -987,6 +988,148 @@ async function gitRemoto(ctx: Ctx, args: Record<string, unknown>): Promise<unkno
   return { ok: exitCode === 0, host: ctx.host, acao, exit: exitCode, saida: txt.slice(0, 60000) };
 }
 
+
+/* ------------------------------------------- arquivos que a MÁQUINA manda (v3.44)
+   Antes só existia servidor -> máquina (`escrever_arquivo` + /maquina/u). Aqui é
+   o sentido contrário, pelo canal binário: o cliente faz POST do arquivo e o
+   servidor guarda como ANEXO (print, imagem, log) — sem base64 no WebSocket e
+   sem o teto de resposta do túnel. */
+
+async function tamanhoRemoto(ctx: Ctx, caminho: string): Promise<number> {
+  const cmd = ctx.so === "windows"
+    ? psEncoded(`$f = Get-Item -LiteralPath '${pq(caminho)}' -ErrorAction Stop\nif ($f.PSIsContainer) { exit 9 }\nWrite-Output $f.Length\n`)
+    : shCmd(`[ -f ${sq(caminho)} ] || exit 9; wc -c < ${sq(caminho)} | tr -dc 0-9`);
+  const res = await exec(ctx, cmd, 30, 200);
+  const n = Number(saida(ctx.so, res).trim());
+  if (res.exit !== 0 || !Number.isFinite(n)) throw new HttpError(422, `nao consegui ler '${caminho}' (existe? e arquivo?)`);
+  return n;
+}
+
+/** POST binário para /maquina/r; devolve a meta do anexo criado no servidor */
+async function enviarParaServidor(ctx: Ctx, caminho: string, nome: string, mime?: string): Promise<AnexoMeta> {
+  const base = ctx.httpBase();
+  if (!base) throw new HttpError(500, "maquina conectou sem Host de retorno — sem canal de envio");
+  const chave = criarRecebimento(ctx.alvo, ctx.host, nome, mime || mimePorNome(nome));
+  const url = `${base}/maquina/r?k=${chave}&host=${encodeURIComponent(ctx.host)}`;
+  let cmd: string;
+  if (ctx.so === "windows") {
+    cmd = psEncoded(
+      "$ErrorActionPreference='Stop'\n" +
+        `$r = curl.exe -sS --fail --retry 1 -X POST -H 'content-type: application/octet-stream' --data-binary '@${pq(caminho)}' '${pq(url)}'\n` +
+        "if ($LASTEXITCODE -ne 0) { exit 7 }\n" +
+        "Write-Output $r\n",
+    );
+  } else {
+    cmd = shCmd(
+      `curl -sS --fail --retry 1 -X POST -H 'content-type: application/octet-stream' --data-binary @${sq(caminho)} ${sq(url)}`,
+    );
+  }
+  const res = await exec(ctx, cmd, 180, 4000);
+  if (res.exit !== 0) {
+    /* a chave foi gerada para esta tentativa; se o curl falhou, o lixo some sozinho (TTL) */
+    throw new HttpError(502, `envio do arquivo falhou (exit=${res.exit}): ${stderrLimpo(res, 200)}`);
+  }
+  const txt = saida(ctx.so, res);
+  try {
+    return JSON.parse(txt) as AnexoMeta;
+  } catch {
+    throw new HttpError(502, `resposta inesperada do servidor ao receber o arquivo: ${txt.slice(0, 160)}`);
+  }
+}
+
+async function capturarTela(ctx: Ctx, args: Record<string, unknown>): Promise<unknown> {
+  const tela = args.tela === undefined ? 1 : Math.max(1, Math.min(4, Number(args.tela) || 1));
+  if (ctx.so === "windows") {
+    const tmp = `Join-Path $env:TEMP ('minirag_tela_' + [guid]::NewGuid().ToString('N') + '.jpg')`;
+    const pegar = tela === 1
+      ? "$b=[System.Windows.Forms.Screen]::PrimaryScreen.Bounds\n"
+      : `$ss=[System.Windows.Forms.Screen]::AllScreens\nif (${tela} -gt $ss.Count) { throw 'so existem ' + $ss.Count + ' telas' }\n$b=$ss[${tela} - 1].Bounds\n`;
+    const cmd = psEncoded(
+      "$ErrorActionPreference='Stop'\n" +
+        "Add-Type -AssemblyName System.Windows.Forms\n" +
+        "Add-Type -AssemblyName System.Drawing\n" +
+        pegar +
+        "$bmp = New-Object System.Drawing.Bitmap $b.Width, $b.Height\n" +
+        "$g = [System.Drawing.Graphics]::FromImage($bmp)\n" +
+        "$g.CopyFromScreen($b.Location, [System.Drawing.Point]::Empty, $b.Size)\n" +
+        `$p = ${tmp}\n` +
+        "$bmp.Save($p, [System.Drawing.Imaging.ImageFormat]::Jpeg)\n" +
+        "$g.Dispose(); $bmp.Dispose()\n" +
+        "Write-Output $p\n",
+    );
+    const res = await exec(ctx, cmd, 60, 2000);
+    const caminho = saida(ctx.so, res).split("\n").pop()?.trim() ?? "";
+    if (res.exit !== 0 || !caminho) throw new HttpError(422, `nao consegui capturar a tela: ${stderrLimpo(res, 160)}`);
+    const nome = `tela-${new Date().toISOString().replace(/[:.]/g, "-")}.jpg`;
+    const meta = await enviarParaServidor(ctx, caminho, nome, "image/jpeg");
+    await exec(ctx, psEncoded(`Remove-Item -LiteralPath '${pq(caminho)}' -Force -ErrorAction SilentlyContinue`), 20, 200);
+    return { ok: true, host: ctx.host, tela, anexo: meta, resumo: `TELA CAPTURADA (${Math.round(meta.bytes / 1024)} KB) — a imagem vai na conversa` };
+  }
+  /* Linux: precisa de X/Wayland com sessão gráfica */
+  const tmp = `/tmp/minirag_tela_${Date.now()}.jpg`;
+  const cmd = shCmd(
+    `if command -v import >/dev/null 2>&1; then import -window root -quality 80 ${sq(tmp)}; ` +
+      `elif command -v gnome-screenshot >/dev/null 2>&1; then gnome-screenshot -f ${sq(tmp)}; ` +
+      `elif command -v scrot >/dev/null 2>&1; then scrot -o ${sq(tmp)}; ` +
+      `else echo SEM_CAPTURA >&2; exit 3; fi; [ -s ${sq(tmp)} ] || exit 4; echo ok`,
+  );
+  const res = await exec(ctx, cmd, 60, 2000);
+  if (res.exit !== 0) {
+    throw new HttpError(422, `capturar tela falhou (exit=${res.exit}): precisa de sessao grafica (import/gnome-screenshot/scrot). ${stderrLimpo(res, 140)}`);
+  }
+  const meta = await enviarParaServidor(ctx, tmp, `tela-${Date.now()}.jpg`, "image/jpeg");
+  await exec(ctx, shCmd(`rm -f ${sq(tmp)}`), 15, 200);
+  return { ok: true, host: ctx.host, tela, anexo: meta, resumo: `TELA CAPTURADA (${Math.round(meta.bytes / 1024)} KB) — a imagem vai na conversa` };
+}
+
+async function baixarArquivo(ctx: Ctx, args: Record<string, unknown>): Promise<unknown> {
+  const caminho = S(args.caminho);
+  if (!caminho) throw new HttpError(422, "caminho obrigatorio");
+  const bytes = await tamanhoRemoto(ctx, caminho);
+  if (bytes > MAX_ANEXO) throw new HttpError(422, `arquivo de ${bytes} bytes passa do teto de ${MAX_ANEXO / 1048576} MB — use a LAN entre as maquinas`);
+  const nome = S(args.nome) || caminho.replace(/\\/g, "/").split("/").pop() || "arquivo";
+  const meta = await enviarParaServidor(ctx, caminho, nome, S(args.mime) || undefined);
+  return {
+    ok: true, host: ctx.host, caminho, nome: meta.nome, bytes: meta.bytes, mime: meta.mime,
+    anexo: meta, resumo: `ARQUIVO ENVIADO: ${meta.nome} (${Math.round(meta.bytes / 1024)} KB)`,
+  };
+}
+
+async function copiarArquivo(ctx: Ctx, args: Record<string, unknown>): Promise<unknown> {
+  const origem = S(args.origem);
+  const hostDestino = S(args.host_destino);
+  const destino = S(args.destino) || origem;
+  if (!origem || !hostDestino || !destino) throw new HttpError(422, "origem, host_destino e destino sao obrigatorios");
+  const bytes = await tamanhoRemoto(ctx, origem);
+  if (bytes > 16 * 1024 * 1024) throw new HttpError(422, `arquivo de ${bytes} bytes passa do teto de 16 MB do canal — use a LAN`);
+  const meta = await enviarParaServidor(ctx, origem, origem.replace(/\\/g, "/").split("/").pop() || "arquivo");
+  const dados = (await lerAnexo(meta.id, ctx.u)).dados;
+  const chave = criarUpload(dados, hostDestino);
+  const base = ctx.httpBase();
+  if (!base) throw new HttpError(500, "maquina conectou sem Host de retorno — sem canal de envio");
+  const url = `${base}/maquina/u?k=${chave}&host=${encodeURIComponent(hostDestino)}`;
+  const soDestino = await soDaMaquina(ctx.alvo, hostDestino);
+  let cmd: string;
+  if (soDestino === "windows") {
+    cmd = psEncoded(
+      "$ErrorActionPreference='Stop'\n" +
+        `$pai = Split-Path -Parent '${pq(destino)}'\n` +
+        "if ($pai -and -not (Test-Path -LiteralPath $pai)) { New-Item -ItemType Directory -Force -Path $pai | Out-Null }\n" +
+        `curl.exe -sS --fail --retry 2 -o '${pq(destino)}' '${pq(url)}'\n` +
+        "if ($LASTEXITCODE -ne 0) { exit 7 }\n" +
+        `Write-Output ((Get-Item -LiteralPath '${pq(destino)}').Length)\n`,
+    );
+  } else {
+    cmd = shCmd(`mkdir -p $(dirname ${sq(destino)}) && curl -sS --fail --retry 2 -o ${sq(destino)} ${sq(url)} && wc -c < ${sq(destino)} | tr -dc 0-9`);
+  }
+  const res = await rodar(ctx.u, ctx.alvo, hostDestino, cmd, 180, `${ctx.origem}:copiar_arquivo`, 2000, false);
+  if (res.exit !== 0) throw new HttpError(502, `copia falhou no destino (exit=${res.exit}): ${stderrLimpo(res, 180)}`);
+  return {
+    ok: true, host: ctx.host, origem, destino_host: hostDestino, destino,
+    bytes, resumo: `COPIADO: ${origem} -> ${hostDestino}:${destino} (${Math.round(bytes / 1024)} KB)`,
+  };
+}
+
 /* ------------------------------------------------------------------ dispatch */
 
 export const NOMES_MAQUINA_TOOLS = [
@@ -994,6 +1137,7 @@ export const NOMES_MAQUINA_TOOLS = [
   "editar_no_local", "estado_maquina", "processos", "janelas", "area_transferencia",
   "falar", "abrir", "servicos", "eventos", "rede", "esperar_arquivo", "power",
   "rodar_lote", "sessao", "git_remoto", "metricas",
+  "capturar_tela", "baixar_arquivo", "copiar_arquivo",
 ] as const;
 
 type Fn = (ctx: Ctx, args: Record<string, unknown>) => Promise<unknown>;
@@ -1004,6 +1148,7 @@ const TABELA: Record<string, Fn> = {
   area_transferencia: areaTransferencia, falar, abrir, servicos, eventos, rede,
   esperar_arquivo: esperarArquivo, power, rodar_lote: rodarLote, sessao, git_remoto: gitRemoto,
   metricas: (ctx) => metricas(ctx),
+  capturar_tela: capturarTela, baixar_arquivo: baixarArquivo, copiar_arquivo: copiarArquivo,
 };
 
 /** plataforma: ao vivo (hub) > gravada (DB) > windows (nunca chutar sh num PC) */

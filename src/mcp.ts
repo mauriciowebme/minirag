@@ -500,6 +500,34 @@ export const TOOLS: Tool[] = [
       tenant: { type: "string", description: "so operador" } }, required: ["host", "caminho"] },
   },
   {
+    name: "capturar_tela",
+    description: "Tira print da tela da maquina e manda a imagem para a CONVERSA (o dono ve e baixa). Windows: tela 1..4. Linux: precisa de sessao grafica (import/gnome-screenshot/scrot).",
+    inputSchema: { type: "object", properties: {
+      host: { type: "string" },
+      tela: { type: "integer", description: "monitor (1 = principal; padrao 1)" },
+      tenant: { type: "string", description: "so operador" } }, required: ["host"] },
+  },
+  {
+    name: "baixar_arquivo",
+    description: "Traz um arquivo da maquina para a conversa (qualquer tipo, ate 32MB): o dono ve/baixa no chat. Usa canal binario, nao base64 no prompt.",
+    inputSchema: { type: "object", properties: {
+      host: { type: "string" },
+      caminho: { type: "string" },
+      nome: { type: "string", description: "nome mostrado (padrao = nome do arquivo)" },
+      mime: { type: "string", description: "opcional; inferido pela extensao" },
+      tenant: { type: "string", description: "so operador" } }, required: ["host", "caminho"] },
+  },
+  {
+    name: "copiar_arquivo",
+    description: "Copia um arquivo de UMA maquina para OUTRA (ate 16MB): a origem envia ao servidor e o destino baixa. Para GB use a LAN.",
+    inputSchema: { type: "object", properties: {
+      host: { type: "string", description: "maquina de ORIGEM" },
+      origem: { type: "string", description: "caminho na origem" },
+      host_destino: { type: "string", description: "maquina de DESTINO" },
+      destino: { type: "string", description: "caminho no destino (padrao = mesmo da origem)" },
+      tenant: { type: "string", description: "so operador" } }, required: ["host", "origem", "host_destino"] },
+  },
+  {
     name: "buscar_arquivos",
     description: "Busca arquivos no disco da maquina: por nome (glob, recursivo) e/ou conteudo (texto fixo).",
     inputSchema: { type: "object", properties: {
