@@ -22,6 +22,12 @@ parecidos com a pergunta, com uma nota de 0 a 1.
 
 ---
 ---
+## v3.39.3 (29/10) — Lateral: "sair" e "versão" vazavam para fora da coluna
+- **O que você vê:** o menu lateral mantém o fundo e a borda até o fim; o bloco do usuário, "sair" e "versão" ficam dentro da coluna. Antes, com a janela baixa, o conteúdo passava da altura e o rodapé aparecia solto sobre o fundo da página, sem bg nem divisor.
+- **Por que:** o `aside` tinha altura fixa (`h-full` dentro de `h-screen`) e nenhuma rolagem — o que passava de 100vh transbordava para fora da caixa, e o fundo não acompanhava o conteúdo.
+- **Como funciona:** o `aside` ganhou `min-h-0 overflow-y-auto` (a coluna rola dentro dela mesma; o `mt-auto` continua empurrando o rodapé para baixo quando sobra espaço) e o wrapper passou de `h-screen` para `h-[100dvh]`, o mesmo padrão do resto do app.
+- **Como é provado:** janela com pouca altura — bloco do usuário, "sair" e "versão" seguem sobre o fundo da coluna, com a borda descendo até a base, e a rolagem acontece dentro do menu.
+
 ## v3.39.2 (29/10) — Chat do operador: a leitura da tarefa ia sem o tenant do foco
 - **O que você vê:** a resposta volta na hora, em vez de "não consegui responder: tarefa não encontrada". Antes, com operador em foco de um tenant, a bolha mostrava o erro e a resposta só aparecia ao recarregar a página.
 - **Por que:** o `POST /chat/tarefa` grava a linha com o tenant do foco, mas a leitura (`GET /chat/tarefa/:id/stream` e `GET /chat/tarefa/:id`) ia SEM `?tenant=`. `verTarefa` filtra por tenant e resolvia o tenant do próprio usuário, então a tarefa existia e terminava, mas a leitura devolvia 404.

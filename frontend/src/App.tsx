@@ -225,7 +225,7 @@ export default function App() {
   const titulo = vista === "gavetas" && !operador ? "Gavetas" : TITULOS[vista];
 
   const lateral = (
-    <aside className="flex h-full w-[224px] flex-none flex-col gap-0.5 border-r border-borda bg-sup px-2.5 py-4">
+    <aside className="flex h-full min-h-0 w-[224px] flex-none flex-col gap-0.5 overflow-y-auto overscroll-contain border-r border-borda bg-sup px-2.5 py-4">
       <div className="flex items-center gap-2 px-2 pb-4 text-[15px] font-semibold tracking-[0.2px]">
         <span className="text-verde">◆</span> minirag
       </div>
@@ -361,7 +361,7 @@ export default function App() {
 
   return (
     <div className="flex min-h-[100dvh]">
-      <div className="sticky top-0 hidden h-screen lg:block">{lateral}</div>
+      <div className="sticky top-0 hidden h-[100dvh] lg:block">{lateral}</div>
 
       {menuAberto && (
         <div className="fixed inset-0 z-30 lg:hidden">
