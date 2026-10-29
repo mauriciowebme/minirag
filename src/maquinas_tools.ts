@@ -171,8 +171,9 @@ async function exec(
   cmd: string,
   espera: number,
   stdoutMax = 20000,
+  bg = false,
 ): Promise<{ exit: number; stdout: string; stderr: string }> {
-  const r = await rodar(ctx.u, ctx.alvo, ctx.host, cmd, espera, `${ctx.origem}:${ctx.tool}`, stdoutMax);
+  const r = await rodar(ctx.u, ctx.alvo, ctx.host, cmd, espera, `${ctx.origem}:${ctx.tool}`, stdoutMax, bg);
   return r;
 }
 
@@ -495,15 +496,91 @@ async function processos(ctx: Ctx, args: Record<string, unknown>): Promise<unkno
         )
       : shCmd(`ps -eo pid,rss,pcpu,comm --sort=-rss | head -n ${top + 1}`);
   } else if (acao === "matar") {
+    /* v3.39: além do nome, aceita PID e PORTA — antes só nome, e achar o PID de quem
+       ocupava a 8080 custava uma tool `rede portas` + uma `processos listar`. */
     const nome = S(args.nome).trim();
-    if (!nome) throw new HttpError(422, "matar exige nome");
-    cmd = ctx.so === "windows"
-      ? psOut(`$ids = @(Get-Process -Name '${pq(nome)}' -ErrorAction SilentlyContinue | ForEach-Object { $_.Id })\nif ($ids.Count -eq 0) { throw 'nenhum processo com nome ${pq(nome)}' }\nStop-Process -Id $ids -Force\n$out = "MATOU $($ids.Count): $($ids -join ',')"\n`)
-      : shCmd(`pkill -x ${sq(nome)} && echo MATOU || { echo NAO_ENCONTRADO; exit 9; }`);
+    const pid = Number(args.pid ?? 0) || 0;
+    const porta = Number(args.porta ?? 0) || 0;
+    const quantos = [nome, pid, porta].filter(Boolean).length;
+    if (quantos === 0) throw new HttpError(422, "matar exige nome, pid ou porta");
+    if (quantos > 1) throw new HttpError(422, "matar aceita UM alvo por vez: nome OU pid OU porta");
+    if (pid && (!Number.isInteger(pid) || pid < 1)) throw new HttpError(422, "pid invalido");
+    if (porta && (porta < 1 || porta > 65535)) throw new HttpError(422, "porta invalida (1-65535)");
+    if (ctx.so === "windows") {
+      if (porta) {
+        cmd = psOut(
+          `$l = @(Get-NetTCPConnection -LocalPort ${porta} -State Listen -ErrorAction SilentlyContinue)\n` +
+          `if ($l.Count -eq 0) { throw 'nenhum processo escutando na porta ${porta}' }\n` +
+          "$ids = @($l | ForEach-Object { $_.OwningProcess } | Sort-Object -Unique)\n" +
+          "Stop-Process -Id $ids -Force\n" +
+          `$out = "MATOU porta=${porta} PIDs=$($ids -join ',')"\n`,
+        );
+      } else if (pid) {
+        cmd = psOut(
+          `$p = Get-Process -Id ${pid} -ErrorAction SilentlyContinue\n` +
+          `if (-not $p) { throw 'nenhum processo com PID ${pid}' }\n` +
+          `Stop-Process -Id ${pid} -Force\n$out = "MATOU PID=${pid} APP=$($p.ProcessName)"\n`,
+        );
+      } else {
+        cmd = psOut(`$ids = @(Get-Process -Name '${pq(nome)}' -ErrorAction SilentlyContinue | ForEach-Object { $_.Id })\nif ($ids.Count -eq 0) { throw 'nenhum processo com nome ${pq(nome)}' }\nStop-Process -Id $ids -Force\n$out = "MATOU $($ids.Count): $($ids -join ',')"\n`);
+      }
+    } else {
+      if (porta) {
+        cmd = shCmd(
+          `pid=$(ss -tlnp 2>/dev/null | awk '$4 ~ /:${porta}$/ {print $6}' | sed -n 's/.*pid=\\([0-9]*\\).*/\\1/p' | head -1)\n` +
+          `[ -n "$pid" ] || { echo "nenhum processo escutando na porta ${porta}"; exit 9; }\n` +
+          `kill -9 "$pid" && echo "MATOU porta=${porta} PID=$pid"`,
+        );
+      } else if (pid) {
+        cmd = shCmd(`kill -9 ${pid} 2>/dev/null && echo "MATOU PID=${pid}" || { echo "nenhum processo com PID ${pid}"; exit 9; }`);
+      } else {
+        cmd = shCmd(`pkill -x ${sq(nome)} && echo MATOU || { echo NAO_ENCONTRADO; exit 9; }`);
+      }
+    }
   } else throw new HttpError(422, "acao deve ser listar ou matar");
   const res = await exec(ctx, cmd, 45);
   if (res.exit !== 0) throw new HttpError(502, `processos falhou (exit=${res.exit}): ${stderrLimpo(res)}`);
   return { ok: true, host: ctx.host, acao, resumo: saida(ctx.so, res).slice(0, 40000) };
+}
+
+/* v3.39: um comando só para o retrato da máquina — CPU, RAM, disco, GPU e top de
+   memória. Antes eram três tools (estado_maquina + procesos + nvidia-smi na mão). */
+async function metricas(ctx: Ctx): Promise<unknown> {
+  let cmd: string;
+  if (ctx.so === "windows") {
+    cmd = psOut(
+      "$os = Get-CimInstance Win32_OperatingSystem\n" +
+      "$cpu = @(Get-CimInstance Win32_Processor)[0]\n" +
+      "$lin = @()\n" +
+      '$lin += "CPU_PCT=$($cpu.LoadPercentage)"\n' +
+      "$ramTot = [int]($os.TotalVisibleMemorySize/1024)\n" +
+      "$ramLiv = [int]($os.FreePhysicalMemory/1024)\n" +
+      '$lin += "RAM_MB usada=$($ramTot-$ramLiv) total=$ramTot livre=$ramLiv"\n' +
+      "$lin += \"UPTIME_H=$([int](([DateTime]::Now - $os.LastBootUpTime).TotalHours))\"\n" +
+      "foreach ($d in Get-PSDrive -PSProvider FileSystem) {\n" +
+      "  $tot = [int](($d.Used + $d.Free) / 1GB)\n" +
+      '  if ($tot -gt 0) { $lin += "DISCO $($d.Name): livre=$([int]($d.Free/1GB))GB de ${tot}GB" }\n' +
+      "}\n" +
+      "$lin += @(Get-Process | Sort-Object WorkingSet64 -Descending | Select-Object -First 5 | ForEach-Object { \"TOP PID=$($_.Id) MEM=$([int]($_.WorkingSet64/1MB))MB APP=$($_.ProcessName)\" })\n" +
+      "try {\n" +
+      "  $g = @(& nvidia-smi --query-gpu=index,name,memory.used,memory.total,utilization.gpu,temperature.gpu --format=csv,noheader 2>$null)\n" +
+      "  if ($g.Count -gt 0) { $lin += @($g | ForEach-Object { \"GPU $_\" }) } else { $lin += 'GPU nenhuma (nvidia-smi sem resposta)' }\n" +
+      "} catch { $lin += 'GPU nenhuma (nvidia-smi ausente)' }\n" +
+      '$out = $lin -join "`n"\n',
+    );
+  } else {
+    cmd = shCmd(
+      "echo CPU_PCT=$(awk '{u=$2+$4; t=$2+$4+$5} END {if (t>0) printf \"%d\", u*100/t; else print 0}' /proc/stat)\n" +
+      "free -m | awk '/^Mem:/ {print \"RAM_MB usada=\" $3 \" total=\" $2 \" livre=\" $7}'\n" +
+      "echo UPTIME_H=$(awk '{print int($1/3600)}' /proc/uptime)\n" +
+      "df -BG 2>/dev/null | tail -n +2 | awk '{print \"DISCO \" $6 \": livre=\" $4 \" de \" $2}'\n" +
+      "ps -eo pid,rss,comm --sort=-rss | head -n 6 | tail -n +2 | awk '{print \"TOP PID=\" $1 \" MEM=\" int($2/1024) \"MB APP=\" $3}'\n" +
+      "if command -v nvidia-smi >/dev/null 2>&1; then nvidia-smi --query-gpu=index,name,memory.used,memory.total,utilization.gpu,temperature.gpu --format=csv,noheader 2>/dev/null | sed 's/^/GPU /'; else echo 'GPU nenhuma (nvidia-smi ausente)'; fi",
+    );
+  }
+  const res = await exec(ctx, cmd, 45);
+  if (res.exit !== 0) throw new HttpError(502, `metricas falhou (exit=${res.exit}): ${stderrLimpo(res)}`);
+  return { ok: true, host: ctx.host, resumo: saida(ctx.so, res).slice(0, 20000) };
 }
 
 async function janelas(ctx: Ctx, args: Record<string, unknown>): Promise<unknown> {
@@ -656,7 +733,7 @@ async function rede(ctx: Ctx, args: Record<string, unknown>): Promise<unknown> {
   if (acao === "espera_porta") {
     if (!/^\d+$/.test(alvo) || Number(alvo) < 1 || Number(alvo) > 65535)
       throw new HttpError(422, "espera_porta: alvo deve ser a porta numerica (ex.: 5173)");
-    timeoutEp = Math.max(1, Math.min(120, Number(args.timeout ?? 30) || 30));
+    timeoutEp = Math.max(1, Math.min(900, Number(args.timeout ?? 30) || 30));
     espera = timeoutEp + 20;
   }
   let cmd: string;
@@ -705,7 +782,7 @@ async function rede(ctx: Ctx, args: Record<string, unknown>): Promise<unknown> {
 async function esperarArquivo(ctx: Ctx, args: Record<string, unknown>): Promise<unknown> {
   const pasta = S(args.pasta);
   const padrao = S(args.padrao) || "*";
-  const t = Math.max(1, Math.min(120, Number(args.timeout ?? 60) || 60));
+  const t = Math.max(1, Math.min(900, Number(args.timeout ?? 60) || 60));
   if (!pasta) throw new HttpError(422, "pasta obrigatória");
   let cmd: string;
   if (ctx.so === "windows") {
@@ -781,7 +858,7 @@ async function rodarLote(ctx: Ctx, args: Record<string, unknown>): Promise<unkno
       lista.map((c, i) => `echo '### ${i + 1}'; ${envpre}${prefixo}bash -c ${sq(c)} 2>&1; echo "exit=$?"`).join("; ") + "; echo '### LOTE-FIM'",
     );
   }
-  const res = await exec(ctx, cmd, 120, 60000);
+  const res = await exec(ctx, cmd, Math.max(1, Math.min(900, Number(args.timeout ?? 120) || 120)), 60000);
   const txt = saida(ctx.so, res);
   if (res.exit !== 0) throw new HttpError(502, `rodar_lote falhou (exit=${res.exit}): ${(txt.slice(0, 120) || stderrLimpo(res).slice(0, 200))}`);
   return { ok: true, host: ctx.host, resumo: txt.slice(0, 60000) };
@@ -881,7 +958,7 @@ export const NOMES_MAQUINA_TOOLS = [
   "listar_arquivos", "ler_arquivo", "escrever_arquivo", "buscar_arquivos", "grep_remoto",
   "editar_no_local", "estado_maquina", "processos", "janelas", "area_transferencia",
   "falar", "abrir", "servicos", "eventos", "rede", "esperar_arquivo", "power",
-  "rodar_lote", "sessao", "git_remoto",
+  "rodar_lote", "sessao", "git_remoto", "metricas",
 ] as const;
 
 type Fn = (ctx: Ctx, args: Record<string, unknown>) => Promise<unknown>;
@@ -891,6 +968,7 @@ const TABELA: Record<string, Fn> = {
   estado_maquina: (ctx) => estadoMaquina(ctx), processos: processos, janelas: janelas,
   area_transferencia: areaTransferencia, falar, abrir, servicos, eventos, rede,
   esperar_arquivo: esperarArquivo, power, rodar_lote: rodarLote, sessao, git_remoto: gitRemoto,
+  metricas: (ctx) => metricas(ctx),
 };
 
 /** plataforma: ao vivo (hub) > gravada (DB) > windows (nunca chutar sh num PC) */

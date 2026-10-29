@@ -439,13 +439,14 @@ export const TOOLS: Tool[] = [
   {
     name: "rodar_comando",
     description:
-      "Executa um comando de shell numa maquina DO USUARIO (fora do ar ou de outro dono = erro). Responde {exit, stdout, stderr, ms}. Tudo fica auditado.",
+      "Executa um comando de shell numa maquina DO USUARIO (fora do ar ou de outro dono = erro). Responde {exit, stdout, stderr, ms}. Tudo fica auditado. background=true sobe o processo solto (devolve INICIADO_PID e o comando do servidor termina sem matar o que roda la).",
     inputSchema: {
       type: "object",
       properties: {
         host: { type: "string" },
         cmd: { type: "string", description: "comando de shell (ate 4000 chars)" },
-        timeout: { type: "integer", description: "segundos aguardando; default 30, max 120" },
+        timeout: { type: "integer", description: "segundos aguardando; default 30, max 900 (15 min)" },
+        background: { type: "boolean", description: "true = inicia e devolve o PID na hora; o processo sobrevive ao fim da chamada (servidor, modelo, build). Sem timeout e sem stdout de volta." },
         tenant: { type: "string", description: "so operador: dono da maquina" },
         sessao: { type: "string", description: "nome de sessao aberta (tool sessao) — roda dentro daquela pasta" },
         env: { type: "object", description: "variaveis SO nesta execucao ({NOME: valor}); nao persistem" },
@@ -531,13 +532,22 @@ export const TOOLS: Tool[] = [
   },
   {
     name: "processos",
-    description: "Processos: listar top por memoria (PID MEM CPU APP TITULO); matar encerra por nome exato (Stop-Process/pkill) e diz quantos.",
+    description: "Processos: listar top por memoria (PID MEM CPU APP TITULO); matar encerra por nome exato, por PID ou por PORTA em escuta (Stop-Process/pkill) e diz quantos.",
     inputSchema: { type: "object", properties: {
       host: { type: "string" },
       acao: { type: "string", enum: ["listar", "matar"] },
       nome: { type: "string", description: "para matar: nome sem .exe" },
+      pid: { type: "integer", description: "para matar: PID exato (alternativa a nome/porta)" },
+      porta: { type: "integer", description: "para matar: quem estiver escutando nesta porta TCP" },
       top: { type: "integer", description: "padrao 15, max 100" },
       tenant: { type: "string", description: "so operador" } }, required: ["host", "acao"] },
+  },
+  {
+    name: "metricas",
+    description: "Retrato completo da maquina em UM comando: CPU%, RAM usada/total, uptime, disco por unidade, top 5 processos por memoria e GPU (VRAM, uso e temperatura quando houver nvidia-smi). Use no lugar de estado_maquina + processos + nvidia-smi.",
+    inputSchema: { type: "object", properties: {
+      host: { type: "string" },
+      tenant: { type: "string", description: "so operador" } }, required: ["host"] },
   },
   {
     name: "janelas",
@@ -601,17 +611,17 @@ export const TOOLS: Tool[] = [
       host: { type: "string" },
       acao: { type: "string", enum: ["ping", "dns", "tracado", "portas", "espera_porta", "info"] },
       alvo: { type: "string", description: "host/URL; em espera_porta: a porta (ex.: 5173); em info: filtra as linhas por IP, interface, gateway ou DNS" },
-      timeout: { type: "integer", description: "espera_porta: segundos (padrao 30, max 120)" },
+      timeout: { type: "integer", description: "espera_porta: segundos (padrao 30, max 900)" },
       tenant: { type: "string", description: "so operador" } }, required: ["host", "acao"] },
   },
   {
     name: "esperar_arquivo",
-    description: "Bloqueia (poll 700ms) ate existir arquivo novo na pasta da maquina; devolve caminho+bytes+hora. Ideal p/ aguardar XML cair na caixa; depois leia com ler_arquivo. Max 120s.",
+    description: "Bloqueia (poll 700ms) ate existir arquivo novo na pasta da maquina; devolve caminho+bytes+hora. Ideal p/ aguardar XML cair na caixa; depois leia com ler_arquivo. Max 900s.",
     inputSchema: { type: "object", properties: {
       host: { type: "string" },
       pasta: { type: "string" },
       padrao: { type: "string", description: "glob (padrao *)" },
-      timeout: { type: "integer", description: "padrao 60, max 120" },
+      timeout: { type: "integer", description: "padrao 60, max 900" },
       tenant: { type: "string", description: "so operador" } }, required: ["host", "pasta"] },
   },
   {
@@ -625,10 +635,11 @@ export const TOOLS: Tool[] = [
   },
   {
     name: "rodar_lote",
-    description: "VARIOS comandos numa so ida ao host (economiza roundtrips): sequencia, cada um com exit proprio — falha de um nao impede o proximo. Blocos '### N exit=X'. Max 20 comandos, teto 120s, 4000 chars de texto no lote (o envelope codificado nao conta).",
+    description: "VARIOS comandos numa so ida ao host (economiza roundtrips): sequencia, cada um com exit proprio — falha de um nao impede o proximo. Blocos '### N exit=X'. Max 20 comandos, teto 900s, 4000 chars de texto no lote (o envelope codificado nao conta).",
     inputSchema: { type: "object", properties: {
       host: { type: "string" },
       comandos: { type: "array", items: { type: "string" }, description: "1 a 20 linhas" },
+      timeout: { type: "integer", description: "segundos para o lote inteiro; padrao 120, max 900" },
       sessao: { type: "string", description: "roda tudo na pasta da sessao" },
       env: { type: "object", description: "variaveis para todos do lote" },
       tenant: { type: "string", description: "so operador" } }, required: ["host", "comandos"] },
@@ -872,6 +883,8 @@ async function executarTool(
         cmdEnrolado,
         args.timeout === undefined || args.timeout === null ? undefined : Number(args.timeout),
         "mcp",
+        20000,
+        args.background === true,
       );
     }
     default:

@@ -28,7 +28,10 @@ import { hashChave, validarNome } from "./usuarios";
 
 const PAREAMENTO_SEG = Math.min(3600, Math.max(60, Number(process.env.MINIRAG_PAREAMENTO_SEG ?? 900) || 900));
 const TIMEOUT_PADRAO = 30;
-const TIMEOUT_MAX = 120;
+/* v3.39: era 120 e cortava comando legítimo (carga de modelo, build, varredura).
+   O teto agora é 900s (15 min); acima disso o certo é background=true. */
+const TIMEOUT_MAX = 900;
+const TIMEOUT_BG = 30; // bg responde o PID na hora; a espera é só o envio
 
 type Ligacao = {
   ws: WebSocket;
@@ -237,6 +240,7 @@ export async function rodar(
   timeoutSeg: number | undefined,
   origem: string,
   stdoutMax = 20000,
+  background = false,
 ): Promise<{ exit: number; stdout: string; stderr: string; ms: number; host: string }> {
   if (typeof cmd !== "string" || !cmd.trim()) throw new HttpError(422, "cmd é obrigatório");
   /* T044: comandos montados pelo servidor (lote/sessão/env) chegam codificados em base64
@@ -245,13 +249,15 @@ export async function rodar(
   const teto = envelope ? 60000 : 4000;
   if (cmd.length > teto) throw new HttpError(422, `cmd longo demais: ${cmd.length} chars (teto ${teto})`);
   if (!controleCache) throw new HttpError(409, "controle das maquinas DESLIGADO (Configuracoes > Ferramentas (MCP)) — nenhuma execucao aceita: chat, MCP ou REST");
-  const espera = Math.min(TIMEOUT_MAX, Math.max(1, Number(timeoutSeg ?? TIMEOUT_PADRAO) || TIMEOUT_PADRAO));
+  const espera = background
+    ? TIMEOUT_BG
+    : Math.min(TIMEOUT_MAX, Math.max(1, Number(timeoutSeg ?? TIMEOUT_PADRAO) || TIMEOUT_PADRAO));
   const chave = chaveDe(alvo, host);
   const l = ligacoes.get(chave);
   if (!l) throw new HttpError(404, "máquina fora do ar (nenhum cliente conectado com esse nome)");
 
   const t0 = Date.now();
-  const resultado = await fila(l, espera, cmd);
+  const resultado = await fila(l, espera, cmd, background);
   const ms = Date.now() - t0;
   const stdout = (resultado.stdout ?? "").slice(0, stdoutMax);
   const stderr = (resultado.stderr ?? "").slice(0, 8000);
@@ -269,7 +275,7 @@ export async function rodar(
 }
 
 /** Serial por máquina (regra herdada do túnel: fila no mesmo host) + teto de tempo. */
-function fila(l: Ligacao, espera: number, cmd: string) {
+function fila(l: Ligacao, espera: number, cmd: string, bg = false) {
   const proximo = l.cauda.then(
     () =>
       new Promise<{ exit: number; stdout: string; stderr: string }>((resolve) => {
@@ -283,10 +289,15 @@ function fila(l: Ligacao, espera: number, cmd: string) {
         };
         l.pendente = terminar;
         const religio = setTimeout(() => {
-          terminar({ exit: -124, stdout: "", stderr: `sem resposta em ${espera + 8}s (espera=${espera}s)` });
+          const dica = bg
+            ? ""
+            : espera >= TIMEOUT_MAX
+              ? ` — teto do servidor (${TIMEOUT_MAX}s); para processo longo use background=true`
+              : ` — aumente timeout (max ${TIMEOUT_MAX}s)`;
+          terminar({ exit: -124, stdout: "", stderr: `sem resposta em ${espera + 8}s (espera=${espera}s)${dica}` });
         }, (espera + 8) * 1000);
         try {
-          l.ws.send(JSON.stringify({ cmd, rotulo: cmd.slice(0, 60), espera }));
+          l.ws.send(JSON.stringify({ cmd, rotulo: cmd.slice(0, 60), espera, bg }));
         } catch {
           terminar({ exit: -1, stdout: "", stderr: "cano quebrado no envio" });
         }

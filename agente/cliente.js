@@ -5,7 +5,7 @@
  * Um arquivo, sem instalação: conecta no hub do minirag, recebe comandos e
  * executa NA MÁQUINA onde roda. Wire herdado do agent-tunel, tags intactas:
  *   cliente → servidor: {"token","host","os","user"}  (oi)
- *   servidor → cliente: {"cmd","rotulo","espera"}
+ *   servidor → cliente: {"cmd","rotulo","espera","bg"?}   (bg ausente = comportamento antigo)
  *   cliente → servidor: {"exit","stdout","stderr"}
  *   servidor → cliente: {"ack":"ok","token":<maquina>} | {"ack":"negado","motivo":...}
  *
@@ -172,10 +172,32 @@ function esperarEnter() {
 }
 
 /* ---------------- execução de comando com kill de árvore ---------------- */
-function rodar(cmd, esperaSeg) {
+/* v3.39: `bg` — o processo nasce em grupo próprio com stdio ignorado e o cliente
+   responde na hora com o PID. É o que permite subir servidor/modelo e o comando
+   do servidor terminar sem matar o que estava rodando. */
+function rodar(cmd, esperaSeg, bg) {
+  if (bg) {
+    return new Promise((resolve) => {
+      try {
+        const b = EH_WIN
+          ? spawn("cmd.exe", ["/d", "/s", "/c", `"${cmd}"`], { detached: true, stdio: "ignore", windowsHide: true })
+          : spawn("/bin/sh", ["-c", cmd], { detached: true, stdio: "ignore" });
+        b.unref();
+        resolve({
+          exit: 0,
+          stdout: "INICIADO_PID=" + b.pid + "\n[background: solto do servidor, sem teto de tempo; a saida nao volta por aqui]",
+          stderr: "",
+        });
+      } catch (e) {
+        resolve({ exit: -1, stdout: "", stderr: "background: " + String((e && e.message) || e) });
+      }
+    });
+  }
   return new Promise((resolve) => {
+    /* /s + aspas externas preservam o quoting interno: sem isso o Node refazia a
+       linha e `type "C:\Pasta com espaco\x.bat"` chegava sem as aspas. */
     const filho = EH_WIN
-      ? spawn("cmd.exe", ["/d", "/c", cmd], { windowsHide: true })
+      ? spawn("cmd.exe", ["/d", "/s", "/c", `"${cmd}"`], { windowsHide: true })
       : spawn("/bin/sh", ["-c", cmd], { detached: true }); // detached = grupo próprio; matamos o grupo
     let stdout = "";
     let stderr = "";
@@ -189,7 +211,7 @@ function rodar(cmd, esperaSeg) {
         try { filho.kill("SIGKILL"); } catch { /* já morreu */ }
       }
     };
-    const teto = Math.max(1, Math.min(600, Number(esperaSeg) || 30)) + 2; // servidor dá -124 em espera+8; aqui é a última barreira
+    const teto = Math.max(1, Math.min(3600, Number(esperaSeg) || 30)) + 2; // servidor dá -124 em espera+8; aqui é a última barreira
     const rel = setTimeout(() => {
       matarArvore();
       stderr += "\n[cliente: mata-árvore após " + teto + "s]";
@@ -611,7 +633,7 @@ function conectar() {
     if (typeof m.cmd === "string") {
       log("cmd (" + (m.rotulo || "?") + "): " + m.cmd.slice(0, 120));
       estado.ultimo_rotulo = m.rotulo || "?";
-      const r = await rodar(m.cmd, m.espera);
+      const r = await rodar(m.cmd, m.espera, m.bg === true);
       registrarComando(m.rotulo || "?", r.exit, r.stdout.length + r.stderr.length);
       log("resposta: exit " + r.exit + " (" + r.stdout.length + "+" + r.stderr.length + " bytes)");
       try {
