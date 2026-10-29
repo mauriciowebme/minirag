@@ -1143,8 +1143,11 @@ export function criarApp(): FastifyInstance {
   app.post("/chat/tarefa/:id/fala", async (req, reply) => {
     const u = usuario(req);
     const b = corpo(req) as Record<string, unknown>;
+    /* o tenant vem na QUERY (padrão das rotas de tarefa: cancelar, stream) — o corpo
+       traria `tenant` e a tela mandaria um dos dois; aceitar os dois evita 404 falso */
+    const s = req.query as Record<string, string>;
     const texto = vString(b.texto, "texto", { obrigatorio: true, min: 1, max: 4000 });
-    const t = await verTarefa(u, String((req.params as Record<string, string>).id), (b.tenant as string | null) ?? null);
+    const t = await verTarefa(u, String((req.params as Record<string, string>).id), s.tenant ?? (b.tenant as string | null) ?? null);
     if (!t) {
       reply.code(404).send({ detail: "tarefa não encontrada" });
       return;

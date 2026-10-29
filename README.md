@@ -22,6 +22,19 @@ parecidos com a pergunta, com uma nota de 0 a 1.
 
 ---
 ---
+## v3.42.1 (29/10) — fala no meio: a tarefa achada pelo tenant certo
+
+O steering da 3.42.0 devolvia `404 tarefa não encontrada` com a resposta rodando na tela
+(print do dono). A rota lia `tenant` do CORPO; a tela manda na QUERY, como nas outras
+rotas de tarefa (cancelar, stream) — sem o tenant, `verTarefa` procurava a tarefa no
+tenant do usuário e não achava a que estava em foco.
+
+- `POST /chat/tarefa/:id/fala` aceita `?tenant=` (query) e o corpo como reserva
+- prova nova no bloco v3.42: operador com tarefa em outro tenant → sem tenant 404,
+  com `?tenant=` 200 (11 checks)
+- conferido também no clique real: painel de teste, "oi", fala no meio, resposta
+  `Mudei o rumo: …` na mesma conversa, sem toast de erro
+
 ## v3.42.0 (29/10) — fala no MEIO do turno (steering)
 
 O que o Hermes faz e o minirag não fazia: você manda uma mensagem enquanto a resposta

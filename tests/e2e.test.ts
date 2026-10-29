@@ -3582,6 +3582,23 @@ await bloco(t, "v3.6: máquinas por usuário — hub WS, pareamento, run, escopo
     f.check("a tarefa atravessou a fala e terminou", t2?.status === "terminou", t2?.status);
     f.check("o modelo RECEBEU a fala e ajustou a resposta", /AJUSTEI: na verdade quero o total de 2025/.test(String(t2?.parcial ?? "")), String(t2?.parcial ?? "").slice(0, 220));
 
+    /* --- o caso do dono (print de 29/10): operador com a conversa em OUTRO tenant.
+       A rota lia o tenant do CORPO e a tela manda na QUERY -> 404 "tarefa não encontrada"
+       com a tarefa viva na frente. Contrato: tenant da leitura = o da criação. */
+    r = await call("POST", "/chat/tarefa", { key: OPKEY, corpo: { pergunta: "qual o total da nota da Gama?", memoria: GAV, tenant: "teste" } });
+    const idOp = String(r.json?.id ?? "");
+    f.check("operador cria tarefa em outro tenant", r.status === 201 && idOp.length >= 8, r.texto.slice(0, 120));
+    await dormir(600);
+    const rfSem = await call("POST", `/chat/tarefa/${idOp}/fala`, { key: OPKEY, corpo: { texto: "sem tenant" } });
+    f.check("fala SEM o tenant da tarefa -> 404 (não acha, não vaza)", rfSem.status === 404, rfSem.texto.slice(0, 140));
+    const rfCom = await call("POST", `/chat/tarefa/${idOp}/fala?tenant=teste`, { key: OPKEY, corpo: { texto: "com tenant na query" } });
+    f.check("fala COM ?tenant (o que a tela manda) -> 200", rfCom.status === 200 && rfCom.json?.ok === true, rfCom.texto.slice(0, 160));
+    for (let i = 0; i < 80; i++) {
+      const g = await call("GET", `/chat/tarefa/${idOp}?tenant=teste`, { key: OPKEY });
+      if (g.json?.status && g.json.status !== "rodando") break;
+      await dormir(400);
+    }
+
     const r409 = await call("POST", `/chat/tarefa/${idSteer}/fala`, { key: TESTKEY, corpo: { texto: "tarde demais" } });
     f.check("fala em tarefa já encerrada -> 409", r409.status === 409, r409.texto.slice(0, 140));
     const r422 = await call("POST", `/chat/tarefa/${idSteer}/fala`, { key: TESTKEY, corpo: { texto: "" } });
