@@ -654,6 +654,17 @@
 | **Correção** | Cliente trunca a coleta em 8 MB (`truncado: true`) em vez de matar; `RespostaMaquina.truncado` propagado em `src/maquinas.ts`; `ler_arquivo` com `-124` vira **504** explicando `limite`/`offset`; `comandos_log.exit` virou **BIGINT** (0x8004100C estourava a auditoria); `git_remoto` sem git instalado virou **422**; `ok` do rastro passou a considerar `exit != 0`. Bloco `v3.43` da suíte sobe o **binário real** e lê 200 KB / padrão / 800 KB. |
 | **Riscos** | Baixo. 8 MB de coleta por comando no cliente; resposta maior continua sendo caminho de LAN/download, não de túnel. |
 
+### T046 — Caminho de volta: print de tela e arquivo da máquina na conversa
+| Campo | Conteúdo |
+|---|---|
+| **Módulo** | maquinas / anexos / chat (front) |
+| **Prioridade** | 🟠 Alta — era a metade que faltava do agente remoto: ele via a máquina, mas não conseguia MOSTRAR nada nem trazer arquivo |
+| **Status** | ✅ Entregue na v3.44.0 (29/10) — 10 checks no bloco `v3.44` com o cliente real |
+| **Antes** | Túnel só ia servidor → máquina. Chat desenhava imagem apenas na bolha do usuário; print/arquivo não tinha como chegar ao dono, e `ler_arquivo` devolvia base64 ao MODELO (gastando a janela). |
+| **Como ficou** | `capturar_tela` (Windows 1..4; Linux com sessão gráfica), `baixar_arquivo` (máquina → conversa, 32 MB) e `copiar_arquivo` (máquina → servidor → outra máquina, 16 MB). Caminho: POST binário em `/maquina/r` com chave one-time presa ao host → linha em `anexos` → `GET /anexos/:id` com a chave do usuário; o front desenha miniatura + baixar. O modelo recebe só a meta (`id`, `nome`, `mime`, `bytes`). |
+| **Prova** | Bloco `v3.44` da suíte: 300 KB aleatórios por `baixar_arquivo`, sha256 do `GET /anexos/:id` igual ao da máquina, 401 sem chave, cópia máquina→máquina com sha256 idêntico, e `capturar_tela` sem X devolvendo erro claro. |
+| **Limite honesto** | GB continua na LAN entre as máquinas; túnel de WebSocket não é canal para isso. |
+
 ## Lotes recomendados (executados — saíram na v3.18)
 
 - **Lote 1 — celular e erros bobos (quase tudo barato)**: T005, T001, T006, T007, T009, T011, T012, T013, T014, T020
