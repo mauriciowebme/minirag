@@ -642,6 +642,18 @@
 | **Correção** | (a) medir o limite sobre o texto **antes** da codificação (somar `comandos` + prefixo), deixando o teto de 4000 significando o que aparenta; e/ou (b) subir o teto do caminho MCP para 60000 (o mesmo das origens `tool `), já que o envelope é nosso e não do usuário. (c) mensagem explícita: `lote grande demais: N chars codificados (teto 4000)`. Teste: bloco com 3 comandos PowerShell curtos tem de passar. |
 | **Riscos** | Baixo. Subir o teto aumenta o payload do WebSocket até o cliente; 60k já é aceito em outras origens, então é o mesmo caminho já exercitado. |
 
+<a id="t045"></a>
+### T045 — Túnel: resposta acima de ~39 KB nunca voltava (o cliente matava a árvore e não resolvia a Promise)
+| Campo | Conteúdo |
+|---|---|
+| **Módulo** | maquinas / cliente |
+| **Prioridade** | 🔴 Crítica — `ler_arquivo` binário (padrão 200 KB) falhava SEMPRE; o agente lia como máquina muda e repetia a chamada |
+| **Status** | ✅ Corrigido na v3.43.0 (29/10) — provado ao vivo em produção nas duas máquinas |
+| **Sintoma** | `ler_arquivo` de print/foto não volta; `rodar_comando` com saída de 40.000 chars morre em 38 s com `exit=-124`; 38.000 volta em 0,7 s. A mensagem manda "aumente timeout", campo que o `ler_arquivo` não tem. Foi o que travou a conversa do dono com o print de 1,08 MB. |
+| **Causa medida** | `agente/cliente.js`, handler de `stdout`: `if (stdout.length > 40000) matarArvore()`. `matarArvore()` marca `morto = true` e o handler de `close` faz `if (morto) return;` — a Promise do comando NUNCA resolve. O servidor só vê silêncio até `espera+8`. Nada a ver com WebSocket (`maxPayload` é o default de 100 MiB) nem com PowerShell. |
+| **Correção** | Cliente trunca a coleta em 8 MB (`truncado: true`) em vez de matar; `RespostaMaquina.truncado` propagado em `src/maquinas.ts`; `ler_arquivo` com `-124` vira **504** explicando `limite`/`offset`; `comandos_log.exit` virou **BIGINT** (0x8004100C estourava a auditoria); `git_remoto` sem git instalado virou **422**; `ok` do rastro passou a considerar `exit != 0`. Bloco `v3.43` da suíte sobe o **binário real** e lê 200 KB / padrão / 800 KB. |
+| **Riscos** | Baixo. 8 MB de coleta por comando no cliente; resposta maior continua sendo caminho de LAN/download, não de túnel. |
+
 ## Lotes recomendados (executados — saíram na v3.18)
 
 - **Lote 1 — celular e erros bobos (quase tudo barato)**: T005, T001, T006, T007, T009, T011, T012, T013, T014, T020
