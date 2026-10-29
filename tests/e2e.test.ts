@@ -424,11 +424,13 @@ test("minirag v2 — suíte completa", async (t) => {
       "eventos", "esperar_arquivo", "falar", "git_remoto", "grep_remoto",
       "janelas", "ler_arquivo", "listar_arquivos", "power", "processos",
       "rede", "rodar_lote", "servicos", "sessao", "escrever_arquivo", "metricas",
+      /* v3.44: print e arquivo da máquina na conversa + cópia máquina -> máquina */
+      "capturar_tela", "baixar_arquivo", "copiar_arquivo",
     ].sort();
     /* v3.36 — a lista passou a dizer a verdade da CONTA: as 5 de operador saem para o comum */
     const SO_OPERADOR_336 = ["listar_usuarios", "criar_usuario", "apagar_usuario", "esquecimento", "gerir_mcp"];
     const ESPERADAS_COMUM = ESPERADAS.filter((n) => !SO_OPERADOR_336.includes(n)).sort();
-    f.check("tools/list da conta comum traz as 46 (as 5 de operador ficam fora)", JSON.stringify(nomes) === JSON.stringify(ESPERADAS_COMUM), `${nomes.length}: ${nomes.filter((n: string) => !ESPERADAS_COMUM.includes(n)).join(", ")}`);
+    f.check("tools/list da conta comum traz as 49 (as 5 de operador ficam fora)", JSON.stringify(nomes) === JSON.stringify(ESPERADAS_COMUM), `${nomes.length}: ${nomes.filter((n: string) => !ESPERADAS_COMUM.includes(n)).join(", ")}`);
 
     r = await rpc(5, "tools/call", { name: "health" }, null);
     f.check("tools/call sem Bearer -> 401", r.status === 401 && "error" in (r.json ?? {}), r.texto.slice(0, 150));
@@ -624,12 +626,12 @@ test("minirag v2 — suíte completa", async (t) => {
     r = await call("PATCH", "/config/mcp/usuarios", { key: OPKEY, corpo: { ativo: false } });
     f.check("operador desliga o MCP das contas", r.status === 200 && r.json?.usuarios_habilitado === false, r.texto.slice(0, 160));
     f.check("com o MCP desligado a conta comum não vê ferramenta nenhuma", (await lista(TESTKEY)).length === 0, (await lista(TESTKEY)).length);
-    f.check("o operador continua entrando (para poder reverter)", (await lista(OPKEY)).length === 51, (await lista(OPKEY)).length);
+    f.check("o operador continua entrando (para poder reverter)", (await lista(OPKEY)).length === 54, (await lista(OPKEY)).length);
     r = await call("POST", "/mcp", { key: TESTKEY, corpo: { jsonrpc: "2.0", id: 8, method: "tools/call", params: { name: "health", arguments: {} } } });
     f.check("chamada da conta comum com MCP desligado: 403 com o motivo", r.status === 403 && /desligado/.test(r.texto), r.texto.slice(0, 160));
 
     r = await call("PATCH", "/config/mcp/usuarios", { key: OPKEY, corpo: { ativo: true } });
-    f.check("religado, a conta comum volta a ver as 46", r.status === 200 && (await lista(TESTKEY)).length === 46, (await lista(TESTKEY)).length);
+    f.check("religado, a conta comum volta a ver as 49", r.status === 200 && (await lista(TESTKEY)).length === 49, (await lista(TESTKEY)).length);
     r = await call("GET", "/config/mcp", { key: OPKEY });
     f.check("a config do admin mostra o interruptor", r.json?.usuarios_habilitado === true, JSON.stringify(r.json).slice(0, 120));
 
@@ -2523,7 +2525,7 @@ await bloco(t, "v3.6: máquinas por usuário — hub WS, pareamento, run, escopo
     f.check("desligado: MCP rodar_comando recusa com a mesma frase", txtBloq.includes("409") && txtBloq.includes("DESLIGADO"), txtBloq.slice(0, 140));
     r = await call("POST", "/mcp", { key: OPKEY, corpo: { jsonrpc: "2.0", id: 90, method: "tools/list" } });
     const nomesOff = ((r.json?.result?.tools ?? []) as any[]).map((t) => t.name);
-    f.check("desligado: as 22 ferramentas de máquina somem do tools/list MCP", !nomesOff.includes("rodar_comando") && !nomesOff.includes("listar_arquivos") && nomesOn.includes("listar_arquivos") && nomesOff.length === nomesOn.length - 22, { on: nomesOn.length, off: nomesOff.length });
+    f.check("desligado: as 25 ferramentas de máquina somem do tools/list MCP", !nomesOff.includes("rodar_comando") && !nomesOff.includes("listar_arquivos") && !nomesOff.includes("capturar_tela") && nomesOn.includes("listar_arquivos") && nomesOff.length === nomesOn.length - 25, { on: nomesOn.length, off: nomesOff.length });
     r = await call("PATCH", "/config/mcp/maquinas", { key: OPKEY, corpo: { ativo: true } });
     r = await call("POST", "/maquinas/maq-mcp/run", { key: TESTKEY, corpo: { cmd: "echo liberado" } });
     f.check("religado: executa normal de novo", r.json?.stdout === "liberado", r.texto.slice(0, 140));
@@ -3668,6 +3670,104 @@ await bloco(t, "v3.6: máquinas por usuário — hub WS, pareamento, run, escopo
     execFileSync("docker", ["exec", CONTAINER, "sh", "-c", "rm -f /tmp/e2e-grande.bin /tmp/e2e-cli-real.json"]);
     await call("DELETE", "/maquinas/cli-real", { key: TESTKEY });
     f.fechar("v3.43 túnel grande");
+  });
+
+  /* v3.44 — o caminho de VOLTA: a máquina manda arquivo e o dono vê no chat.
+     Usa o CLIENTE REAL (Linux) do container: curl de verdade, POST de verdade,
+     registro em `anexos` e GET /anexos/:id com a chave do usuário. */
+  await bloco(t, "v3.44: arquivo/print da máquina chega na conversa", async () => {
+    const f = fiscal();
+    const CONTAINER = process.env.CONTAINER ?? "";
+    const leJson = (r: any): any => {
+      const t = String(r?.json?.result?.content?.[0]?.text ?? "");
+      try { return JSON.parse(t); } catch { return {}; }
+    };
+    const erroDe = (r: any): string =>
+      String(r?.json?.error?.message ?? r?.json?.result?.content?.[0]?.text ?? r?.texto ?? "");
+    const HOST = "cli-anexo";
+    const MATAR = "const fs=require('fs');for(const d of fs.readdirSync('/proc')){if(!/^[0-9]+$/.test(d))continue;"
+      + "try{const c=fs.readFileSync('/proc/'+d+'/cmdline','utf8').split(String.fromCharCode(0)).join(' ');"
+      + "if(c.indexOf('minirag-cliente-linux')>=0&&c.indexOf('" + HOST + "')>=0)process.kill(Number(d),'SIGKILL')}catch(e){}}";
+    const matar = () => { try { execFileSync("docker", ["exec", CONTAINER, "node", "-e", MATAR]); } catch { /* ok */ } };
+
+    matar();
+    await call("DELETE", `/maquinas/${HOST}`, { key: TESTKEY });
+    const r0 = await call("POST", "/maquinas", { key: TESTKEY, corpo: { nome: HOST } });
+    const par = String(r0.json?.token ?? "");
+    f.check("v3.44 pareamento criado", Boolean(par), r0.texto.slice(0, 120));
+
+    /* 300 KB de bytes que NÃO são texto: se algum caminho tratar como utf-8, o sha muda */
+    execFileSync("docker", ["exec", CONTAINER, "sh", "-c",
+      "head -c 307200 /dev/urandom > /tmp/e2e-anexo.bin && rm -f /tmp/e2e-anexo-copia.bin"]);
+    execFileSync("docker", ["exec", "-d", CONTAINER, "/app/agente/bin/minirag-cliente-linux",
+      "--url", "http://127.0.0.1:8000", "--token", par, "--host", HOST, "--conf", "/tmp/e2e-cli-anexo.json"]);
+
+    let online = false;
+    for (let i = 0; i < 60; i++) {
+      const g = await call("GET", "/maquinas", { key: TESTKEY });
+      online = (g.json?.maquinas ?? []).some((m: any) => m.host === HOST && m.online === true);
+      if (online) break;
+      await dormir(300);
+    }
+    f.check("v3.44 cliente real conectou", online, online);
+
+    const shaRemoto = (caminho: string, id: number) =>
+      call("POST", "/mcp", { key: TESTKEY, corpo: { jsonrpc: "2.0", id, method: "tools/call",
+        params: { name: "rodar_comando", arguments: { host: HOST, comando: `sha256sum ${caminho}` } } } });
+    const shaLocal = execFileSync("docker", ["exec", CONTAINER, "sha256sum", "/tmp/e2e-anexo.bin"], { encoding: "utf8" })
+      .trim().split(/\s+/)[0];
+
+    /* 1) baixar_arquivo: máquina -> servidor -> conversa */
+    let r = await call("POST", "/mcp", { key: TESTKEY, corpo: { jsonrpc: "2.0", id: 960, method: "tools/call",
+      params: { name: "baixar_arquivo", arguments: { host: HOST, caminho: "/tmp/e2e-anexo.bin" } } } });
+    const env = leJson(r);
+    const anexo = env?.anexo ?? {};
+    f.check("v3.44 baixar_arquivo devolve a META do anexo (id, nome, bytes)",
+      r.status === 200 && typeof anexo.id === "string" && anexo.id.length >= 16 && anexo.bytes === 307200,
+      JSON.stringify({ st: r.status, anexo }).slice(0, 220));
+
+    /* 2) o dono busca o arquivo pela chave dele — e os BYTES têm que ser os mesmos */
+    const baixado = await call("GET", `/anexos/${String(anexo.id ?? "")}`, { key: TESTKEY });
+    const shaBaixado = (await import("node:crypto")).createHash("sha256").update(baixado.buf).digest("hex");
+    f.check("v3.44 GET /anexos/:id entrega os MESMOS bytes (sha256 igual ao da máquina)",
+      baixado.status === 200 && shaBaixado === shaLocal,
+      JSON.stringify({ st: baixado.status, bytes: baixado.buf.length, shaBaixado, shaLocal }).slice(0, 260));
+    f.check("v3.44 o anexo vem com content-type de download e nome no header",
+      String(baixado.headers.get("content-disposition") ?? "").includes("e2e-anexo.bin"),
+      String(baixado.headers.get("content-disposition") ?? "").slice(0, 120));
+
+    /* 3) sem chave / chave alheia não abre o anexo de outro tenant */
+    const semChave = await call("GET", `/anexos/${String(anexo.id ?? "")}`, { key: null });
+    f.check("v3.44 anexo sem chave é 401 (não vaza arquivo da máquina)", semChave.status === 401, semChave.status);
+
+    /* 4) copiar_arquivo: máquina -> servidor -> OUTRA máquina (mesmo cliente, outro caminho) */
+    r = await call("POST", "/mcp", { key: TESTKEY, corpo: { jsonrpc: "2.0", id: 961, method: "tools/call",
+      params: { name: "copiar_arquivo", arguments: { host: HOST, origem: "/tmp/e2e-anexo.bin",
+        host_destino: HOST, destino: "/tmp/e2e-anexo-copia.bin" } } } });
+    const cp = leJson(r);
+    f.check("v3.44 copiar_arquivo responde ok e o tamanho copiado", r.status === 200 && cp?.bytes === 307200,
+      JSON.stringify({ st: r.status, cp, erro: erroDe(r) }).slice(0, 240));
+    const shaCopia = execFileSync("docker", ["exec", CONTAINER, "sha256sum", "/tmp/e2e-anexo-copia.bin"], { encoding: "utf8" })
+      .trim().split(/\s+/)[0];
+    f.check("v3.44 a cópia no destino é IDÊNTICA (sha256)", shaCopia === shaLocal, JSON.stringify({ shaCopia, shaLocal }));
+
+    /* 5) capturar_tela num Linux SEM sessão gráfica: erro claro, não silêncio */
+    r = await call("POST", "/mcp", { key: TESTKEY, corpo: { jsonrpc: "2.0", id: 962, method: "tools/call",
+      params: { name: "capturar_tela", arguments: { host: HOST } } } });
+    const txtTela = erroDe(r);
+    f.check("v3.44 capturar_tela sem X diz o que falta (sessão gráfica), não trava",
+      /sessao grafica|grafica/i.test(txtTela), `${r.status} ${txtTela}`.slice(0, 200));
+
+    /* 6) a meta do anexo não vaza o CONTEÚDO para o modelo (contrato: id/nome/mime/bytes) */
+    const metaNoTexto = String(r?.json?.result?.content?.[0]?.text ?? "");
+    f.check("v3.44 o resultado para o modelo não carrega base64 do arquivo",
+      !/base64/i.test(metaNoTexto) || metaNoTexto.length < 4000, metaNoTexto.length);
+
+    matar();
+    execFileSync("docker", ["exec", CONTAINER, "sh", "-c",
+      "rm -f /tmp/e2e-anexo.bin /tmp/e2e-anexo-copia.bin /tmp/e2e-cli-anexo.json"]);
+    await call("DELETE", `/maquinas/${HOST}`, { key: TESTKEY });
+    f.fechar("v3.44 anexos da máquina");
   });
 
   await bloco(t, "freio de força bruta (último: bloqueia o IP)", async () => {
