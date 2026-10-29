@@ -72,7 +72,7 @@ import {
   apagarProvedor,
   provarModelos,
 } from "./provedores";
-import { assinarTarefa, criarTarefa, cancelarTarefa, listarTarefas, rodarTarefa, verTarefa } from "./tarefa";
+import { assinarTarefa, criarTarefa, cancelarTarefa, enfileirarFala, listarTarefas, notificarTarefa, rodarTarefa, verTarefa } from "./tarefa";
 import multipart from "@fastify/multipart";
 import { LIMITE_BYTES } from "./conversor";
 import {
@@ -1137,6 +1137,26 @@ export function criarApp(): FastifyInstance {
   /* ------------------------------------------- v3.18: básico que faltava no chat */
 
   /** T001: "parar" — aborta a chamada do provider; o parcial já está gravado no fim da tarefa. */
+  /** v3.42 — fala no MEIO do turno (steering, o jeito do Hermes): não enfileira conversa,
+   *  entra na próxima rodada da tarefa viva. Tarefa já encerrada: 409, para a tela poder
+   *  cair no envio normal em vez de perder o texto. */
+  app.post("/chat/tarefa/:id/fala", async (req, reply) => {
+    const u = usuario(req);
+    const b = corpo(req) as Record<string, unknown>;
+    const texto = vString(b.texto, "texto", { obrigatorio: true, min: 1, max: 4000 });
+    const t = await verTarefa(u, String((req.params as Record<string, string>).id), (b.tenant as string | null) ?? null);
+    if (!t) {
+      reply.code(404).send({ detail: "tarefa não encontrada" });
+      return;
+    }
+    if (String(t.status) !== "rodando" || !enfileirarFala(String(t.id), texto)) {
+      reply.code(409).send({ detail: "a tarefa já não está rodando" });
+      return;
+    }
+    notificarTarefa(String(t.id), { tipo: "steer", texto });
+    return { ok: true };
+  });
+
   app.post("/chat/tarefa/:id/cancelar", async (req, reply) => {
     const u = usuario(req);
     const s = req.query as Record<string, string>;

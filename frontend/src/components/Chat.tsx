@@ -24,8 +24,7 @@ import {
   type FerramentaLinha,
   type Linha,
   type SegmentoRastro,
-  type Transportar,
-} from "../lib/conversa";
+  type Transportar, tarefaViva, falarNoTurno } from "../lib/conversa";
 import type { ChatHistorico, Compactacao, ProviderResp, Provedor } from "../types";
 
 /** linha de status da tarefa viva (GET /chat/tarefas e GET /chat/tarefa/:id) */
@@ -811,6 +810,18 @@ export function Chat({
     if (campoRef.current) {
       campoRef.current.style.height = "auto";
       campoRef.current.focus();
+    }
+    /* v3.42 — resposta rodando e a pessoa fala de novo: entra NO turno (steering), não
+       na fila. Sem imagem: a rota leva só texto. Com anexo, segue o caminho normal. */
+    const vivo = imgs.length === 0 ? tarefaViva(chave) : "";
+    if (vivo) {
+      falarNoTurno(chave, pedido);
+      void post(`/chat/tarefa/${vivo}/fala${tenantParam ? "?" + qs({ tenant: tenantParam }) : ""}`, { texto: pedido })
+        .catch(async (e) => {
+          toast("encaixar a fala falhou: " + (e as Error).message + " — mandei como próxima pergunta", "erro");
+          enviarNaConversa(chave, pedido, memoria, tenantParam, transportar);
+        });
+      return;
     }
     enviarNaConversa(chave, pedido, memoria, tenantParam, transportar, imgs.length ? imgs : undefined);
   }

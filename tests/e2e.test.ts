@@ -3519,6 +3519,76 @@ await bloco(t, "v3.6: máquinas por usuário — hub WS, pareamento, run, escopo
     f.fechar("v3.24 código ao vivo");
   });
 
+
+  await bloco(t, "v3.42 fala no MEIO do turno (steering)", async () => {
+    const f = fiscal();
+    const CONTAINER = process.env.CONTAINER ?? "";
+    const GAV = "suite-v42";
+    if (!CONTAINER) {
+      f.check("steering precisa do container (provedor falso dentro dele)", true, "sem CONTAINER: não executável");
+      f.fechar("v3.42 steering (parcial)");
+      return;
+    }
+
+    console.log("-- provedor falso lento na 1ª rodada (dá tempo de falar no meio)");
+    const codSteer = [
+      "const http=require('http');",
+      "const s=http.createServer((req,res)=>{let b='';req.on('data',c=>b+=c);req.on('end',()=>{",
+      "let j={};try{j=JSON.parse(b||'{}');}catch(e){}",
+      "const m=j.messages||[];",
+      "const comFerramenta=m.filter(x=>x.role==='tool').length>0;",
+      "const ultima=[...m].reverse().find(x=>x.role==='user')||{};",
+      "const t=String(ultima.content||'');",
+      "const teveFala=t.indexOf('falou enquanto você trabalhava')>=0;",
+      "res.setHeader('content-type','application/json');",
+      "if(!comFerramenta){setTimeout(()=>{res.end(JSON.stringify({choices:[{message:{role:'assistant',content:'',tool_calls:[{id:'t1',type:'function',function:{name:'search',arguments:JSON.stringify({query:'nota Gama',k:2})}}]}}]}));},2500);return;}",
+      "const alvo=teveFala?t.split(') ').pop():'nao vi a fala';",
+      "res.end(JSON.stringify({choices:[{message:{role:'assistant',content:'AJUSTEI: '+alvo}}]}));",
+      "});});",
+      "s.listen(9917,'127.0.0.1');setTimeout(()=>process.exit(0),240000);",
+    ].join("");
+    execFileSync("docker", ["exec", "-d", CONTAINER, "node", "-e", codSteer]);
+    await dormir(1200);
+
+    let r = await call("POST", "/ingest", {
+      key: TESTKEY,
+      corpo: { doc_id: "suite-v42-nota", content: "Nota 7788 da empresa Gama. Total R$ 1.111,00 vencendo em 10/01/2027.", memoria: GAV },
+    });
+    const job = await esperarJob(TESTKEY, r.json?.job_id);
+    f.check("documento do steering indexado", job.status === "concluido", job);
+
+    r = await call("PUT", "/config/provider", {
+      key: OPKEY,
+      corpo: { tipo: "litellm", base_url: "http://127.0.0.1:9917/v1", modelo: "steer", temperatura: 0, system_prompt: "", mcp_interno: true, max_rodadas: 3, ativo: true, global: true },
+    });
+    f.check("provider do steering salvo", r.status === 200, r.texto.slice(0, 160));
+
+    r = await call("POST", "/chat/tarefa", { key: TESTKEY, corpo: { pergunta: "qual o total da nota da Gama?", memoria: GAV } });
+    const idSteer = String(r.json?.id ?? "");
+    f.check("tarefa criada para o steering", r.status === 201 && idSteer.length >= 8, r.texto.slice(0, 120));
+
+    /* fala com a tarefa AINDA rodando (o fake segura a 1ª rodada por 2,5s) */
+    await dormir(700);
+    const rf = await call("POST", `/chat/tarefa/${idSteer}/fala`, { key: TESTKEY, corpo: { texto: "na verdade quero o total de 2025" } });
+    f.check("fala aceita no meio do turno (200 + ok)", rf.status === 200 && rf.json?.ok === true, rf.texto.slice(0, 160));
+
+    let t2: any = null;
+    for (let i = 0; i < 80; i++) {
+      const g = await call("GET", `/chat/tarefa/${idSteer}`, { key: TESTKEY });
+      t2 = g.json;
+      if (t2?.status && t2.status !== "rodando") break;
+      await dormir(400);
+    }
+    f.check("a tarefa atravessou a fala e terminou", t2?.status === "terminou", t2?.status);
+    f.check("o modelo RECEBEU a fala e ajustou a resposta", /AJUSTEI: na verdade quero o total de 2025/.test(String(t2?.parcial ?? "")), String(t2?.parcial ?? "").slice(0, 220));
+
+    const r409 = await call("POST", `/chat/tarefa/${idSteer}/fala`, { key: TESTKEY, corpo: { texto: "tarde demais" } });
+    f.check("fala em tarefa já encerrada -> 409", r409.status === 409, r409.texto.slice(0, 140));
+    const r422 = await call("POST", `/chat/tarefa/${idSteer}/fala`, { key: TESTKEY, corpo: { texto: "" } });
+    f.check("fala vazia -> 422", r422.status === 422, r422.texto.slice(0, 120));
+    f.fechar("v3.42 steering");
+  });
+
   await bloco(t, "freio de força bruta (último: bloqueia o IP)", async () => {
     const f = fiscal();
     for (let i = 0; i < 10; i++) {

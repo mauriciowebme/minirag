@@ -258,6 +258,22 @@ export function enviar(
   return id;
 }
 
+/** v3.42 — a tarefa viva desta conversa (para encaixar fala no MEIO do turno) */
+export function tarefaViva(chave: string): string {
+  const c = pega(chave);
+  return c.rodando && c.tarefaId ? c.tarefaId : "";
+}
+
+/** v3.42 — fala encaixada no turno em curso: entra na tela como bolha do usuário e NÃO
+ *  vai para a fila — quem entrega é a rota /fala, que injeta na rodada seguinte. */
+export function falarNoTurno(chave: string, texto: string): string {
+  const c = pega(chave);
+  const id = proximoId();
+  c.msgs.push({ id, papel: "user", texto, ferramentas: [], when: new Date().toISOString() });
+  notifica(chave);
+  return id;
+}
+
 /** cancela antes de sair (se já estiver escrevendo, cancela a próxima, não a viva) */
 export function cancelar(chave: string, id: string): void {
   const c = pega(chave);

@@ -39,6 +39,30 @@ export function notificarTarefa(id: string, e: unknown): void {
    morre junto com o processamento; cancelarTarefa aborta, responderChat preserva o parcial. */
 const controles = new Map<string, AbortController>();
 
+/* v3.42 — falas que a pessoa manda ENQUANTO a tarefa roda (steering, o jeito do Hermes).
+   Vivem na memória do processo, presas à tarefa: `provider.ts` drena no topo de cada
+   rodada e injeta como mensagem de usuário, então o modelo ajusta o rumo sem perder o
+   fio. Tarefa que não está rodando não aceita fala (vira 409 na rota). */
+const falasVivas = new Map<string, string[]>();
+const MAX_FALAS = 8;
+
+export function enfileirarFala(id: string, texto: string): boolean {
+  if (!controles.has(id)) return false;
+  const t = String(texto ?? "").trim();
+  if (!t) return false;
+  const fila = falasVivas.get(id) ?? [];
+  if (fila.length >= MAX_FALAS) return false;
+  fila.push(t.slice(0, 4000));
+  falasVivas.set(id, fila);
+  return true;
+}
+
+export function drenarFalas(id: string): string[] {
+  const fila = falasVivas.get(id) ?? [];
+  falasVivas.delete(id);
+  return fila;
+}
+
 /** v3.18 (T001): parar uma tarefa. A regra de dono é a mesma do reanexar (verTarefa:
    id + tenant; operador via tenantFor). Tarefa que já acabou: ok=true, vivia=false —
    não se cancela fantasma, e a tela limpa o estado dela pelo `fim` que já viu. */
@@ -129,8 +153,9 @@ export async function rodarTarefa(id: string, u: Usuario): Promise<void> {
         }
         notificarTarefa(id, e); // barril (Task 4) — ao vivo, independente do banco
       },
-      /* v3.18 (T001): o "parar" derruba a chamada do provider em curso */
-      { sinal: ctrl.signal },
+      /* v3.18 (T001): o "parar" derruba a chamada do provider em curso
+         v3.42: `falas` drena a fala que chegou no meio — o modelo vê antes da rodada seguinte */
+      { sinal: ctrl.signal, falas: () => drenarFalas(id) },
     );
     await grava; // drena a fila ANTES do UPDATE final (ver nota acima)
     await q(
@@ -153,5 +178,6 @@ export async function rodarTarefa(id: string, u: Usuario): Promise<void> {
     notificarTarefa(id, { tipo: "erro", detalhe: String((e as Error).message ?? "a tarefa falhou") });
   } finally {
     controles.delete(id);
+    falasVivas.delete(id);
   }
 }

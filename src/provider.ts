@@ -779,6 +779,8 @@ export type EventoChat =
   | { tipo: "ferramenta_inicio"; nome: string }
   | { tipo: "ferramenta"; servidor: string; nome: string; ok: boolean; ms: number }
   | { tipo: "fala"; texto: string }
+  /** v3.42: a pessoa falou no MEIO do turno — a tela mostra que o ajuste foi encaixado */
+  | { tipo: "steer"; texto: string }
   /** v3.23: tela gerada (HTML+CSS+JS) — o card com preview funcional aparece ao vivo */
   | { tipo: "tela"; tela: Tela }
   /** v3.24: código da tela sendo ESCRITO (pedaço do HTML ainda em construção) */
@@ -866,8 +868,9 @@ export async function responderChat(
     imagens?: { mime: string; base64: string }[];
   },
   emitir?: (e: EventoChat) => void,
-  /** v3.18 (T001): sinal de cancelamento da tarefa (botão "parar") */
-  opts: { sinal?: AbortSignal } = {},
+  /** v3.18 (T001): sinal de cancelamento da tarefa (botão "parar")
+   *  v3.42: `falas` entrega o que a pessoa mandou no meio — drenado a cada rodada */
+  opts: { sinal?: AbortSignal; falas?: () => string[] } = {},
 ) {
   const pergunta = body.pergunta.trim();
   /* v3.41 — imagem colada no chat: vai como parte do turno, não como documento. */
@@ -946,6 +949,8 @@ export async function responderChat(
      fica gravado na mensagem — o Open WebUI faz assim ("Thinking…" → "Thought for Ns"). */
   let pensamento = "";
   let texto = "";
+  /** v3.42: trechos já fechados quando uma fala no meio obrigou mais uma rodada */
+  const partes: string[] = [];
   let rodadas = 0;
   let aviso: string | null = null;
   /* v3.18: `emitido` é o texto JÁ MOSTRADO da rodada em curso (zera a cada rodada com
@@ -995,6 +1000,15 @@ export async function responderChat(
     liberado = false;
     parciais.clear(); /* v3.24: argumentos são por rodada — índice 0 de uma rodada ≠ da outra */
     rodadas++;
+    /* v3.42 — fala no meio do turno: injeta ANTES de o modelo pensar nesta rodada */
+    const chegadas = opts.falas?.() ?? [];
+    for (const fala of chegadas) {
+      mensagens.push({
+        role: "user",
+        content: `(a pessoa falou enquanto você trabalhava — leve isto em conta e ajuste a resposta) ${fala}`,
+      });
+      emitir?.({ tipo: "steer", texto: fala });
+    }
     const usaFerramentas = pacote.specs.length > 0 && cfg.max_rodadas > 0;
     let saiuTexto = false;
     /* cada rodada coloca mais um resultado de ferramenta no payload: aperta ANTES de chamar */
@@ -1084,7 +1098,24 @@ export async function responderChat(
         emitir({ tipo: "delta", texto: retido });
         retido = "";
       }
-      texto = r.texto;
+      /* v3.42 — a fala pode chegar depois de ele já ter concluído: em vez de perder,
+         guarda o que ele disse e abre mais uma rodada só para encaixar o ajuste. */
+      const ultimas = opts.falas?.() ?? [];
+      if (ultimas.length) {
+        if (r.texto) {
+          partes.push(r.texto);
+          mensagens.push({ role: "assistant", content: r.texto });
+        }
+        for (const fala of ultimas) {
+          mensagens.push({
+            role: "user",
+            content: `(a pessoa falou enquanto você trabalhava — leve isto em conta e ajuste a resposta) ${fala}`,
+          });
+          emitir?.({ tipo: "steer", texto: fala });
+        }
+        continue;
+      }
+      texto = partes.length ? [...partes, r.texto].filter(Boolean).join("\n\n") : r.texto;
       break;
     }
     /* a rodada chamou ferramenta: o texto dela NÃO é a resposta — mas é FALA DE

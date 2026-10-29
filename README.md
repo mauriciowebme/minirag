@@ -22,6 +22,19 @@ parecidos com a pergunta, com uma nota de 0 a 1.
 
 ---
 ---
+## v3.42.0 (29/10) — fala no MEIO do turno (steering)
+
+O que o Hermes faz e o minirag não fazia: você manda uma mensagem enquanto a resposta
+está sendo produzida e ela **entra no turno em curso**, em vez de esperar na fila.
+
+- `POST /chat/tarefa/:id/fala` — guarda a fala na tarefa viva (409 se já encerrou, 422 se vazia)
+- o loop de rodadas drena essa fila no topo de cada rodada e injeta como mensagem de usuário:
+  o modelo vê antes de pensar e ajusta o rumo sem perder o fio
+- se ele já tinha concluído, abre **mais uma rodada** para encaixar (o que já disse fica guardado
+  e a resposta final sai como a soma das partes)
+- na tela: Enter com resposta rodando chama a rota em vez de enfileirar; a bolha entra na conversa
+- limite honesto: não corta a palavra que já está saindo — a fala entra na rodada seguinte
+
 ## v3.41.1 (29/10) — a foto aparece na bolha e entra por três caminhos
 - **O que você vê:** ao mandar uma imagem, ela fica **dentro da bolha da sua pergunta** (clique abre inteira) — igual ao assistente do IA_GO. E dá para trazer imagem de três jeitos: colar (Ctrl+V), arrastar e soltar no campo, ou o botão de clipe ao lado do microfone.
 - **Por que:** a v3.41.0 mandava a imagem para o modelo, mas a bolha só renderizava texto — a pessoa mandava e "não aparecia nada" na conversa. O `onPaste` também estava só no `textarea`, então colar com o foco fora dele não fazia nada.
