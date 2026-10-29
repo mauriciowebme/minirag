@@ -361,7 +361,7 @@ test("minirag v2 — suíte completa", async (t) => {
     f.fechar("v1.8");
   });
 
-  await bloco(t, "MCP: JSON-RPC stateless com as 49 tools", async () => {
+  await bloco(t, "MCP: JSON-RPC stateless com as 50 tools", async () => {
     const f = fiscal();
     const H = { key: TESTKEY };
     const rpc = (id: unknown, method: string, params?: unknown, key: string | null = TESTKEY) =>
@@ -418,16 +418,16 @@ test("minirag v2 — suíte completa", async (t) => {
       /* v3.32: busca na web e leitura de página (entraram sem atualizar esta lista) */
       "web_search",
       "web_open",
-      /* v3.8: vocabulário do túnel entra na superfície (20 tools) */
+      /* v3.8: vocabulário do túnel entra na superfície (21 tools após a v3.39) */
       "abrir", "area_transferencia", "buscar_arquivos", "editar_no_local", "estado_maquina",
       "eventos", "esperar_arquivo", "falar", "git_remoto", "grep_remoto",
       "janelas", "ler_arquivo", "listar_arquivos", "power", "processos",
-      "rede", "rodar_lote", "servicos", "sessao", "escrever_arquivo",
+      "rede", "rodar_lote", "servicos", "sessao", "escrever_arquivo", "metricas",
     ].sort();
     /* v3.36 — a lista passou a dizer a verdade da CONTA: as 5 de operador saem para o comum */
     const SO_OPERADOR_336 = ["listar_usuarios", "criar_usuario", "apagar_usuario", "esquecimento", "gerir_mcp"];
     const ESPERADAS_COMUM = ESPERADAS.filter((n) => !SO_OPERADOR_336.includes(n)).sort();
-    f.check("tools/list da conta comum traz as 44 (as 5 de operador ficam fora)", JSON.stringify(nomes) === JSON.stringify(ESPERADAS_COMUM), `${nomes.length}: ${nomes.filter((n: string) => !ESPERADAS_COMUM.includes(n)).join(",")}`);
+    f.check("tools/list da conta comum traz as 45 (as 5 de operador ficam fora)", JSON.stringify(nomes) === JSON.stringify(ESPERADAS_COMUM), `${nomes.length}: ${nomes.filter((n: string) => !ESPERADAS_COMUM.includes(n)).join(", ")}`);
 
     r = await rpc(5, "tools/call", { name: "health" }, null);
     f.check("tools/call sem Bearer -> 401", r.status === 401 && "error" in (r.json ?? {}), r.texto.slice(0, 150));
@@ -623,12 +623,12 @@ test("minirag v2 — suíte completa", async (t) => {
     r = await call("PATCH", "/config/mcp/usuarios", { key: OPKEY, corpo: { ativo: false } });
     f.check("operador desliga o MCP das contas", r.status === 200 && r.json?.usuarios_habilitado === false, r.texto.slice(0, 160));
     f.check("com o MCP desligado a conta comum não vê ferramenta nenhuma", (await lista(TESTKEY)).length === 0, (await lista(TESTKEY)).length);
-    f.check("o operador continua entrando (para poder reverter)", (await lista(OPKEY)).length === 49, (await lista(OPKEY)).length);
+    f.check("o operador continua entrando (para poder reverter)", (await lista(OPKEY)).length === 50, (await lista(OPKEY)).length);
     r = await call("POST", "/mcp", { key: TESTKEY, corpo: { jsonrpc: "2.0", id: 8, method: "tools/call", params: { name: "health", arguments: {} } } });
     f.check("chamada da conta comum com MCP desligado: 403 com o motivo", r.status === 403 && /desligado/.test(r.texto), r.texto.slice(0, 160));
 
     r = await call("PATCH", "/config/mcp/usuarios", { key: OPKEY, corpo: { ativo: true } });
-    f.check("religado, a conta comum volta a ver as 44", r.status === 200 && (await lista(TESTKEY)).length === 44, (await lista(TESTKEY)).length);
+    f.check("religado, a conta comum volta a ver as 45", r.status === 200 && (await lista(TESTKEY)).length === 45, (await lista(TESTKEY)).length);
     r = await call("GET", "/config/mcp", { key: OPKEY });
     f.check("a config do admin mostra o interruptor", r.json?.usuarios_habilitado === true, JSON.stringify(r.json).slice(0, 120));
 
@@ -2522,7 +2522,7 @@ await bloco(t, "v3.6: máquinas por usuário — hub WS, pareamento, run, escopo
     f.check("desligado: MCP rodar_comando recusa com a mesma frase", txtBloq.includes("409") && txtBloq.includes("DESLIGADO"), txtBloq.slice(0, 140));
     r = await call("POST", "/mcp", { key: OPKEY, corpo: { jsonrpc: "2.0", id: 90, method: "tools/list" } });
     const nomesOff = ((r.json?.result?.tools ?? []) as any[]).map((t) => t.name);
-    f.check("desligado: as 21 ferramentas de máquina somem do tools/list MCP", !nomesOff.includes("rodar_comando") && !nomesOff.includes("listar_arquivos") && nomesOn.includes("listar_arquivos") && nomesOff.length === nomesOn.length - 21, { on: nomesOn.length, off: nomesOff.length });
+    f.check("desligado: as 22 ferramentas de máquina somem do tools/list MCP", !nomesOff.includes("rodar_comando") && !nomesOff.includes("listar_arquivos") && nomesOn.includes("listar_arquivos") && nomesOff.length === nomesOn.length - 22, { on: nomesOn.length, off: nomesOff.length });
     r = await call("PATCH", "/config/mcp/maquinas", { key: OPKEY, corpo: { ativo: true } });
     r = await call("POST", "/maquinas/maq-mcp/run", { key: TESTKEY, corpo: { cmd: "echo liberado" } });
     f.check("religado: executa normal de novo", r.json?.stdout === "liberado", r.texto.slice(0, 140));
