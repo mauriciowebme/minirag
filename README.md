@@ -22,6 +22,31 @@ parecidos com a pergunta, com uma nota de 0 a 1.
 
 ---
 ---
+## v3.44.0 (29/10) — a máquina manda arquivo para a conversa (print, imagem, log)
+
+O que você vê: o agente tira **print da tela do PC** e a imagem aparece na conversa, com
+miniatura e botão de baixar. Um arquivo da máquina (log, XML, PDF) também vem para o chat
+do mesmo jeito, até 32 MB. E `copiar_arquivo` leva um arquivo de uma máquina para outra.
+
+Por que: até a 3.43 o túnel só ia **servidor → máquina**. Não existia caminho de volta:
+o chat desenhava imagem apenas na bolha do usuário, e `ler_arquivo` devolvia base64 ao
+MODELO (gastando a janela) sem nunca mostrar nada ao dono.
+
+Como funciona: três ferramentas novas — `capturar_tela` (Windows: tela 1..4; Linux: precisa
+de sessão gráfica), `baixar_arquivo` (máquina → conversa) e `copiar_arquivo` (máquina →
+servidor → outra máquina). O arquivo **não passa em base64 pelo WebSocket**: a máquina faz
+POST binário em `/maquina/r` com chave one-time presa ao host (TTL 5 min), o servidor grava
+em `anexos` e o front busca por `GET /anexos/:id` com a chave no header. O modelo recebe só
+a meta (`id`, `nome`, `mime`, `bytes`) — o conteúdo nunca entra no contexto.
+
+Como é provado: bloco `v3.44` da suíte sobe o **cliente real** do container, envia 300 KB
+de bytes aleatórios por `baixar_arquivo`, confere que `GET /anexos/:id` devolve o **mesmo
+sha256** do arquivo na máquina, que sem chave dá 401, que a cópia máquina→máquina no destino
+tem o mesmo sha256, e que `capturar_tela` num Linux sem X responde erro claro (10 checks).
+
+Limite honesto: 32 MB por anexo e 16 MB na cópia entre máquinas. Para GB, a LAN entre as
+máquinas (medido 107 MB/s) — túnel de WebSocket não é canal para isso.
+
 ## v3.43.0 (29/10) — o túnel passou a entregar o que promete (e o ✓ parou de mentir)
 
 O que você vê: `ler_arquivo` de print/foto/log volta a funcionar (até os 800 KB do
