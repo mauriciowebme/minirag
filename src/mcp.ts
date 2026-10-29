@@ -550,7 +550,7 @@ export const TOOLS: Tool[] = [
   },
   {
     name: "area_transferencia",
-    description: "Le (get) ou escreve (set) a area de transferencia da maquina. set pisa o que estava. Linux precisa xclip.",
+    description: "Le (get) ou escreve (set) a area de transferencia da maquina. set pisa o que estava. Linux precisa xclip. Windows: se a sessao remota travar o clipboard, responde 422 dizendo que foi bloqueado.",
     inputSchema: { type: "object", properties: {
       host: { type: "string" },
       acao: { type: "string", enum: ["get", "set"] },
@@ -600,7 +600,7 @@ export const TOOLS: Tool[] = [
     inputSchema: { type: "object", properties: {
       host: { type: "string" },
       acao: { type: "string", enum: ["ping", "dns", "tracado", "portas", "espera_porta", "info"] },
-      alvo: { type: "string", description: "host/URL; em espera_porta: a porta (ex.: 5173)" },
+      alvo: { type: "string", description: "host/URL; em espera_porta: a porta (ex.: 5173); em info: filtra as linhas por IP, interface, gateway ou DNS" },
       timeout: { type: "integer", description: "espera_porta: segundos (padrao 30, max 120)" },
       tenant: { type: "string", description: "so operador" } }, required: ["host", "acao"] },
   },
@@ -625,7 +625,7 @@ export const TOOLS: Tool[] = [
   },
   {
     name: "rodar_lote",
-    description: "VARIOS comandos numa so ida ao host (economiza roundtrips): sequencia, cada um com exit proprio — falha de um nao impede o proximo. Blocos '### N exit=X'. Max 20 comandos, teto 120s.",
+    description: "VARIOS comandos numa so ida ao host (economiza roundtrips): sequencia, cada um com exit proprio — falha de um nao impede o proximo. Blocos '### N exit=X'. Max 20 comandos, teto 120s, 4000 chars de texto no lote (o envelope codificado nao conta).",
     inputSchema: { type: "object", properties: {
       host: { type: "string" },
       comandos: { type: "array", items: { type: "string" }, description: "1 a 20 linhas" },

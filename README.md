@@ -22,6 +22,12 @@ parecidos com a pergunta, com uma nota de 0 a 1.
 
 ---
 ---
+## v3.38.0 (28/10) — Ferramentas de máquina: o que estava torto, medido e corrigido
+- **O que você vê:** (1) caminho de arquivo vem limpo — `C:\Windows`, sem o `\r` grudado no fim; (2) `rede info` respeita o `alvo` e filtra IP/interface/gateway/DNS em vez de devolver tudo; (3) `git_remoto` numa pasta que não é repositório responde em uma linha ("não é repositório git") em vez de despejar o XML do PowerShell; (4) `area_transferencia` no Windows cai para o modo alternativo quando a sessão remota trava o clipboard, e a recusa vem como **422** explicando, não como 502 com stack; (5) máquina que reconecta no meio do comando responde **503 "reconectando"** — antes parecia defeito do PC; (6) `rodar_lote` deixou de recusar lote pequeno: 3 comandos de 367 caracteres batiam num teto de 4.000 que era medido **depois** da codificação.
+- **Por que:** varredura das 20 ferramentas nas duas máquinas (T043) e um lote recusado sem motivo aparente (T044). Quinze funcionavam; cinco tinham defeito, todos medidos em produção antes de mexer.
+- **Como funciona:** o texto que sai das ferramentas de Windows passa por uma normalização única de CRLF; o ruído do PowerShell (`No linha:`, `CategoryInfo`, `FullyQualifiedErrorId`) é removido do erro; o teto do comando passou a olhar o envelope (base64) para as ferramentas que montam o comando, e o texto do usuário continua limitado a 4.000 com a mensagem dizendo o número real; queda do cliente no meio da chamada virou 503 com auditoria preservada.
+- **Como é provado:** blocos `MCP`, `v3.37`, `v3.6` e `v3.8` rodados em 49 s — **5/5 verde, 0 falha**, com os 23 blocos pulados listados nominalmente. Depois do deploy, as cinco correções são chamadas ao vivo nas duas máquinas Windows.
+
 ## v3.37.0 (28/10) — As ferramentas de máquina voltam a funcionar em PC Windows
 - **O que você vê:** listar pasta, processos, janelas, rede e estado das máquinas Windows passa a responder de verdade. Antes, tudo isso ficava mudo ou voltava vazio — e a lista vazia vinha com "ok", como se a pasta não tivesse nada.
 - **Por que:** o programa que roda no PC anuncia o sistema como **win32 10.0.26200**, mas o servidor só reconhecia a palavra **windows**. Nenhuma das 20 ferramentas de máquina achava que era Windows, então mandava comando de Linux para o PC (`ifconfig`), recusava janelas e devolvia listagem vazia.

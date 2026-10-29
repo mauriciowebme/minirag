@@ -53,8 +53,8 @@
 | T040 | Renderizar JavaScript no `web_open` (chromium/CDP, sem npm) | ferramentas | 🟡 Média | ✅ v3.33.0 | [#t040](#t040) |
 | T041 | Rastro cronológico, narração obrigatória e instruções editáveis | chat-srv + chat-ui | 🟠 Alta | ✅ v3.34.0 | [#t041](#t041) |
 | T042 | Ferramentas de máquina erram o SO do Windows (`win32 …` × `windows`) | maquinas-tools + cliente | 🔴 Crítica | ✅ v3.37.0 | [#t042](#t042) |
-| T043 | Ferramentas de máquina: varredura das 20 (o que quebrou e o que ficou torto) | maquinas-tools | 🟠 Alta | ⏳ 5 achados medidos (28/10) | [#t043](#t043) |
-| T044 | `rodar_lote` recusa 3 comandos curtos: limite de 4000 medido no comando JÁ codificado | maquinas-tools | 🟠 Alta | ⏳ Medido (28/10) | [#t044](#t044) |
+| T043 | Ferramentas de máquina: varredura das 20 (o que quebrou e o que ficou torto) | maquinas-tools | 🟠 Alta | ✅ v3.38.0 | [#t043](#t043) |
+| T044 | `rodar_lote` recusa 3 comandos curtos: limite de 4000 medido no comando JÁ codificado | maquinas-tools | 🟠 Alta | ✅ v3.38.0 | [#t044](#t044) |
 
 ---
 
@@ -624,7 +624,7 @@
 |---|---|
 | **Módulo** | maquinas-tools |
 | **Prioridade** | 🟠 Alta — 15 de 20 respondem; 5 têm defeito (2 quebrados, 3 tortos) |
-| **Status** | ⏳ Medido em produção (v3.37.0, 28/10) no JPPCINFODEV01 (Win11) e no DESKTOP-0NTAOUP (Win10) — sem correção |
+| **Status** | ✅ Corrigido na v3.38.0 (28/10) — os 5 achados; provado ao vivo nas duas máquinas depois do deploy |
 | **Contexto** | Varredura pedida pelo dono depois do T042: todas as ferramentas de máquina chamadas de verdade pelas duas máquinas. Resultado: `listar_arquivos`, `ler_arquivo`, `buscar_arquivos`, `grep_remoto`, `processos`, `janelas`, `servicos`, `eventos`, `rede info/dns/portas/ping`, `estado_maquina`, `rodar_lote`, `sessao abrir/listar/fechar` e `git_remoto` (quando o repo existe) **funcionam**. |
 | **Achados** | **1) `area_transferencia` quebrado no JPPCINFODEV01** — 502 "clipboard bloqueado por sessao remota (RustDesk/AnyDesk costumam travar)". No DESKTOP funcionou (veio vazio). Correção: ler por `Get-Clipboard -Raw` com fallback Win32/`[System.Windows.Forms.Clipboard]`, e mensagem clara em vez de 502 com stack do PowerShell. **2) `git_remoto` em pasta que não é repo** — 502 com o CLIXML cru do git ("fatal: not a git repository") e o `&amp;` escapado do XML vazando na mensagem. Correção: detectar `.git` antes e devolver 422 curto ("C:/IA não é repositório"), sem CLIXML. **3) `rede info` ignora o campo `alvo`** — passei `minirag.techupsistemas.com` e ele devolveu a mesma lista de IPs de com `alvo` vazio; ou o alvo deveria filtrar a interface, ou o campo não deveria existir nessa ação (ficou confuso). **4) `listar_arquivos`/`buscar_arquivos` devolvem caminho com `\r` no fim** (`C:\Windows\r`) — sujeira do `ConvertTo-Json`/`Out-String` no ramo Windows; quebra quem for abrir o arquivo com o valor recebido. **5) `estado_maquina` no DESKTOP falhou 1x com "máquina caiu no meio do comando" (exit=-1)** e passou na tentativa seguinte — coincide com a troca do `.exe` do cliente (21:34); investigar timeout do `run` quando o cliente reconecta (a chamada é descartada, mas a mensagem confunde: parece defeito da máquina, não reconexão). |
 | **Escopo** | `src/maquinas_tools.ts` (clipboard, mensagem de erro do git, filtro do `alvo` em `rede info`, `TrimEnd`/`-NoNewline` nos nomes de arquivo) e `src/maquinas.ts` (código de retorno quando o cliente cai no meio: erro 503 "reconectando" em vez de 502 exit=-1). Teste: bloco com hub falso no Windows cobrindo clipboard (sucesso e recusa), git fora de repo (422) e caminho sem `\r`. |
@@ -636,7 +636,7 @@
 |---|---|
 | **Módulo** | maquinas-tools |
 | **Prioridade** | 🟠 Alta — bloqueia lotes pequenos e o erro não diz o motivo nem o teto |
-| **Status** | ⏳ Medido em produção (v3.37.0, 28/10) — sem correção |
+| **Status** | ✅ Corrigido na v3.38.0 (28/10) — teto do envelope 60.000 nos comandos montados; texto do usuário segue em 4.000 com a mensagem dizendo o número |
 | **Sintoma** | `rodar_lote` com **3** comandos PowerShell de ~120 chars cada devolve `422 cmd longo demais`. O dono escreveu **367 caracteres**; o limite documentado é 4000. O mesmo lote com **2** comandos passa. |
 | **Causa medida** | `maquinas.ts:242` compara `cmd.length > 4000`, mas o `cmd` ali é o script inteiro **já passado por `psOut` → `psEncoded`**: PowerShell `-EncodedCommand` em base64 UTF-16LE. Cada comando vira ~300 chars e o envelope base64 infla 2,67× de novo no script todo. Reprodução exata da montagem: 1 comando = **1838**, 2 = **2870**, 3 = **4038** chars — reprova por 38. Ou seja, o teto real é ~1.500 chars de texto do usuário, não 4000. |
 | **Correção** | (a) medir o limite sobre o texto **antes** da codificação (somar `comandos` + prefixo), deixando o teto de 4000 significando o que aparenta; e/ou (b) subir o teto do caminho MCP para 60000 (o mesmo das origens `tool `), já que o envelope é nosso e não do usuário. (c) mensagem explícita: `lote grande demais: N chars codificados (teto 4000)`. Teste: bloco com 3 comandos PowerShell curtos tem de passar. |

@@ -239,7 +239,11 @@ export async function rodar(
   stdoutMax = 20000,
 ): Promise<{ exit: number; stdout: string; stderr: string; ms: number; host: string }> {
   if (typeof cmd !== "string" || !cmd.trim()) throw new HttpError(422, "cmd é obrigatório");
-  if (cmd.length > (origem.startsWith("tool ") ? 60000 : 4000)) throw new HttpError(422, "cmd longo demais");
+  /* T044: comandos montados pelo servidor (lote/sessão/env) chegam codificados em base64
+     UTF-16LE e inflam ~11x — o teto tem de ser o do envelope, não o do texto do usuário. */
+  const envelope = origem.startsWith("tool ") || /:(rodar_lote|rodar_comando)$/.test(origem);
+  const teto = envelope ? 60000 : 4000;
+  if (cmd.length > teto) throw new HttpError(422, `cmd longo demais: ${cmd.length} chars (teto ${teto})`);
   if (!controleCache) throw new HttpError(409, "controle das maquinas DESLIGADO (Configuracoes > Ferramentas (MCP)) — nenhuma execucao aceita: chat, MCP ou REST");
   const espera = Math.min(TIMEOUT_MAX, Math.max(1, Number(timeoutSeg ?? TIMEOUT_PADRAO) || TIMEOUT_PADRAO));
   const chave = chaveDe(alvo, host);
@@ -256,6 +260,10 @@ export async function rodar(
      VALUES ($1,$2,$3,$4,$5,$6,$7,$8)`,
     [alvo, host, cmd, resultado.exit, stdout.slice(0, 20000), stderr, ms, origem],
   ).catch((e) => log(`maquinas: auditoria falhou: ${(e as Error).message}`));
+  /* T043: exit -1 = o cliente caiu entre o envio e a resposta; antes virava 502
+     "máquina caiu no meio do comando", que parece defeito da máquina. É reconexão: 503. */
+  if (resultado.exit === -1)
+    throw new HttpError(503, `maquina reconectando (${stderr || "cliente caiu no meio do comando"}) — a chamada nao foi executada; tente de novo`);
   void u;
   return { exit: resultado.exit, stdout, stderr, ms, host };
 }

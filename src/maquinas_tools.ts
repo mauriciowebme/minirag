@@ -60,12 +60,25 @@ function b64Out(saida: string): string {
   }
 }
 
-const saida = (so: string, res: { stdout: string }): string =>
-  so === "windows" ? b64Out(res.stdout) : String(res.stdout ?? "").trim();
+const saida = (so: string, res: { stdout: string }): string => {
+  const txt = so === "windows" ? b64Out(res.stdout) : String(res.stdout ?? "").trim();
+  /* T043: o PowerShell devolve CRLF (e `Out-String` às vezes CR solto). Sem normalizar,
+     `listar_arquivos` entregava "C:\Windows\r" — valor quebrado para quem fosse abrir. */
+  return txt.replace(/\r\n/g, "\n").replace(/\r/g, "");
+};
+
+/** T043: o PS 5.1 despeja a moldura do erro nativo (No linha:/CategoryInfo) no stderr */
+function semRuidoPs(txt: string): string {
+  return String(txt)
+    .split("\n")
+    .filter((l) => !/^\s*(\+|No linha:|At line:|CategoryInfo|FullyQualifiedErrorId|RemoteException)/i.test(l))
+    .filter((l) => !/^\s*[~^]+\s*$/.test(l))
+    .join("\n");
+}
 
 /** PowerShell -EncodedCommand cospe throw em CLIXML no stderr: fica só o texto do erro */
 function stderrLimpo(res: { stderr?: string }, limite = 300): string {
-  const s = String(res.stderr ?? "");
+  const s = semRuidoPs(String(res.stderr ?? ""));
   if (s.includes("#< CLIXML")) {
     const msgs = s.match(/<S S="Error">([\s\S]*?)<\/S>/g) ?? [];
     if (msgs.length) {
@@ -520,19 +533,38 @@ async function areaTransferencia(ctx: Ctx, args: Record<string, unknown>): Promi
   }
   let cmd: string;
   if (ctx.so === "windows") {
-    const nucleo = acao === "get" ? "$out = Get-Clipboard -Raw; if (-not $out) { $out = '' }" : `Set-Clipboard -Value '${pq(String(texto))}'; $out = 'AREA_SET_OK'`;
-    cmd = psOut("$erro = ''\nfor ($i = 0; $i -lt 4; $i++) { try { " + nucleo + "; $erro = ''; break } catch { $erro = $_.Exception.Message; Start-Sleep -Milliseconds 300 } }\nif ($erro) { throw ('AREA_BLOQUEADA: ' + $erro) }\n");
+    /* T043: em sessão remota (RDP/RustDesk/AnyDesk) Get-Clipboard e Set-Clipboard estouram
+       "Requested Clipboard operation did not succeed". Cai para o Win32 via Windows.Forms. */
+    const nucleo = acao === "get"
+      ? "$out = Get-Clipboard -Raw; if ($null -eq $out) { $out = '' }"
+      : `Set-Clipboard -Value '${pq(String(texto))}'; $out = 'AREA_SET_OK'`;
+    const reserva = acao === "get"
+      ? "Add-Type -AssemblyName System.Windows.Forms\n$out = [System.Windows.Forms.Clipboard]::GetText()\nif ($null -eq $out) { $out = '' }"
+      : `Add-Type -AssemblyName System.Windows.Forms\n[System.Windows.Forms.Clipboard]::SetText('${pq(String(texto))}')\n$out = 'AREA_SET_OK'`;
+    cmd = psOut(
+      "$erro = ''\n" +
+        "for ($i = 0; $i -lt 3; $i++) {\n" +
+        "  try { " + nucleo + "; $erro = ''; break } catch { $erro = $_.Exception.Message }\n" +
+        "  try { " + reserva + "; $erro = ''; break } catch { $erro = $_.Exception.Message }\n" +
+        "  Start-Sleep -Milliseconds 300\n" +
+        "}\n" +
+        "if ($erro) { $out = 'AREA_BLOQUEADA: ' + $erro }\n",
+    );
   } else {
     cmd = acao === "get"
       ? shCmd("command -v xclip >/dev/null 2>&1 || { echo SEM_XCLIP; exit 9; }; xclip -o -selection clipboard 2>/dev/null")
       : shCmd(`command -v xclip >/dev/null 2>&1 || { echo SEM_XCLIP; exit 9; }; printf '%s' ${sq(String(texto))} | xclip -selection clipboard`);
   }
   const res = await exec(ctx, cmd, 45);
-  if (res.exit !== 0) {
-    const limpo = (stderrLimpo(res) || String(res.stdout)).slice(0, 250);
-    throw new HttpError(502, limpo.includes("AREA_BLOQUEADA")
-      ? "area_transferencia: clipboard bloqueado por sessao remota (RustDesk/AnyDesk costumam travar) — encerre e tente de novo: " + limpo.slice(0, 200)
-      : `area_transferencia falhou (exit=${res.exit}): ${limpo}`);
+  const corpo = (saida(ctx.so, res) || stderrLimpo(res)).slice(0, 250);
+  if (res.exit !== 0 || corpo.includes("AREA_BLOQUEADA")) {
+    const bloqueado = corpo.includes("AREA_BLOQUEADA");
+    throw new HttpError(
+      bloqueado ? 422 : 502,
+      bloqueado
+        ? `area_transferencia: o Windows recusou o clipboard (${corpo.replace("AREA_BLOQUEADA:", "").trim().slice(0, 160)}) — sessao remota RDP/RustDesk/AnyDesk trava a area de transferencia; libere no app e tente de novo`
+        : `area_transferencia falhou (exit=${res.exit}): ${corpo}`,
+    );
   }
   return acao === "get"
     ? { ok: true, host: ctx.host, conteudo: saida(ctx.so, res).slice(0, 200000) }
@@ -653,7 +685,15 @@ async function rede(ctx: Ctx, args: Record<string, unknown>): Promise<unknown> {
     throw new HttpError(502, `rede falhou (exit=${res.exit}): ${(saida(ctx.so, res).slice(0, 120) || stderrLimpo(res))}`);
   const txt = saida(ctx.so, res);
   if (acao === "espera_porta" && txt.includes("TEMPO_ESGOTADO")) throw new HttpError(502, `porta ${alvo} nao abriu em ${timeoutEp}s`);
-  return { ok: true, host: ctx.host, acao, alvo: alvo || null, resumo: txt.slice(0, 20000) };
+  /* T043: `info` aceitava `alvo` e ignorava — agora filtra as linhas (IP, interface, gateway
+     ou DNS que contenham o valor). Sem casar nada, 422 em vez de devolver tudo como resposta. */
+  let resumo = txt.slice(0, 20000);
+  if (acao === "info" && alvo) {
+    const filtradas = resumo.split("\n").filter((l) => l.toLowerCase().includes(alvo.toLowerCase()));
+    if (!filtradas.length) throw new HttpError(422, `rede info: nenhuma interface/rota/DNS casa com '${alvo}'`);
+    resumo = filtradas.join("\n");
+  }
+  return { ok: true, host: ctx.host, acao, alvo: alvo || null, resumo };
 }
 
 async function esperarArquivo(ctx: Ctx, args: Record<string, unknown>): Promise<unknown> {
@@ -706,6 +746,11 @@ async function rodarLote(ctx: Ctx, args: Record<string, unknown>): Promise<unkno
     throw new HttpError(422, "comandos: lista de 1 a 20 strings");
   if (!comandos.every((c) => typeof c === "string" && c.trim()))
     throw new HttpError(422, "todo comando deve ser texto nao-vazio");
+  /* T044: o teto de 4000 do `rodar` é medido no comando JÁ codificado (base64 de base64),
+     que infla ~11x. Aqui o usuário paga o limite pelo texto que escreveu. */
+  const charsTexto = (comandos as string[]).reduce((s, c) => s + c.length, 0);
+  if (charsTexto > 4000)
+    throw new HttpError(422, `lote grande demais: ${charsTexto} chars de texto (teto 4000 por lote)`);
   const lista = (comandos as string[]).map(psAutoencode);
   const env = validaEnv(args.env);
   let prefixo = "";
@@ -811,6 +856,10 @@ async function gitRemoto(ctx: Ctx, args: Record<string, unknown>): Promise<unkno
     exitCode = Number(txt.slice(i + 5).trim());
     txt = txt.slice(0, i).replace(/\s+$/, "");
   }
+  /* T043: pasta que não é repositório virava 502 com o CLIXML cru do PowerShell na cara.
+     É erro de uso, não de servidor: 422 curto, sem ruído. */
+  if (exitCode !== 0 && /not a git repository|not a git dir|n[ãa]o [ée] um reposit[óo]rio/i.test(txt))
+    throw new HttpError(422, `git_remoto: '${repo}' nao e repositorio git (nenhum .git encontrado) — nada foi executado`);
   return { ok: exitCode === 0, host: ctx.host, acao, exit: exitCode, saida: txt.slice(0, 60000) };
 }
 
@@ -877,6 +926,9 @@ export async function toolMaquina(
 export async function wrapComando(
   u: Usuario, args: Record<string, unknown>, cmdBruto: string,
 ): Promise<string> {
+  /* T044: aqui o limite é o texto do usuário; o envelope (sessão/env/base64) é nosso. */
+  if (cmdBruto.length > 4000)
+    throw new HttpError(422, `comando grande demais: ${cmdBruto.length} chars de texto (teto 4000)`);
   const host = S(args.host);
   const sessNome = S(args.sessao).trim();
   const env = validaEnv(args.env);
