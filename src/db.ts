@@ -169,6 +169,8 @@ export async function initDb(dim: number): Promise<void> {
 
   /* v3.23: telas geradas sobrevivem ao reanexar (o card volta no `fim` da tarefa) */
   await q(`ALTER TABLE chat_tarefas ADD COLUMN IF NOT EXISTS telas JSONB`);
+  /* v3.44: prints/arquivos que a máquina mandou durante o turno */
+  await q(`ALTER TABLE chat_tarefas ADD COLUMN IF NOT EXISTS anexos JSONB`);
 
   // container pode ter morrido no meio de um job: devolve pra fila
   await q(`UPDATE ingest_jobs SET status = 'na_fila', chunks_feitos = 0 WHERE status = 'processando'`);

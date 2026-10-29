@@ -16,6 +16,7 @@ import { REGRAS_CASA } from "./regras";
 import { erro409, erro422 } from "./errors";
 import { q } from "./db";
 import { apertarRodada, custoDoPayload, type MsgChat, montarPayload } from "./compactar";
+import type { AnexoMeta } from "./anexos";
 import { MAX_TELAS_TURNO, htmlParcial, type Tela } from "./telas";
 import {
   type ChamadaFerramenta,
@@ -147,6 +148,8 @@ export async function initProvider(): Promise<void> {
   await q(`ALTER TABLE chat_mensagens ADD COLUMN IF NOT EXISTS custo JSONB`);
   /* v3.23: telas geradas pelo agente (HTML+CSS+JS) viajam com a resposta */
   await q(`ALTER TABLE chat_mensagens ADD COLUMN IF NOT EXISTS telas JSONB`);
+  /* v3.44: print/arquivo vindo da máquina, reaberto junto com a conversa */
+  await q(`ALTER TABLE chat_mensagens ADD COLUMN IF NOT EXISTS anexos JSONB`);
   await q(`CREATE INDEX IF NOT EXISTS chat_tenant_idx ON chat_mensagens (tenant, memoria, id)`);
   /* v3.35.1: o texto das regras da casa NÃO é mais injetado no boot. Antes, cada subida regravava
      as regras em todo campo vazio — quem apagasse as instruções ("conversa pura") as via voltar
@@ -767,7 +770,10 @@ export type SegmentoRastro =
    *  nunca pela ordem de chegada (é o que garante a trilha cronológica ao vivo e ao reabrir). */
   | { tipo: "pensamento"; texto: string; ms: number; em?: number }
   | { tipo: "narracao"; texto: string; em?: number }
-  | { tipo: "ferramenta"; servidor: string; nome: string; ok: boolean; ms: number; em?: number };
+  | { tipo: "ferramenta"; servidor: string; nome: string; ok: boolean; ms: number; em?: number }
+  /** v3.43: a pessoa falou no MEIO do turno — entra na trilha na posição em que chegou,
+   *  para a interrupção não virar um balão solto depois da resposta. */
+  | { tipo: "interrupcao"; texto: string; em?: number };
 
 /** Evento do chat com streaming (rota /chat/stream). */
 export type EventoChat =
@@ -783,6 +789,8 @@ export type EventoChat =
   | { tipo: "steer"; texto: string }
   /** v3.23: tela gerada (HTML+CSS+JS) — o card com preview funcional aparece ao vivo */
   | { tipo: "tela"; tela: Tela }
+  /** v3.44: print/arquivo que a máquina mandou — entra na conversa ao vivo */
+  | { tipo: "anexo"; anexo: AnexoMeta }
   /** v3.24: código da tela sendo ESCRITO (pedaço do HTML ainda em construção) */
   | { tipo: "codigo"; texto: string }
   | { tipo: "fim"; dados: Record<string, unknown> }
@@ -924,6 +932,8 @@ export async function responderChat(
   const chamadas: ChamadaFerramenta[] = [];
   /* v3.23: telas geradas neste turno (viram cards no chat e ficam gravadas na mensagem) */
   const telas: Tela[] = [];
+  /* v3.44: arquivos que as ferramentas trouxeram neste turno (print de tela, anexo) */
+  const anexos: AnexoMeta[] = [];
   const falas: string[] = []; // v3.8: as falas de caminho da rodada ficam na tela (e na gaveta)
   /* v3.15: a trilha do turno na ordem real. O bloco de pensamento da rodada em curso fecha
      quando a rodada decide (fala, chama ferramenta ou responde) — assim o tempo dele NÃO
@@ -973,6 +983,8 @@ export async function responderChat(
     rastro,
     /* v3.23: telas geradas neste turno (o card do chat) */
     telas,
+    /* v3.44: arquivos/prints que as ferramentas trouxeram */
+    anexos,
     /** v3.13: raciocínio do modelo, para a tela recolher "Pensou por Ns" ao reabrir a conversa */
     raciocinio: pensamento.trim(),
     rodadas,
@@ -1007,6 +1019,7 @@ export async function responderChat(
         role: "user",
         content: `(a pessoa falou enquanto você trabalhava — leve isto em conta e ajuste a resposta) ${fala}`,
       });
+      rastro.push({ tipo: "interrupcao", texto: fala, em: Date.now() - inicio });
       emitir?.({ tipo: "steer", texto: fala });
     }
     const usaFerramentas = pacote.specs.length > 0 && cfg.max_rodadas > 0;
@@ -1111,6 +1124,7 @@ export async function responderChat(
             role: "user",
             content: `(a pessoa falou enquanto você trabalhava — leve isto em conta e ajuste a resposta) ${fala}`,
           });
+          rastro.push({ tipo: "interrupcao", texto: fala, em: Date.now() - inicio });
           emitir?.({ tipo: "steer", texto: fala });
         }
         continue;
@@ -1173,6 +1187,11 @@ export async function responderChat(
           aviso = aviso ?? `o modelo gerou mais de ${MAX_TELAS_TURNO} telas neste turno — as excedentes não foram exibidas`;
         }
       }
+      /* v3.44: arquivo/print achado pela ferramenta vai direto para a conversa */
+      if (exec.anexo) {
+        anexos.push(exec.anexo);
+        emitir?.({ tipo: "anexo", anexo: exec.anexo });
+      }
       /* o resultado entra já aparado: ferramenta gulosamente verbosa não pode estourar a janela */
       const brutoTool = paraTexto(exec.saida);
       /* v3.18 (T004): documentos que a BUSCA devolveu são as fontes da resposta. A coluna
@@ -1209,7 +1228,7 @@ export async function responderChat(
     const parcial = emitido.trim();
     await gravarMensagens(
       tenant, memoria, pergunta, parcial, chamadas, falas, pensamento.trim(), rastro, [...fontes],
-      cfg.provedor, cfg.modelo, telas, Date.now() - inicio,
+      cfg.provedor, cfg.modelo, telas, anexos, Date.now() - inicio,
     );
     return empacotar(parcial, "parada pelo usuário — o que chegou ficou gravado", true);
   }
@@ -1226,7 +1245,7 @@ export async function responderChat(
         : "nenhuma ferramenta está ligada em Configurações → Ferramentas (MCP)");
   }
 
-  await gravarMensagens(tenant, memoria, pergunta, texto, chamadas, falas, pensamento.trim(), rastro, [...fontes], cfg.provedor, cfg.modelo, telas, Date.now() - inicio);
+  await gravarMensagens(tenant, memoria, pergunta, texto, chamadas, falas, pensamento.trim(), rastro, [...fontes], cfg.provedor, cfg.modelo, telas, anexos, Date.now() - inicio);
   return empacotar(texto, aviso, false);
 }
 
@@ -1243,6 +1262,7 @@ async function gravarMensagens(
   provedor: string | null = null,
   modelo = "",
   telas: Tela[] = [],
+  anexos: AnexoMeta[] = [],
   msTurno = 0,
 ): Promise<void> {
   await q(
@@ -1250,7 +1270,7 @@ async function gravarMensagens(
     [tenant, memoria, pergunta],
   );
   await q(
-    `INSERT INTO chat_mensagens (tenant, memoria, papel, texto, ferramentas, falas, raciocinio, rastro, fontes, custo, provedor, modelo, telas) VALUES ($1, $2, 'assistant', $3, $4::jsonb, $5::jsonb, $6, $7::jsonb, $8::jsonb, $9::jsonb, $10, $11, $12::jsonb)`,
+    `INSERT INTO chat_mensagens (tenant, memoria, papel, texto, ferramentas, falas, raciocinio, rastro, fontes, custo, provedor, modelo, telas, anexos) VALUES ($1, $2, 'assistant', $3, $4::jsonb, $5::jsonb, $6, $7::jsonb, $8::jsonb, $9::jsonb, $10, $11, $12::jsonb, $13::jsonb)`,
     [
       tenant, memoria, resposta, JSON.stringify(chamadas), JSON.stringify(falas), raciocinio || null,
       JSON.stringify(rastro), JSON.stringify(fontes),
@@ -1261,6 +1281,8 @@ async function gravarMensagens(
       provedor, modelo || "",
       /* v3.23: telas geradas neste turno */
       JSON.stringify(telas),
+      /* v3.44: prints/arquivos da máquina */
+      JSON.stringify(anexos),
     ],
   );
 }
@@ -1273,7 +1295,7 @@ export async function historicoChat(
   const memoria = (opts.memoria ?? "").trim();
   const limite = Math.min(Math.max(opts.limit ?? 40, 1), 200);
   const r = await q(
-    `SELECT id, papel, texto, ferramentas, falas, raciocinio, rastro, fontes, custo, provedor, modelo, telas, criado_em FROM chat_mensagens
+    `SELECT id, papel, texto, ferramentas, falas, raciocinio, rastro, fontes, custo, provedor, modelo, telas, anexos, criado_em FROM chat_mensagens
      WHERE tenant = $1 AND memoria = $2 ORDER BY id DESC LIMIT $3`,
     [tenant, memoria, limite],
   );
@@ -1296,6 +1318,8 @@ export async function historicoChat(
       modelo: m.modelo ?? "",
       /* v3.23: telas geradas (o card com preview volta ao reabrir a conversa) */
       telas: m.telas ?? [],
+      /* v3.44: prints/arquivos voltam com a conversa */
+      anexos: m.anexos ?? [],
       quando: m.criado_em,
     })),
   };

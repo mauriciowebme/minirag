@@ -10,6 +10,7 @@
  *   - o que foi chamado fica registrado (painel "ferramentas chamadas" + histórico),
  *     com segredo mascarado e texto grande cortado.
  */
+import type { AnexoMeta } from "./anexos";
 import { CONFIG, Usuario } from "./config";
 import { q } from "./db";
 import { erro404, erro409, erro422 } from "./errors";
@@ -356,7 +357,7 @@ export async function executarFerramenta(
   user: Usuario,
   pacote: PacoteFerramentas,
   contexto: { memoria?: string } = {},
-): Promise<{ servidor: string; nome: string; saida: string; ok: boolean; ms: number; args: Record<string, unknown>; tela?: Tela }> {
+): Promise<{ servidor: string; nome: string; saida: string; ok: boolean; ms: number; args: Record<string, unknown>; tela?: Tela; anexo?: AnexoMeta }> {
   const rota = pacote.rotas.get(nome);
   if (!rota) return { servidor: "?", nome, saida: `ferramenta '${nome}' não está ligada neste momento`, ok: false, ms: 0, args };
   const argsUsados = { ...args };
@@ -375,6 +376,17 @@ export async function executarFerramenta(
       if (rota.original === "mostrar_tela" && r && typeof (r as Tela).html === "string") {
         const tela = r as Tela;
         return { servidor: "minirag", nome: rota.original, saida: resumoTela(tela), ok: true, ms: Date.now() - inicio, args: argsUsados, tela };
+      }
+      /* v3.44 — arquivo que a MÁQUINA mandou (print, imagem, log): a meta viaja em
+         `anexo` para o chat desenhar a miniatura; o modelo recebe só o resumo. */
+      const meta = (r as { anexo?: AnexoMeta })?.anexo;
+      if (meta && typeof meta.id === "string" && meta.id) {
+        const limpo = { id: meta.id, nome: meta.nome, mime: meta.mime, bytes: meta.bytes };
+        return {
+          servidor: "minirag", nome: rota.original, ok: okDaSaida(r), ms: Date.now() - inicio,
+          args: argsUsados, anexo: limpo as AnexoMeta,
+          saida: paraTexto({ ...(r as Record<string, unknown>), anexo: limpo }),
+        };
       }
       return { servidor: "minirag", nome: rota.original, saida: paraTexto(r), ok: okDaSaida(r), ms: Date.now() - inicio, args: argsUsados };
     }
