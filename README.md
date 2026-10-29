@@ -22,6 +22,12 @@ parecidos com a pergunta, com uma nota de 0 a 1.
 
 ---
 ---
+## v3.39.4 (29/10) — Chat: a rolagem acompanha a escrita até o último pixel
+- **O que você vê:** com a resposta sendo escrita e você no fim, a tela desce o tempo todo; nada de sobrar um pedaço escondido embaixo. Se você subir para reler, ela para de puxar e só volta quando você voltar ao fim.
+- **Por que:** o auto-scroll só era disparado quando o TEXTO mudava de tamanho. Mudanças de altura que não mexem no texto (campo de digitação crescendo, rastro abrindo/fechando, tela entrando) não puxavam nada; e o `scrollTo` do próprio app gerava evento de `scroll` que podia ser lido como "o usuário saiu do fim", desligando o acompanhamento.
+- **Como funciona:** uma marca `programando` faz o app ignorar o scroll que ele mesmo disparou; um `ResizeObserver` no conteúdo e na área reagenda o salto em `requestAnimationFrame` sempre que a altura muda, mas só quando você está no fim (`colado`). Subir continua mandando: nada é puxado.
+- **Como é provado:** resposta longa em streaming com a janela no fim — a última linha fica visível do começo ao fim, inclusive quando o campo cresce; subir no meio da escrita para a rolagem e mostra o botão "↓ fim"; clicar nele volta a acompanhar.
+
 ## v3.39.3 (29/10) — Lateral: "sair" e "versão" vazavam para fora da coluna
 - **O que você vê:** o menu lateral mantém o fundo e a borda até o fim; o bloco do usuário, "sair" e "versão" ficam dentro da coluna. Antes, com a janela baixa, o conteúdo passava da altura e o rodapé aparecia solto sobre o fundo da página, sem bg nem divisor.
 - **Por que:** o `aside` tinha altura fixa (`h-full` dentro de `h-screen`) e nenhuma rolagem — o que passava de 100vh transbordava para fora da caixa, e o fundo não acompanhava o conteúdo.

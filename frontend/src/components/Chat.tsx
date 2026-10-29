@@ -336,6 +336,10 @@ export function Chat({
   const area = useRef<HTMLDivElement>(null);
   const campoRef = useRef<HTMLTextAreaElement>(null);
   const colado = useRef(true);
+  /* v3.39.4: marca que o PRÓXIMO evento de scroll foi disparado por nós (irParaOFim).
+     Sem isso, o próprio scroll programático era lido como "o usuário saiu do fim" e
+     desligava o acompanhamento — era o "pedacinho que não desce" no meio do streaming. */
+  const programando = useRef(false);
   const [noFundo, setNoFundo] = useState(true);
   const [novoAbaixo, setNovoAbaixo] = useState(false);
   /* ---------------- v3.18: edição de pergunta, ditado por voz, rascunho por gaveta ---------------- */
@@ -557,10 +561,16 @@ export function Chat({
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [snap.msgs.length]);
 
-  /** medir é o que decide: folga menor que 80px = você está acompanhando de baixo */
+  /** medir é o que decide: folga menor que 80px = você está acompanhando de baixo.
+   *  v3.39.4: ignora o scroll que o próprio app disparou — senão o salto automático
+   *  era medido com o conteúdo já maior e derrubava `colado` sem o usuário sair do fim. */
   function medirRolagem() {
     const a = area.current;
     if (!a) return;
+    if (programando.current) {
+      programando.current = false;
+      return;
+    }
     colado.current = a.scrollHeight - a.scrollTop - a.clientHeight < 80;
     setNoFundo(colado.current);
     if (colado.current) setNovoAbaixo(false);
@@ -570,10 +580,16 @@ export function Chat({
     const a = area.current;
     if (!a) return;
     /* salto imediato: suave em travessia longa parece que nao fez nada */
+    programando.current = true;
     a.scrollTo({ top: a.scrollHeight, behavior: "auto" });
     colado.current = true;
     setNoFundo(true);
     setNovoAbaixo(false);
+    /* se o scrollTo não mudou nada (já estávamos no fim) não vem evento de scroll;
+       o quadro seguinte solta a marca de qualquer jeito. */
+    requestAnimationFrame(() => {
+      programando.current = false;
+    });
   }
 
   /* o texto chega em pedaços: desce junto se (e somente se) o usuário estiver no fim.
@@ -595,6 +611,32 @@ export function Chat({
     if (colado.current) irParaOFim();
     else setNovoAbaixo(true);
   }, [rastro, snap.rodando]);
+
+  /* v3.39.4 — o "pedacinho que não desce": o auto-scroll só reagia a mudança de TEXTO.
+     A altura também muda sem texto (campo crescendo, rastro abrindo/fechando, tela ou
+     imagem entrando) e ninguém puxava. ResizeObserver no conteúdo + na área cobre os dois,
+     agrupado em requestAnimationFrame (1 salto por quadro). Se você subiu, não puxa nada. */
+  useEffect(() => {
+    const a = area.current;
+    if (!a) return;
+    const conteudo = a.firstElementChild as HTMLElement | null;
+    let agendado = 0;
+    const puxar = () => {
+      if (!colado.current || agendado) return;
+      agendado = requestAnimationFrame(() => {
+        agendado = 0;
+        if (colado.current) irParaOFim();
+      });
+    };
+    const ro = new ResizeObserver(puxar);
+    if (conteudo) ro.observe(conteudo);
+    ro.observe(a); // pé/teclado mudam a altura da ÁREA, não do conteúdo
+    return () => {
+      if (agendado) cancelAnimationFrame(agendado);
+      ro.disconnect();
+    };
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, []);
 
   /* o pensamento cresce POR DENTRO do painel (ele tem altura própria com rolagem): enquanto
      escreve, o painel tem de acompanhar a escrita em vez de deixar o texto novo subir e
