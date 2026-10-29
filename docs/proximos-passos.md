@@ -53,6 +53,7 @@
 | T040 | Renderizar JavaScript no `web_open` (chromium/CDP, sem npm) | ferramentas | 🟡 Média | ✅ v3.33.0 | [#t040](#t040) |
 | T041 | Rastro cronológico, narração obrigatória e instruções editáveis | chat-srv + chat-ui | 🟠 Alta | ✅ v3.34.0 | [#t041](#t041) |
 | T042 | Ferramentas de máquina erram o SO do Windows (`win32 …` × `windows`) | maquinas-tools + cliente | 🔴 Crítica | ✅ v3.37.0 | [#t042](#t042) |
+| T043 | Ferramentas de máquina: varredura das 20 (o que quebrou e o que ficou torto) | maquinas-tools | 🟠 Alta | ⏳ 5 achados medidos (28/10) | [#t043](#t043) |
 
 ---
 
@@ -615,6 +616,18 @@
 | **Descrição** | O cliente anuncia o sistema como `process.platform + " " + os.release()` (`agente/cliente.js:561`), ou seja **`win32 10.0.26200`**. O servidor decide o ramo comparando `ctx.so === "windows"` em ~20 pontos (`src/maquinas_tools.ts`), e `soDaMaquina()` devolve a string viva **sem normalizar** — logo a comparação nunca é verdadeira e toda ferramenta de máquina em Windows cai no ramo Unix. Medido pelos dois lados: `janelas` → 422 "janelas so em Windows (host JPPCINFODEV01 e win32 10.0.26200)"; `rede info` → "'ifconfig' não é reconhecido"; `estado_maquina` e `processos` → 502 "exit=255: O sistema não pode encontrar o caminho especificado"; `listar_arquivos` em `C:\`, `C:/`, `C:/Users` e `C:\Windows` → `{"ok":true,"total":0,"itens":[]}` (sempre vazio, sem erro). As máquinas estavam online (`maquinas_online`: DESKTOP-0NTAOUP e JPPCINFODEV01), então não é conexão: é o ramo de plataforma. |
 | **Escopo** | Normalizar num lugar só: `plataforma(so)` em `src/maquinas_tools.ts` (ou em `maquinas.ts`) mapeando `/^win/` → `windows`, `/^linux/` → `linux`, `/^darwin/` → `macos`, aplicada onde o `ctx.so` é montado (~linha 855) — o valor cru de `maquinas.so` continua como está para exibição. Teste: bloco com hub falso anunciando `win32 10.0.19045` provando que `janelas`, `rede info` e `processos` pegam o ramo PowerShell (e que `linux` continua pegando o ramo shell). |
 | **Riscos** | Baixo para o código; **médio para o parque**: clientes antigos podem anunciar outras formas (`Windows`, `win32`), então o normalizador tem de ser tolerante (prefixo, caixa). Enquanto não subir, qualquer automação que dependa de ferramenta de máquina em Windows falha calada (`listar_arquivos` devolve vazio **com ok:true**). |
+
+<a id="t043"></a>
+### T043 — Ferramentas de máquina: varredura das 20 (o que quebrou e o que ficou torto)
+| Campo | Conteúdo |
+|---|---|
+| **Módulo** | maquinas-tools |
+| **Prioridade** | 🟠 Alta — 15 de 20 respondem; 5 têm defeito (2 quebrados, 3 tortos) |
+| **Status** | ⏳ Medido em produção (v3.37.0, 28/10) no JPPCINFODEV01 (Win11) e no DESKTOP-0NTAOUP (Win10) — sem correção |
+| **Contexto** | Varredura pedida pelo dono depois do T042: todas as ferramentas de máquina chamadas de verdade pelas duas máquinas. Resultado: `listar_arquivos`, `ler_arquivo`, `buscar_arquivos`, `grep_remoto`, `processos`, `janelas`, `servicos`, `eventos`, `rede info/dns/portas/ping`, `estado_maquina`, `rodar_lote`, `sessao abrir/listar/fechar` e `git_remoto` (quando o repo existe) **funcionam**. |
+| **Achados** | **1) `area_transferencia` quebrado no JPPCINFODEV01** — 502 "clipboard bloqueado por sessao remota (RustDesk/AnyDesk costumam travar)". No DESKTOP funcionou (veio vazio). Correção: ler por `Get-Clipboard -Raw` com fallback Win32/`[System.Windows.Forms.Clipboard]`, e mensagem clara em vez de 502 com stack do PowerShell. **2) `git_remoto` em pasta que não é repo** — 502 com o CLIXML cru do git ("fatal: not a git repository") e o `&amp;` escapado do XML vazando na mensagem. Correção: detectar `.git` antes e devolver 422 curto ("C:/IA não é repositório"), sem CLIXML. **3) `rede info` ignora o campo `alvo`** — passei `minirag.techupsistemas.com` e ele devolveu a mesma lista de IPs de com `alvo` vazio; ou o alvo deveria filtrar a interface, ou o campo não deveria existir nessa ação (ficou confuso). **4) `listar_arquivos`/`buscar_arquivos` devolvem caminho com `\r` no fim** (`C:\Windows\r`) — sujeira do `ConvertTo-Json`/`Out-String` no ramo Windows; quebra quem for abrir o arquivo com o valor recebido. **5) `estado_maquina` no DESKTOP falhou 1x com "máquina caiu no meio do comando" (exit=-1)** e passou na tentativa seguinte — coincide com a troca do `.exe` do cliente (21:34); investigar timeout do `run` quando o cliente reconecta (a chamada é descartada, mas a mensagem confunde: parece defeito da máquina, não reconexão). |
+| **Escopo** | `src/maquinas_tools.ts` (clipboard, mensagem de erro do git, filtro do `alvo` em `rede info`, `TrimEnd`/`-NoNewline` nos nomes de arquivo) e `src/maquinas.ts` (código de retorno quando o cliente cai no meio: erro 503 "reconectando" em vez de 502 exit=-1). Teste: bloco com hub falso no Windows cobrindo clipboard (sucesso e recusa), git fora de repo (422) e caminho sem `\r`. |
+| **Riscos** | Baixo. O clipboard depende de sessão interativa: em sessão RDP/RustDesk pode continuar falhando mesmo com o fallback — o teste tem de aceitar "bloqueado" como resposta legítima e não como verde forçado. |
 
 ## Lotes recomendados (executados — saíram na v3.18)
 
