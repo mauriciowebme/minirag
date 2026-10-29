@@ -539,6 +539,13 @@
   .rastro-narra {
     @apply text-txt2;
   }
+  /* v3.43: fala da pessoa no meio do turno — âmbar para não confundir com narração do modelo */
+  .rastro-interrupcao {
+    @apply rounded border border-amarelo/40 bg-amarelo/10 px-1.5 py-0.5 text-txt;
+  }
+  .rastro-ponto-amarelo {
+    @apply mt-[6px] bg-amarelo;
+  }
   .rastro-pensa-cab {
     @apply text-txt3;
   }
@@ -1029,6 +1036,22 @@
   }
   .chat-anexo img {
     @apply h-full w-full object-cover;
+  }
+  /* v3.44 — print/arquivo que veio da MÁQUINA: miniatura + nome + baixar na bolha */
+  .chat-arquivos {
+    @apply mb-1.5 flex flex-col gap-1.5;
+  }
+  .chat-arquivo {
+    @apply w-fit max-w-full overflow-hidden rounded-lg border border-borda bg-sup2;
+  }
+  .chat-arquivo-img {
+    @apply block max-h-[260px] max-w-full cursor-zoom-in object-contain bg-black/5;
+  }
+  .chat-arquivo-rodape {
+    @apply flex items-center gap-2 px-2 py-1;
+  }
+  .chat-arquivo-nome {
+    @apply max-w-[220px] truncate text-[12px] text-txt2;
   }
   /* v3.41 — foto enviada: fica na bolha da pergunta, com clique para abrir inteira */
   .chat-bolha-imgs {

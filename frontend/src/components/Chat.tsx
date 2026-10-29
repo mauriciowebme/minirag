@@ -1,5 +1,5 @@
 import { useCallback, useEffect, useRef, useState } from "react";
-import { ApiErro, del, get, getStream, post, postStream, qs } from "../services/api";
+import { ApiErro, blobUrl, del, get, getStream, post, postStream, qs } from "../services/api";
 import { useToast } from "./Toast";
 import { mdParaHtml } from "../lib/md";
 import { TelaGerada } from "./TelaGerada";
@@ -15,6 +15,7 @@ import {
   estado,
   getSelecao,
   enviar as enviarNaConversa,
+  type AnexoArquivo,
   type AnexoImagem,
   limpar as limparConversa,
   reativar,
@@ -288,6 +289,17 @@ function Rastro({
                 </div>
               );
             }
+            if (s.tipo === "interrupcao") {
+              /* v3.43: a fala da pessoa no MEIO do turno — marcada na trilha, onde chegou */
+              return (
+                <div className="rastro-linha rastro-interrupcao" key={`i${i}`} data-testid="rastroInterrupcao">
+                  <i className="rastro-ponto rastro-ponto-amarelo" />
+                  <span>
+                    <b>você, no meio:</b> {s.texto}
+                  </span>
+                </div>
+              );
+            }
             if (s.tipo === "ferramenta") {
               const d = detalhes[posTools.indexOf(i)] as FerramentaLinha | undefined;
               /* v3.34: linha VIVA — aparece quando a ferramenta começa e conta o tempo dela
@@ -356,6 +368,53 @@ function Rastro({
  *  v3.0: a conversa mora em `lib/conversa` (fora do React). Você troca de página no painel, vai
  *  olhar a Busca ou outra gaveta, e o que o agente está fazendo NÃO é interrompido por isso —
  *  ao voltar, a bolha está lá, maior, com o tempo certo desde o começo. */
+
+/** v3.44 — arquivo que a máquina mandou. Imagem vira miniatura clicável; o resto vira
+ *  cartão com nome e tamanho. O GET leva a chave no header (por isso blob URL). */
+function AnexoBolha({ a }: { a: AnexoArquivo }) {
+  const [url, setUrl] = useState("");
+  const [erro, setErro] = useState("");
+  const img = String(a.mime || "").startsWith("image/");
+  useEffect(() => {
+    let vivo = true;
+    let criada = "";
+    blobUrl(`/anexos/${a.id}`)
+      .then((u) => {
+        if (!vivo) { URL.revokeObjectURL(u); return; }
+        criada = u;
+        setUrl(u);
+      })
+      .catch((e) => vivo && setErro(String((e as Error)?.message ?? e)));
+    return () => {
+      vivo = false;
+      if (criada) URL.revokeObjectURL(criada);
+    };
+  }, [a.id]);
+  const kb = a.bytes >= 1048576 ? `${(a.bytes / 1048576).toFixed(1)} MB` : `${Math.max(1, Math.round(a.bytes / 1024))} KB`;
+  const baixarAgora = () => {
+    if (!url) return;
+    const el = document.createElement("a");
+    el.href = url;
+    el.download = a.nome;
+    el.click();
+  };
+  return (
+    <div className="chat-arquivo">
+      {img && url ? (
+        <img src={url} alt={a.nome} className="chat-arquivo-img" onClick={() => window.open(url, "_blank")} />
+      ) : null}
+      <div className="chat-arquivo-rodape">
+        <span className="chat-arquivo-nome" title={a.nome}>{a.nome}</span>
+        <span className="sub2">{kb}</span>
+        <button className="btn btn-mini" onClick={baixarAgora} disabled={!url} title="baixar o arquivo">
+          baixar
+        </button>
+      </div>
+      {erro ? <span className="sub2">anexo indisponível: {erro}</span> : null}
+    </div>
+  );
+}
+
 export function Chat({
   escopo,
   operador,
@@ -1150,6 +1209,11 @@ export function Chat({
                       ) : (
                         <TelaGerada tela={null} codigo={m.codigo} digitando={Boolean(m.escrevendo)} />
                       )}
+                    </div>
+                  )}
+                  {m.anexos && m.anexos.length > 0 && (
+                    <div className="chat-arquivos">
+                      {m.anexos.map((a) => <AnexoBolha key={a.id} a={a} />)}
                     </div>
                   )}
                   {m.escrevendo && !m.texto && !(m.codigo || (m.telas && m.telas.length > 0)) ? (

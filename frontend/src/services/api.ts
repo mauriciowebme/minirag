@@ -146,6 +146,13 @@ export async function enviar<T>(caminho: string, form: FormData): Promise<T> {
   throw new ApiErro(r.status, detalhe);
 }
 
+/** Blob URL de um recurso autenticado (imagem de anexo, por exemplo). */
+export async function blobUrl(caminho: string): Promise<string> {
+  const r = await fetch(caminho, { headers: cabecalhos(false) });
+  if (!r.ok) throw new ApiErro(r.status, `${r.status} ${r.statusText}`);
+  return URL.createObjectURL(await r.blob());
+}
+
 /** Download autenticado (o <a href> não manda o header). */
 /* v3.10.1: download por LINK de verdade (bilhete de uso único). O fetch+blob fazia
  * o Edge/Chrome bloquear o segundo download da mesma página ("Precisa de

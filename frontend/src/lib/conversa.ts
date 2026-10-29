@@ -27,8 +27,12 @@ export type EventoTransporte =
   /** v3.34: a ferramenta COMEÇOU — abre a linha viva "Consultando X… Ns" na trilha */
   | { tipo: "ferramenta_inicio"; nome: string }
   | { tipo: "ferramenta"; servidor: string; nome: string; ok: boolean; ms: number }
+  /** v3.43: a pessoa falou no MEIO do turno — entra na trilha, no ponto em que chegou */
+  | { tipo: "steer"; texto: string }
   /** v3.23: tela pronta — o card com preview funcional entra na bolha na hora */
   | { tipo: "tela"; tela: Tela }
+  /** v3.44: arquivo/print que a máquina mandou — aparece na hora (miniatura + baixar) */
+  | { tipo: "anexo"; anexo: AnexoArquivo }
   /** v3.24: código da tela chegando em pedaços (o dono vê o HTML sendo digitado) */
   | { tipo: "codigo"; texto: string }
   | { tipo: "fim"; dados: Record<string, unknown> }
@@ -52,7 +56,12 @@ export type SegmentoRastro =
    *  por ele (cronologia de verdade), com `vivo`/`inicio` só do que está acontecendo agora. */
   | { tipo: "pensamento"; texto: string; ms: number; vivo?: boolean; inicio?: number; em?: number }
   | { tipo: "narracao"; texto: string; em?: number }
-  | { tipo: "ferramenta"; servidor: string; nome: string; ok: boolean; ms: number; vivo?: boolean; inicio?: number; em?: number };
+  | { tipo: "ferramenta"; servidor: string; nome: string; ok: boolean; ms: number; vivo?: boolean; inicio?: number; em?: number }
+  /** v3.43: a fala que a pessoa mandou NO MEIO do turno — mora na trilha, no ponto em que chegou */
+  | { tipo: "interrupcao"; texto: string; em?: number };
+
+/** v3.44: arquivo que veio da máquina (print, imagem, log) e mora em `anexos` no servidor */
+export type AnexoArquivo = { id: string; nome: string; mime: string; bytes: number };
 
 export type Linha = {
   id: string;
@@ -92,6 +101,8 @@ export type Linha = {
   modelo?: string;
   /** v3.23: telas geradas neste turno (cards com preview funcional) */
   telas?: Tela[];
+  /** v3.44: arquivos/prints que as ferramentas trouxeram neste turno */
+  anexos?: AnexoArquivo[];
   /** v3.24: o código da tela enquanto o modelo escreve (o HTML nasce à vista) */
   codigo?: string;
   /** v3.34: duração do turno medida pelo servidor — é o tempo do cabeçalho do rastro */
@@ -264,14 +275,19 @@ export function tarefaViva(chave: string): string {
   return c.rodando && c.tarefaId ? c.tarefaId : "";
 }
 
-/** v3.42 — fala encaixada no turno em curso: entra na tela como bolha do usuário e NÃO
- *  vai para a fila — quem entrega é a rota /fala, que injeta na rodada seguinte. */
+/** v3.43 — fala encaixada no turno em curso: entra DENTRO do rastro do turno, na posição em
+ *  que chegou (o dono: "minha mensagem deveria entrar no meio do rastro"). Não vira balão
+ *  solto nem vai para a fila; quem entrega ao modelo é a rota /fala. */
 export function falarNoTurno(chave: string, texto: string): string {
   const c = pega(chave);
-  const id = proximoId();
-  c.msgs.push({ id, papel: "user", texto, ferramentas: [], when: new Date().toISOString() });
+  const alvo = [...c.msgs].reverse().find((m) => m.papel === "assistant");
+  if (!alvo) return "";
+  alvo.rastro = alvo.rastro ?? [];
+  if (!alvo.rastro.some((x) => x.tipo === "interrupcao" && x.texto === texto)) {
+    alvo.rastro.push({ tipo: "interrupcao", texto, em: Math.max(0, Date.now() - c.inicio) });
+  }
   notifica(chave);
-  return id;
+  return alvo.id;
 }
 
 /** cancela antes de sair (se já estiver escrevendo, cancela a próxima, não a viva) */
@@ -395,6 +411,14 @@ export async function reativar(
           acrescentar(bolha, { tipo: "narracao", texto: txt, em: Math.max(0, Date.now() - c.inicio) });
           bruto = ""; base = 0; bolha.texto = "";
         }
+      } else if (e.tipo === "steer") {
+        /* v3.43: interrupção aparece DENTRO do rastro, no ponto em que chegou — não como
+           balão solto depois da resposta (que era o pedido do dono) */
+        const txt = String(e.texto ?? "").replace(/^\(a pessoa falou enquanto você trabalhava[^)]*\)\s*/, "");
+        if (txt && !(bolha.rastro ?? []).some((x) => x.tipo === "interrupcao" && x.texto === txt)) {
+          fecharPensamento(bolha);
+          acrescentar(bolha, { tipo: "interrupcao", texto: txt, em: Math.max(0, Date.now() - c.inicio) });
+        }
       } else if (e.tipo === "ferramenta_inicio") {
         /* v3.34: a linha nasce quando a ferramenta COMEÇA ("Consultando X… Ns") e é fechada no
            evento de fim — a trilha não fica parada enquanto a ferramenta roda */
@@ -418,6 +442,9 @@ export async function reativar(
       } else if (e.tipo === "tela") {
         /* v3.23: a tela chega pronta — o card entra na bolha sem esperar o fim */
         (bolha.telas ??= []).push(e.tela);
+      } else if (e.tipo === "anexo") {
+        /* v3.44: print/arquivo da máquina entra na bolha na hora */
+        (bolha.anexos ??= []).push(e.anexo);
       } else if (e.tipo === "codigo") {
         /* v3.24: o código da tela nasce letra por letra (pedido do dono) */
         bolha.codigo = (bolha.codigo ?? "") + String(e.texto ?? "");
@@ -456,6 +483,7 @@ export async function reativar(
       if (r.custo && typeof r.custo === "object") bolha.custo = r.custo as Record<string, unknown>;
       /* v3.23: no reanexar sem stream as telas vêm no `fim` (nunca some o card) */
       if (Array.isArray(r.telas) && r.telas.length) bolha.telas = r.telas as Tela[];
+      if (Array.isArray(r.anexos) && r.anexos.length) bolha.anexos = r.anexos as AnexoArquivo[];
       /* v3.19: quem respondeu */
       if (r.provedor) bolha.provedor = String(r.provedor);
       if (r.modelo) bolha.modelo = String(r.modelo);
@@ -559,6 +587,9 @@ async function bombeia(chave: string, memoria: string, tenant: string | undefine
       } else if (e.tipo === "tela") {
         /* v3.23: a tela chega pronta — o card entra na bolha sem esperar o fim */
         (bolha.telas ??= []).push(e.tela);
+      } else if (e.tipo === "anexo") {
+        /* v3.44: print/arquivo da máquina entra na bolha na hora */
+        (bolha.anexos ??= []).push(e.anexo);
       } else if (e.tipo === "codigo") {
         /* v3.24: o código da tela nasce letra por letra (pedido do dono) */
         bolha.codigo = (bolha.codigo ?? "") + String(e.texto ?? "");
@@ -597,6 +628,7 @@ async function bombeia(chave: string, memoria: string, tenant: string | undefine
       if (r.custo && typeof r.custo === "object") bolha.custo = r.custo as Record<string, unknown>;
       /* v3.23: no reanexar sem stream as telas vêm no `fim` (nunca some o card) */
       if (Array.isArray(r.telas) && r.telas.length) bolha.telas = r.telas as Tela[];
+      if (Array.isArray(r.anexos) && r.anexos.length) bolha.anexos = r.anexos as AnexoArquivo[];
       /* v3.19: quem respondeu */
       if (r.provedor) bolha.provedor = String(r.provedor);
       if (r.modelo) bolha.modelo = String(r.modelo);
