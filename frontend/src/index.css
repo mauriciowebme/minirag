@@ -1020,6 +1020,19 @@
   .chat-acoes {
     @apply mt-1 flex items-center gap-1;
   }
+  /* v3.41 — imagem colada no campo (Ctrl+V): miniatura acima do texto, com o × para tirar */
+  .chat-anexos {
+    @apply flex flex-wrap items-center gap-1.5 px-2 pt-1.5;
+  }
+  .chat-anexo {
+    @apply relative h-12 w-12 overflow-hidden rounded-lg border border-borda;
+  }
+  .chat-anexo img {
+    @apply h-full w-full object-cover;
+  }
+  .chat-anexo-x {
+    @apply absolute right-0 top-0 grid h-4 w-4 cursor-pointer place-items-center rounded-bl-md border-0 bg-black/70 text-[11px] leading-none text-white;
+  }
   .chat-acao-icone {
     @apply grid h-8 w-8 cursor-pointer place-items-center rounded-lg border-0 bg-transparent
       text-txt3 hover:bg-sup2 hover:text-txt;

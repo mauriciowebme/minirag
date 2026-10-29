@@ -19,6 +19,7 @@ import {
 import { enqueueIngest } from "./ingest";
 import { CONFIG } from "./config";
 import { healthAtual } from "./ferramentas";
+import { ocrDisponivel, ocrImagem } from "./ocr";
 import { criarUsuario, listarUsuarios, exigirOperador, removerUsuario } from "./usuarios";
 import { escreverEsquecimento, lerEsquecimento } from "./esquecimento";
 import { alvoMaquina, criarPareamento, controleDeMaquinaAtivo, listarMaquinas, rodar } from "./maquinas";
@@ -72,6 +73,18 @@ export const TOOLS: Tool[] = [
     description:
       "Status do servidor RAG: dimensao do modelo de embedding e numero de usuarios ativos.",
     inputSchema: { type: "object", properties: {} },
+  },
+  {
+    name: "analisar_imagem",
+    description:
+      "Le o TEXTO de uma imagem (print, foto, captura de tela) por OCR local. Passe url (http/https) ou base64. Devolve o texto reconhecido, o motor e o tempo. Teto 8MB. Para o modelo VER a imagem (descrever, analisar), o usuario cola no chat e ela vai como visao nativa.",
+    inputSchema: {
+      type: "object",
+      properties: {
+        url: { type: "string", description: "endereco http(s) da imagem" },
+        base64: { type: "string", description: "imagem em base64, com ou sem o prefixo data:" },
+      },
+    },
   },
   {
     name: "search",
@@ -704,6 +717,44 @@ function initialize(params: Row) {
 
 type Row = Record<string, any>;
 
+/** v3.41 — imagem → texto por OCR local. A visao de verdade (modelo olhando) acontece
+ *  quando a pessoa cola a imagem no chat; aqui o alvo e extrair texto de print/foto. */
+async function analisarImagem(args: Row) {
+  if (!ocrDisponivel()) throw new Error("OCR fora do ar no servidor (o mesmo servico do embedder)");
+  const url = String(args.url ?? "").trim();
+  const b64Cru = String(args.base64 ?? "").trim();
+  let buf: Buffer;
+  let origem: string;
+  if (url) {
+    if (!/^https?:\/\//i.test(url)) throw new Error("url precisa ser http(s)");
+    const ctrl = new AbortController();
+    const t = setTimeout(() => ctrl.abort(), 20000);
+    try {
+      const r = await fetch(url, { signal: ctrl.signal });
+      if (!r.ok) throw new Error(`a imagem respondeu ${r.status}`);
+      const tipo = (r.headers.get("content-type") ?? "").toLowerCase();
+      if (!tipo.startsWith("image/")) throw new Error(`a URL nao devolveu imagem (${tipo || "sem content-type"})`);
+      buf = Buffer.from(await r.arrayBuffer());
+      origem = url;
+    } finally {
+      clearTimeout(t);
+    }
+  } else if (b64Cru) {
+    buf = Buffer.from(b64Cru.replace(/^data:[^;]+;base64,/, "").replace(/\s+/g, ""), "base64");
+    if (!buf.length) throw new Error("base64 invalido");
+    origem = "base64";
+  } else {
+    throw new Error("passe url ou base64");
+  }
+  if (buf.length > 8 * 1024 * 1024)
+    throw new Error(`imagem de ${(buf.length / 1024 / 1024).toFixed(1)}MB passa do teto de 8MB`);
+  const r = await ocrImagem(buf);
+  return {
+    ok: true, origem, bytes: buf.length, motor: r.motor, paginas: r.paginas, ms: r.ms,
+    chars: r.texto.length, texto: r.texto.slice(0, 20000),
+  };
+}
+
 async function executarTool(
   name: string,
   args: Row,
@@ -713,6 +764,8 @@ async function executarTool(
   switch (name) {
     case "health":
       return deps.health();
+    case "analisar_imagem":
+      return analisarImagem(args);
     case "mostrar_tela":
       /* valida e normaliza; a camada do chat (ferramentas.ts) lê o HTML por fora do texto */
       return montarTela({ titulo: args.titulo, html: args.html });

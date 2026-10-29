@@ -36,7 +36,7 @@ export type EventoTransporte =
 
 /** quem sabe falar com o servidor (o Chat injeta; o teste injeta um falso) */
 export type Transportar = (
-  pedido: { pergunta: string; memoria: string; tenant?: string; provedor?: string; modelo?: string },
+  pedido: { pergunta: string; memoria: string; tenant?: string; provedor?: string; modelo?: string; imagens?: AnexoImagem[] },
   onEvent: (e: EventoTransporte) => void,
 ) => Promise<Record<string, unknown>>;
 
@@ -98,9 +98,12 @@ export type Linha = {
   inicio?: number;
 };
 
+/** v3.41: imagem colada no campo (Ctrl+V) — vai no turno como parte de visão do modelo */
+export type AnexoImagem = { mime: string; base64: string; nome?: string };
+
 export type Estado = {
   msgs: Linha[];
-  fila: { id: string; texto: string }[];
+  fila: { id: string; texto: string; imagens?: AnexoImagem[] }[];
   rodando: boolean;
   /** v3.18 (T001): id da tarefa no servidor do turno em curso ("" = nada para parar) */
   tarefaId: string;
@@ -236,11 +239,15 @@ export function semear(chave: string, msgs: Linha[]): void {
 }
 
 /** empurra para o modelo: entra na fila da gaveta e sai uma por vez, na ordem */
-export function enviar(chave: string, texto: string, memoria: string, tenant: string | undefined, transportar: Transportar): string {
+export function enviar(
+  chave: string, texto: string, memoria: string, tenant: string | undefined, transportar: Transportar,
+  /** v3.41: imagens coladas — só neste turno; não entram no histórico gravado */
+  imagens?: AnexoImagem[],
+): string {
   const c = pega(chave);
   const id = proximoId();
   c.msgs.push({ id, papel: "user", texto, ferramentas: [], naFila: true, when: new Date().toISOString() });
-  c.fila.push({ id, texto });
+  c.fila.push({ id, texto, ...(imagens?.length ? { imagens } : {}) });
   notifica(chave);
   void bombeia(chave, memoria, tenant, transportar);
   return id;
@@ -478,7 +485,9 @@ async function bombeia(chave: string, memoria: string, tenant: string | undefine
   const caixa: { dados: Record<string, unknown> | null } = { dados: null };
   let erro = "";
   try {
-    const saida = await transportar({ pergunta: item.texto, memoria, ...(tenant ? { tenant } : {}), ...getSelecao(chave) }, (e) => {
+    const saida = await transportar(
+      { pergunta: item.texto, memoria, ...(tenant ? { tenant } : {}), ...(item.imagens?.length ? { imagens: item.imagens } : {}), ...getSelecao(chave) },
+      (e) => {
       const bolha = c.msgs.find((m) => m.id === vivoId);
       if (!bolha) return;
       if (e.tipo === "delta") {

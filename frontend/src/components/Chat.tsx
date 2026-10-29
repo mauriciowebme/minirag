@@ -15,6 +15,7 @@ import {
   estado,
   getSelecao,
   enviar as enviarNaConversa,
+  type AnexoImagem,
   limpar as limparConversa,
   reativar,
   semear,
@@ -123,7 +124,55 @@ const ROTULOS_FERRAMENTA: Record<string, string> = {
   config_provider: "a configuração do modelo",
   web_search: "a busca na web",
   web_open: "a leitura da página",
+  /* v3.41 — ferramentas de máquina: sem entrada aqui o rastro imprimia o nome cru do MCP
+     ("Consultando rodar_comando"), único lugar da tela em snake_case. */
+  listar_arquivos: "os arquivos da máquina",
+  ler_arquivo: "o arquivo na máquina",
+  escrever_arquivo: "o arquivo na máquina",
+  buscar_arquivos: "arquivos na máquina",
+  grep_remoto: "o texto nos arquivos",
+  editar_no_local: "a edição no arquivo",
+  estado_maquina: "o estado da máquina",
+  processos: "os processos",
+  janelas: "as janelas",
+  area_transferencia: "a área de transferência",
+  falar: "a fala na máquina",
+  abrir: "a abertura na máquina",
+  servicos: "os serviços",
+  eventos: "os eventos",
+  rede: "a rede da máquina",
+  esperar_arquivo: "o arquivo esperado",
+  power: "a energia da máquina",
+  rodar_lote: "o lote de comandos",
+  sessao: "a sessão de pasta",
+  git_remoto: "o git na máquina",
+  metricas: "as métricas da máquina",
+  gerar_pareamento: "o pareamento da máquina",
+  maquinas_online: "as máquinas online",
+  analisar_imagem: "a imagem",
 };
+
+/* v3.41 — o verbo diz o que a ferramenta FAZ. "Consultando" em tudo era mentira em
+   escrever_arquivo, rodar_comando e nas de apagar. */
+const VERBO_FERRAMENTA: Record<string, string> = {
+  escrever_arquivo: "Escrevendo", editar_no_local: "Editando", edit_doc: "Editando",
+  upload_file: "Enviando", ingest: "Ingerindo", create_gaveta: "Criando",
+  criar_usuario: "Criando", gerar_pareamento: "Gerando",
+  delete_doc: "Apagando", delete_gaveta: "Apagando", apagar_usuario: "Apagando",
+  rodar_comando: "Rodando", rodar_lote: "Rodando", abrir: "Abrindo", falar: "Falando",
+  power: "Ligando/desligando", git_remoto: "Rodando", esperar_arquivo: "Esperando",
+  config_provider: "Configurando", rename_doc: "Renomeando", archive_doc: "Arquivando",
+  search: "Buscando", web_search: "Buscando", buscar_arquivos: "Buscando",
+  grep_remoto: "Buscando", list_docs: "Listando", list_gavetas: "Listando",
+  listar_arquivos: "Listando", listar_usuarios: "Listando", maquinas_online: "Listando",
+  processos: "Listando", janelas: "Listando", servicos: "Listando",
+  ler_arquivo: "Lendo", get_file: "Baixando", analisar_imagem: "Analisando",
+  web_open: "Abrindo",
+};
+
+function verboFerramenta(nome: string): string {
+  return VERBO_FERRAMENTA[nome] ?? "Consultando";
+}
 
 function rotuloFerramenta(s: { servidor: string; nome: string }): string {
   const interno = s.servidor === "minirag" || s.servidor === "?";
@@ -249,7 +298,7 @@ function Rastro({
                 return (
                   <div className="rastro-linha rastro-tool" key={`f${i}`} data-testid="rastroFerramentaViva">
                     <i className="rastro-ponto rastro-ponto-azul animate-pulse" />
-                    <span>{`Consultando ${rotuloFerramenta(s)}… ${seg}s`}</span>
+                    <span>{`${verboFerramenta(s.nome)} ${rotuloFerramenta(s)}… ${seg}s`}</span>
                   </div>
                 );
               }
@@ -258,7 +307,7 @@ function Rastro({
                   <i className="rastro-ponto rastro-ponto-azul" />
                   <details className="rastro-tool-detalhe">
                     <summary>
-                      {`Consultando ${rotuloFerramenta(s)} · ${Math.max(1, Math.round(s.ms / 1000))}s `}
+                      {`${verboFerramenta(s.nome)} ${rotuloFerramenta(s)} · ${Math.max(1, Math.round(s.ms / 1000))}s `}
                       <span className={s.ok ? "txt-ok" : "txt-erro"}>{s.ok ? "✓" : "✕"}</span>
                       {d && (d.resumo || (d.args && Object.keys(d.args as object).length)) ? " · detalhe" : ""}
                     </summary>
@@ -335,6 +384,9 @@ export function Chat({
      (antes descia a cada tique do cronômetro e não deixava ler a resposta nem digitar) */
   const area = useRef<HTMLDivElement>(null);
   const campoRef = useRef<HTMLTextAreaElement>(null);
+  /* v3.41 — imagens coladas (Ctrl+V) no campo: vão junto com a pergunta e o modelo VÊ a imagem.
+     Sem texto, a pergunta vira "Analise a imagem que colei." para o turno nunca ir vazio. */
+  const [anexos, setAnexos] = useState<AnexoImagem[]>([]);
   const colado = useRef(true);
   /* v3.39.4: marca que o PRÓXIMO evento de scroll foi disparado por nós (irParaOFim).
      Sem isso, o próprio scroll programático era lido como "o usuário saiu do fim" e
@@ -680,21 +732,33 @@ export function Chat({
       /* v3.3: a resposta agora VIVE no servidor (tarefa): fechar a aba não mata o trabalho.
          Servidor antigo (404 em /chat/tarefa): cai no caminho direto /chat/stream. */
       let idTarefa = "";
-      try {
-        idTarefa = String((await post<{ id: string }>("/chat/tarefa", pedido)).id);
-        /* v3.18 (T001): a conversa dona da tarefa registra o id — é assim que o "parar" sabe o que matar */
-        registrarTarefa(chaveConversa(escopoRef.current.tenant, String(pedido.memoria ?? "")), idTarefa);
-      } catch (e) {
-        if (e instanceof ApiErro && e.status === 404) {
-          await postStream("/chat/stream", pedido, (ev) => {
-            if (ev.tipo === "fim") dados = ev.dados as Record<string, unknown>;
-            else onEvent(ev as EventoTransporte);
-          });
-        } else {
-          throw e;
+      /* v3.41 — com imagem colada o turno vai DIRETO pelo /chat/stream: a tarefa guarda só
+         texto no banco, e a imagem não pode ser reidratada depois. O stream carrega as partes
+         de visão na própria requisição. */
+      const temImagem =
+        Array.isArray(pedido.imagens) && (pedido.imagens as unknown[]).length > 0;
+      if (temImagem) {
+        await postStream("/chat/stream", pedido, (ev) => {
+          if (ev.tipo === "fim") dados = ev.dados as Record<string, unknown>;
+          else onEvent(ev as EventoTransporte);
+        });
+      } else {
+        try {
+          idTarefa = String((await post<{ id: string }>("/chat/tarefa", pedido)).id);
+          /* v3.18 (T001): a conversa dona da tarefa registra o id — é assim que o "parar" sabe o que matar */
+          registrarTarefa(chaveConversa(escopoRef.current.tenant, String(pedido.memoria ?? "")), idTarefa);
+        } catch (e) {
+          if (e instanceof ApiErro && e.status === 404) {
+            await postStream("/chat/stream", pedido, (ev) => {
+              if (ev.tipo === "fim") dados = ev.dados as Record<string, unknown>;
+              else onEvent(ev as EventoTransporte);
+            });
+          } else {
+            throw e;
+          }
         }
+        if (idTarefa) dados = await bombearTarefa(idTarefa, onEvent, pedido.tenant);
       }
-      if (idTarefa) dados = await bombearTarefa(idTarefa, onEvent, pedido.tenant);
       const d = (dados ?? {}) as Record<string, unknown>;
       const aviso = textoCompacto(d.compactacao as Compactacao | undefined);
       if (aviso) d.compacto = aviso;
@@ -737,14 +801,42 @@ export function Chat({
 
   function enviar() {
     const texto = pergunta.trim();
-    if (!texto) return;
+    const imgs = anexos;
+    if (!texto && imgs.length === 0) return;
+    const pedido = texto || "Analise a imagem que colei.";
     setPergunta("");
+    setAnexos([]);
     rascunhos.current.delete(chave); // v3.18 (T014): rascunho daquela gaveta foi usado
     if (campoRef.current) {
       campoRef.current.style.height = "auto";
       campoRef.current.focus();
     }
-    enviarNaConversa(chave, texto, memoria, tenantParam, transportar);
+    enviarNaConversa(chave, pedido, memoria, tenantParam, transportar, imgs.length ? imgs : undefined);
+  }
+
+  /** v3.41 — Ctrl+V de imagem: lê os arquivos do clipboard e guarda como anexo (até 3). */
+  async function colarImagens(itens: DataTransferItem[]) {
+    const novos: AnexoImagem[] = [];
+    for (const it of itens.slice(0, 3)) {
+      const f = it.getAsFile();
+      if (!f) continue;
+      if (!/^image\/(png|jpeg|webp)$/.test(f.type)) {
+        toast("imagem: só png, jpeg ou webp", "erro");
+        continue;
+      }
+      if (f.size > 4 * 1024 * 1024) {
+        toast("imagem maior que 4MB", "erro");
+        continue;
+      }
+      const b64 = await new Promise<string>((ok, falha) => {
+        const fr = new FileReader();
+        fr.onload = () => ok(String(fr.result).replace(/^data:[^;]+;base64,/, ""));
+        fr.onerror = () => falha(fr.error);
+        fr.readAsDataURL(f);
+      });
+      novos.push({ mime: f.type, base64: b64, nome: f.name || "colada.png" });
+    }
+    if (novos.length) setAnexos((a) => [...a, ...novos].slice(0, 3));
   }
 
   /* ---------------- v3.18: parar, regenerar, editar, repetir, exportar, voz, hora ---------------- */
@@ -1297,6 +1389,24 @@ export function Chat({
                 if (e.target === e.currentTarget) campoRef.current?.focus();
               }}
             >
+              {anexos.length > 0 && (
+                <div className="chat-anexos" data-testid="chatAnexos">
+                  {anexos.map((a, i) => (
+                    <div className="chat-anexo" key={i} title={a.nome || "imagem colada"}>
+                      <img src={`data:${a.mime};base64,${a.base64}`} alt={a.nome || "imagem colada"} />
+                      <button
+                        className="chat-anexo-x"
+                        title="remover imagem"
+                        aria-label="remover imagem"
+                        onClick={(e) => {
+                          e.stopPropagation();
+                          setAnexos((atual) => atual.filter((_, k) => k !== i));
+                        }}
+                      >×</button>
+                    </div>
+                  ))}
+                </div>
+              )}
               <textarea
                 id="chatPergunta"
                 ref={campoRef}
@@ -1309,6 +1419,13 @@ export function Chat({
               onChange={(e) => {
                 setPergunta(e.target.value);
                 ajustarAltura(e.currentTarget);
+              }}
+              onPaste={(e) => {
+                /* v3.41 — print colado do clipboard entra como anexo, não como texto sujo */
+                const itens = Array.from(e.clipboardData?.items ?? []).filter((it) => it.type.startsWith("image/"));
+                if (!itens.length) return;
+                e.preventDefault();
+                void colarImagens(itens);
               }}
               onKeyDown={(e) => {
                 /* v3.18 (T005): Enter QUE ACEITA AUTOCORREÇÃO do teclado não envia — no celular

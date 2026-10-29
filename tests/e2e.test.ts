@@ -387,6 +387,7 @@ test("minirag v2 — suíte completa", async (t) => {
     r = await rpc(4, "tools/list");
     const nomes = (r.json?.result?.tools ?? []).map((x: any) => x.name).sort();
     const ESPERADAS = [
+      "analisar_imagem",
       "apagar_usuario",
       "archive_doc",
       "chat",
@@ -427,7 +428,7 @@ test("minirag v2 — suíte completa", async (t) => {
     /* v3.36 — a lista passou a dizer a verdade da CONTA: as 5 de operador saem para o comum */
     const SO_OPERADOR_336 = ["listar_usuarios", "criar_usuario", "apagar_usuario", "esquecimento", "gerir_mcp"];
     const ESPERADAS_COMUM = ESPERADAS.filter((n) => !SO_OPERADOR_336.includes(n)).sort();
-    f.check("tools/list da conta comum traz as 45 (as 5 de operador ficam fora)", JSON.stringify(nomes) === JSON.stringify(ESPERADAS_COMUM), `${nomes.length}: ${nomes.filter((n: string) => !ESPERADAS_COMUM.includes(n)).join(", ")}`);
+    f.check("tools/list da conta comum traz as 46 (as 5 de operador ficam fora)", JSON.stringify(nomes) === JSON.stringify(ESPERADAS_COMUM), `${nomes.length}: ${nomes.filter((n: string) => !ESPERADAS_COMUM.includes(n)).join(", ")}`);
 
     r = await rpc(5, "tools/call", { name: "health" }, null);
     f.check("tools/call sem Bearer -> 401", r.status === 401 && "error" in (r.json ?? {}), r.texto.slice(0, 150));
@@ -623,12 +624,12 @@ test("minirag v2 — suíte completa", async (t) => {
     r = await call("PATCH", "/config/mcp/usuarios", { key: OPKEY, corpo: { ativo: false } });
     f.check("operador desliga o MCP das contas", r.status === 200 && r.json?.usuarios_habilitado === false, r.texto.slice(0, 160));
     f.check("com o MCP desligado a conta comum não vê ferramenta nenhuma", (await lista(TESTKEY)).length === 0, (await lista(TESTKEY)).length);
-    f.check("o operador continua entrando (para poder reverter)", (await lista(OPKEY)).length === 50, (await lista(OPKEY)).length);
+    f.check("o operador continua entrando (para poder reverter)", (await lista(OPKEY)).length === 51, (await lista(OPKEY)).length);
     r = await call("POST", "/mcp", { key: TESTKEY, corpo: { jsonrpc: "2.0", id: 8, method: "tools/call", params: { name: "health", arguments: {} } } });
     f.check("chamada da conta comum com MCP desligado: 403 com o motivo", r.status === 403 && /desligado/.test(r.texto), r.texto.slice(0, 160));
 
     r = await call("PATCH", "/config/mcp/usuarios", { key: OPKEY, corpo: { ativo: true } });
-    f.check("religado, a conta comum volta a ver as 45", r.status === 200 && (await lista(TESTKEY)).length === 45, (await lista(TESTKEY)).length);
+    f.check("religado, a conta comum volta a ver as 46", r.status === 200 && (await lista(TESTKEY)).length === 46, (await lista(TESTKEY)).length);
     r = await call("GET", "/config/mcp", { key: OPKEY });
     f.check("a config do admin mostra o interruptor", r.json?.usuarios_habilitado === true, JSON.stringify(r.json).slice(0, 120));
 

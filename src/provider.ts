@@ -520,6 +520,35 @@ async function lerPedaco<T>(
 }
 
 /** Chama o provider (OpenAI-compatível) sem streaming; devolve a mensagem crua para ver tool_calls. */
+/** v3.41 — a última mensagem do usuário vira partes [texto, imagens...]; as demais seguem
+ *  string. Só o payload ENVIADO muda: o que fica gravado, compactado e contado em tokens
+ *  continua texto, então memória/compactação não precisam saber que existe imagem. */
+function comVisao(
+  mensagens: Mensagem[],
+  visao?: { mime: string; base64: string }[],
+): unknown[] {
+  if (!visao?.length) return mensagens;
+  let ultimo = -1;
+  for (let k = mensagens.length - 1; k >= 0; k--) {
+    if (mensagens[k].role === "user") { ultimo = k; break; }
+  }
+  if (ultimo < 0) return mensagens;
+  return mensagens.map((m, k) =>
+    k === ultimo
+      ? {
+          ...m,
+          content: [
+            { type: "text", text: m.content },
+            ...visao.map((v) => ({
+              type: "image_url",
+              image_url: { url: `data:${v.mime};base64,${v.base64}` },
+            })),
+          ],
+        }
+      : m,
+  );
+}
+
 export async function chamarModelo(
   cfg: { base_url: string; modelo: string; chave: string; temperatura: number; tipo: TipoProvider; silencio_s?: number },
   mensagens: Mensagem[],
@@ -537,6 +566,10 @@ export async function chamarModelo(
     /** v3.18 (T001): sinal externo ("parar" do usuário). Abortado: o erro lançado é
        exatamente "cancelado-pelo-usuario" — quem chama preserva o parcial e não grava falha. */
     sinal?: AbortSignal;
+    /** v3.41: imagens anexadas no chat (data URL no formato OpenAI). Só a ÚLTIMA mensagem
+       do usuário recebe o array de partes; o histórico continua texto puro, para a
+       compactação e a memória não terem de entender imagem. */
+    visao?: { mime: string; base64: string }[];
   } = {},
 ): Promise<{
   message: { role: "assistant"; content: string; tool_calls?: ChamadaTool[] };
@@ -559,7 +592,7 @@ export async function chamarModelo(
   if (cfg.chave) headers.authorization = "B" + "earer " + cfg.chave;
   const corpo: Record<string, unknown> = {
     model: cfg.modelo,
-    messages: mensagens,
+    messages: comVisao(mensagens, opts.visao),
     temperature: cfg.temperatura,
     stream: Boolean(opts.stream && opts.onDelta),
   };
@@ -800,14 +833,45 @@ async function mensagensDoHistorico(tenant: string, memoria: string, turnos: num
     .map((m: any) => ({ role: m.papel === "user" ? "user" : "assistant", content: String(m.texto ?? "") })) as MsgChat[];
 }
 
+const MIMES_VISAO = new Set(["image/png", "image/jpeg", "image/webp"]);
+const MAX_IMG_BYTES = 4 * 1024 * 1024;
+const MAX_IMGS_TURNO = 3;
+
+/** v3.41 — valida o que a tela colou: 3 imagens, 4MB cada, só o que o provider lê.
+ *  Aceita com ou sem o prefixo `data:image/...;base64,` (o front manda cru). */
+function validarImagens(entrada: unknown): { mime: string; base64: string }[] {
+  if (!Array.isArray(entrada) || entrada.length === 0) return [];
+  if (entrada.length > MAX_IMGS_TURNO)
+    throw erro422(`no máximo ${MAX_IMGS_TURNO} imagens por mensagem (vieram ${entrada.length})`);
+  return entrada.map((x, i) => {
+    const o = (x ?? {}) as Record<string, unknown>;
+    const mime = String(o.mime ?? "").toLowerCase().trim();
+    const b64 = String(o.base64 ?? "").replace(/^data:[^;]+;base64,/, "").replace(/\s+/g, "");
+    if (!MIMES_VISAO.has(mime))
+      throw erro422(`imagem ${i + 1}: formato ${mime || "?"} não aceito (png, jpeg ou webp)`);
+    if (!b64 || !/^[A-Za-z0-9+/=]+$/.test(b64))
+      throw erro422(`imagem ${i + 1}: base64 inválido`);
+    const bytes = Math.floor((b64.length * 3) / 4);
+    if (bytes > MAX_IMG_BYTES)
+      throw erro422(`imagem ${i + 1}: ${(bytes / 1024 / 1024).toFixed(1)}MB passa do teto de 4MB`);
+    return { mime, base64: b64 };
+  });
+}
+
 export async function responderChat(
   user: Usuario,
-  body: { pergunta: string; memoria?: string; tenant?: string | null; provedor?: string; modelo?: string },
+  body: {
+    pergunta: string; memoria?: string; tenant?: string | null; provedor?: string; modelo?: string;
+    /** v3.41: imagens coladas/coladas no chat (base64 puro, sem o prefixo data:) */
+    imagens?: { mime: string; base64: string }[];
+  },
   emitir?: (e: EventoChat) => void,
   /** v3.18 (T001): sinal de cancelamento da tarefa (botão "parar") */
   opts: { sinal?: AbortSignal } = {},
 ) {
   const pergunta = body.pergunta.trim();
+  /* v3.41 — imagem colada no chat: vai como parte do turno, não como documento. */
+  const imagens = validarImagens(body.imagens);
   const tenant = tenantFor(user, body.tenant ?? null);
   const memoria = (body.memoria ?? "").trim();
   /* v3.19: o usuário pode escolher o provedor (e o modelo) na hora da conversa */
@@ -1000,6 +1064,9 @@ export async function responderChat(
       },
       /* v3.18 (T001): o sinal da tarefa chega até aqui — "parar" aborta a chamada em curso */
       sinal: opts.sinal,
+      /* v3.41: a imagem colada acompanha a pergunta nas rodadas do turno — o modelo
+         precisa poder olhar de novo depois de chamar uma ferramenta. */
+      visao: imagens,
     });
     const pedidas = r.message.tool_calls ?? [];
     if (!emitir && r.pensamento) {

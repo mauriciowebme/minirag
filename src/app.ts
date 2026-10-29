@@ -913,6 +913,8 @@ export function criarApp(): FastifyInstance {
       /* v3.19: escolha na hora da conversa ("" = padrão da casa) */
       provedor: vString(b.provedor, "provedor", { max: 40, def: "" }),
       modelo: vString(b.modelo, "modelo", { max: 100, def: "" }),
+      /* v3.41: imagem colada no chat (validação e teto ficam em responderChat) */
+      imagens: (b.imagens as { mime: string; base64: string }[] | undefined) ?? [],
     });
     void contarUso("chats");
     return r;
@@ -1095,7 +1097,11 @@ export function criarApp(): FastifyInstance {
       }
     }, 10_000);
     try {
-      const dados = await responderChat(u, { pergunta, memoria, tenant, provedor, modelo }, enviar);
+      const dados = await responderChat(
+        u,
+        { pergunta, memoria, tenant, provedor, modelo, imagens: b.imagens as { mime: string; base64: string }[] | undefined },
+        enviar,
+      );
       enviar({ tipo: "fim", dados });
       void contarUso("chats");
     } catch (e) {

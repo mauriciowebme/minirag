@@ -22,6 +22,12 @@ parecidos com a pergunta, com uma nota de 0 a 1.
 
 ---
 ---
+## v3.41.0 (29/10) — imagem no chat (colar e o modelo ver), ferramenta `analisar_imagem` e rastro sem nome cru
+- **O que você vê:** cola um print no campo do chat (Ctrl+V) e ele aparece como miniatura; a pergunta vai com a imagem e o modelo **olha** — descreve, compara, lê o que está na tela. Até 3 imagens por mensagem, 4 MB cada. E o rastro deixou de mostrar `Consultando rodar_comando`: agora lê "Rodando o comando na máquina", "Lendo o arquivo na máquina", "Escrevendo o arquivo na máquina".
+- **Por que:** o chat não tinha entrada de imagem nenhuma — o modelo só recebia texto; e o mapa de rótulos do rastro cobria as ferramentas do RAG mas nenhuma das 22 de máquina, então o nome técnico em snake_case vazava para a tela. O verbo era sempre "Consultando", mentindo em escrever/rodar/apagar.
+- **Como funciona:** o front lê o clipboard (`onPaste`), guarda `{mime, base64}` e envia o turno pelo `/chat/stream` (a imagem não passa pelo banco da tarefa). No servidor, `validarImagens` aplica teto e formatos (png/jpeg/webp) e `comVisao` transforma **só a última mensagem do usuário** em partes `[texto, image_url...]` no payload do provider — o histórico, a memória e a compactação continuam texto puro. A ferramenta `analisar_imagem` (url ou base64) roda o OCR local e devolve o texto, para print/foto onde o que importa é o texto.
+- **Como é provado:** provedor falso registrando o corpo recebido — a mensagem do usuário chega como array com `image_url` e o texto; `analisar_imagem` devolve o texto reconhecido de uma imagem de teste; e o CSS/bundle servidos trazem `chat-anexos`.
+
 ## v3.40.0 (29/10) — `editar_no_local` sem teto de 4000 e botões de mensagem sempre visíveis
 - **O que você vê:** o agente edita arquivos grandes no PC sem trocar de ferramenta no meio do caminho; e os botões de copiar/regenerar/editar ficam sempre à vista em cada mensagem, sem precisar passar o mouse.
 - **Por que:** a busca e a substituição viajavam **dentro do comando** remoto. O transporte aplica teto de 4000 chars quando a origem não é "envelope", e `chat:editar_no_local` não era — o modelo via o 422 e improvisava com `rodar_comando`. Os botões, desde a v3.22, ficavam com `opacity: 0` e só apareciam no hover: quem não passava o mouse nunca descobria.
