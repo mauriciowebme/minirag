@@ -833,11 +833,26 @@ const TABELA: Record<string, Fn> = {
 };
 
 /** plataforma: ao vivo (hub) > gravada (DB) > windows (nunca chutar sh num PC) */
+/**
+ * v3.37 (T042) — o cliente anuncia `process.platform + " " + os.release()` = "win32 10.0.26200",
+ * e todas as 20 ferramentas decidem o ramo com `ctx.so === "windows"`. Sem normalizar, TODO PC
+ * caía no ramo Unix: `ifconfig` no Windows, `janelas` devolvia 422 e `listar_arquivos` voltava
+ * vazio com ok:true. Normaliza em UM lugar; o valor cru de `maquinas.so` continua para exibição.
+ */
+export function plataforma(so: string): string {
+  const s = String(so ?? "").trim().toLowerCase();
+  if (!s) return "windows";
+  if (s.startsWith("win")) return "windows";
+  if (s.startsWith("linux")) return "linux";
+  if (s.startsWith("darwin") || s.startsWith("mac") || s.includes("mac os")) return "macos";
+  return s.split(" ")[0];
+}
+
 async function soDaMaquina(alvo: string, host: string): Promise<string> {
   const vivo = soConectado(alvo, host);
-  if (vivo) return vivo;
+  if (vivo) return plataforma(vivo);
   const r = await q<{ so: string }>(`SELECT so FROM maquinas WHERE tenant = $1 AND host = $2`, [alvo, host]);
-  return r.rows[0]?.so || "windows";
+  return plataforma(r.rows[0]?.so || "windows");
 }
 
 export async function toolMaquina(

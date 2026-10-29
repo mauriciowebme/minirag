@@ -22,6 +22,12 @@ parecidos com a pergunta, com uma nota de 0 a 1.
 
 ---
 ---
+## v3.37.0 (28/10) — As ferramentas de máquina voltam a funcionar em PC Windows
+- **O que você vê:** listar pasta, processos, janelas, rede e estado das máquinas Windows passa a responder de verdade. Antes, tudo isso ficava mudo ou voltava vazio — e a lista vazia vinha com "ok", como se a pasta não tivesse nada.
+- **Por que:** o programa que roda no PC anuncia o sistema como **win32 10.0.26200**, mas o servidor só reconhecia a palavra **windows**. Nenhuma das 20 ferramentas de máquina achava que era Windows, então mandava comando de Linux para o PC (`ifconfig`), recusava janelas e devolvia listagem vazia.
+- **Como funciona:** um único ponto passou a traduzir o nome do sistema (`win32 …` vira Windows, `linux …` vira Linux, `darwin …` vira Mac) antes de escolher o caminho de comando. O nome cru continua guardado para exibição.
+- **Como é provado:** bloco novo `v3.37` com 4 checagens num PC falso que anuncia `win32 10.0.19045` — a máquina aparece online, o lote de comandos sai embrulhado em PowerShell (o caminho de Windows) e a ferramenta de janelas deixa de responder "só em Windows"; uma máquina Linux na mesma rodada continua no caminho de Linux. Suíte completa roda em seguida.
+
 ## v3.36.0 (28/10) — Cada conta decide o que ela oferece como servidor MCP
 - **O que você vê:** item novo no menu, **MCP** (🔌), disponível para todo usuário. A página mostra o endereço do serviço, o cabeçalho de autorização, **a lista do que aquela conta pode usar** — com um interruptor por ferramenta — e o bloco pronto para colar no agente (JSON do `mcpServers`).
 - **Por que:** pedido do dono (28/10) — "se o usuário quiser usar como servidor MCP ele pode, e as ferramentas que o admin colocou como permitidas é o que ele vai conseguir usar", e isso não podia ficar escondido no chat.

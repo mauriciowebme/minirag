@@ -635,6 +635,82 @@ test("minirag v2 — suíte completa", async (t) => {
     f.fechar("v3.36 MCP por conta");
   });
 
+  /* v3.37 (T042) — o cliente anuncia `process.platform + " " + os.release()` = "win32 10.0.26200".
+     Antes desta correção, `ctx.so === "windows"` nunca era verdade em PC: `ifconfig` rodava no
+     Windows, `janelas` dava 422 e `listar_arquivos` voltava vazio COM ok:true (falha calada). */
+  await bloco(t, "v3.37: ferramenta de máquina reconhece o SO do Windows (win32 …)", async () => {
+    const f = fiscal();
+    const CONTAINER = process.env.CONTAINER ?? "";
+    const psql = (sql: string) =>
+      execFileSync("docker", ["exec", process.env.DBCONTAINER ?? CONTAINER.replace("-api-", "-db-"), "sh", "-c",
+        `psql -U \"$POSTGRES_USER\" -d \"$POSTGRES_DB\" -tAc \"${sql}\"`], { encoding: "utf8" }).trim();
+    const leArq = (p: string) => {
+      try { return execFileSync("docker", ["exec", CONTAINER, "cat", p], { encoding: "utf8" }); } catch { return ""; }
+    };
+    /* máquina falsa que fala o wire do túnel e ANUNCIA o SO que o teste mandar */
+    const FAKE = [
+      'const WebSocket=require("/app/node_modules/ws");const fs=require("fs");',
+      'const token=process.env.FQ2_TOKEN||"",host=process.env.FQ2_HOST||"maq",so=process.env.FQ2_SO||"fake";',
+      'const ws=new WebSocket(process.env.FQ2_URL||"ws://127.0.0.1:8000/maquina/ws");',
+      'ws.on("open",()=>ws.send(JSON.stringify({token,host,os:so,user:"suite"})));',
+      'ws.on("message",(b)=>{let m={};try{m=JSON.parse(String(b))}catch{return}',
+      'if(typeof m.cmd==="string")ws.send(JSON.stringify({exit:0,stdout:"ECO:"+m.cmd,stderr:""}))});',
+      'ws.on("error",()=>{});',
+    ].join("");
+    execFileSync("docker", ["exec", "-i", CONTAINER, "sh", "-c", "cat > /app/maqso.js"], { input: FAKE });
+
+    const subir = async (nome: string, so: string) => {
+      let r = await call("POST", "/maquinas", { key: TESTKEY, corpo: { nome } });
+      const par = String(r.json?.token ?? "");
+      execFileSync("docker", ["exec", "-d", CONTAINER, "sh", "-c",
+        `FQ2_TOKEN='${par}' FQ2_HOST='${nome}' FQ2_SO='${so}' node /app/maqso.js`]);
+      for (let i = 0; i < 40; i++) {
+        if (psql(`SELECT so FROM maquinas WHERE host='${nome}'`).startsWith("win")) break;
+        await dormir(300);
+      }
+      r = await call("GET", "/maquinas", { key: TESTKEY });
+      return (r.json?.maquinas ?? []).find((m: any) => m.host === nome);
+    };
+
+    const win = await subir("so-win", "win32 10.0.19045");
+    f.check("v3.37 máquina Windows online e com o SO CRU guardado (win32 …)",
+      win?.online === true && String(win?.so).startsWith("win32"), JSON.stringify(win ?? {}).slice(0, 160));
+
+    /* o pedido que o servidor MANDA para a máquina é a prova do ramo escolhido */
+    /* rodar_lote é a ferramenta que EMBRULHA o comando por plataforma (PowerShell no Windows,
+       bash no Linux) — o `run` cru manda o texto igual nos dois e não prova ramo nenhum. */
+    let r = await call("POST", "/mcp", { key: TESTKEY, corpo: { jsonrpc: "2.0", id: 89, method: "tools/call",
+      params: { name: "rodar_lote", arguments: { host: "so-win", comandos: ["echo ramo"] } } } });
+    /* a máquina falsa devolve o comando que RECEBEU: provar o ramo pelo texto enviado, não pelo
+       exit (os dois ramos rodam — o errado é o Unix mandando ifconfig/sh para um PC) */
+    const enviado = JSON.stringify(r.json ?? {});
+    f.check("v3.37 com win32 o rodar_lote embrulha o comando em PowerShell (ramo Windows)",
+      r.status === 200 && /powershell/i.test(enviado), enviado.slice(0, 300));
+
+    r = await call("POST", "/mcp", { key: TESTKEY, corpo: { jsonrpc: "2.0", id: 90, method: "tools/call",
+      params: { name: "janelas", arguments: { host: "so-win", acao: "listar" } } } });
+    const erroJanelas = String(r.json?.error?.message ?? r.json?.result?.content?.[0]?.text ?? "");
+    f.check("v3.37 janelas NÃO diz mais 'so em Windows' para uma máquina win32",
+      !/so em Windows/i.test(erroJanelas), erroJanelas.slice(0, 200));
+
+    const lin = await subir("so-lin", "linux 6.8.0");
+    f.check("v3.37 máquina Linux continua linux",
+      lin?.online === true && String(lin?.so).startsWith("linux"), JSON.stringify(lin ?? {}).slice(0, 160));
+
+    /* pkill -f casa com a própria linha do shell (sh -c ... maqso.js) e derruba quem executa:
+       o truque do colchete já está no padrão, mas o rm sai em comando separado por segurança */
+    try {
+      execFileSync("docker", ["exec", CONTAINER, "sh", "-c", "pkill -f '[m]aqso.js'; true"], { stdio: "ignore" });
+    } catch {}
+    execFileSync("docker", ["exec", CONTAINER, "sh", "-c", "rm -f /app/maqso.js; echo ok"]);
+    for (const h of ["so-win", "so-lin"]) {
+      const g = await call("GET", "/maquinas", { key: TESTKEY });
+      const id = (g.json?.maquinas ?? []).find((m: any) => m.host === h)?.id;
+      if (id) await call("DELETE", `/maquinas/chave/${id}`, { key: TESTKEY });
+    }
+    f.fechar("v3.37 SO do Windows");
+  });
+
   await bloco(t, "v1.10: renomear/mover, arquivar, zip, gaveta, jobs", async () => {
     const f = fiscal();
     const TEXTO = "Relatório de campo sobre marés e ventos do litoral norte. ".repeat(4);

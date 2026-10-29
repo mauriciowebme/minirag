@@ -1,6 +1,6 @@
 # Próximos passos — minirag
 
-> **Última atualização:** 2026-10-27 · **Versão/Dono:** minirag 3.25.0 · Mauricio
+> **Última atualização:** 2026-10-28 · **Versão/Dono:** minirag 3.37.0 · Mauricio
 **Fonte**: varredura do chat contra a linha de base de harnesses maduros (Open WebUI, Hermes), medida no código em 25/10/2026 — tudo o que está aqui foi confirmado por leitura/grep, nada é opinião de memória. Análise é o Mauricio quem conduz; execução de qualquer T### exige OK explícito dele.
 
 **Decisão de escopo (25/10, Mauricio)**: não adotar harness pronto — o chat do minirag é a face do produto por tenant (gaveta, ferramentas, máquinas) e o duro já existe (streaming reanexável, fila, tarefa persistente, markdown, rastro). O caminho é roubar dos maduros o básico que falta. **Fora de linha de base, NÃO viram tarefa**: branch de conversa, 👍/👎, compartilhar por URL, slash commands, parâmetros por chat, TTS de leitura.
@@ -52,6 +52,7 @@
 | T039 | Busca na web (`web_search`) e leitura de página (`web_open`) | ferramentas | 🟡 Média | ✅ v3.32.0 | [#t039](#t039) |
 | T040 | Renderizar JavaScript no `web_open` (chromium/CDP, sem npm) | ferramentas | 🟡 Média | ✅ v3.33.0 | [#t040](#t040) |
 | T041 | Rastro cronológico, narração obrigatória e instruções editáveis | chat-srv + chat-ui | 🟠 Alta | ✅ v3.34.0 | [#t041](#t041) |
+| T042 | Ferramentas de máquina erram o SO do Windows (`win32 …` × `windows`) | maquinas-tools + cliente | 🔴 Crítica | ✅ v3.37.0 | [#t042](#t042) |
 
 ---
 
@@ -603,6 +604,17 @@
 | **Escopo** | `src/provider.ts` (tipo `SegmentoRastro` com `em`, evento `ferramenta_inicio`, seed das instruções), `src/provedores.ts` (editar sem reenviar o prompt não zera mais), `src/regras.ts` (novo: texto padrão), `frontend/src/lib/conversa.ts` (linha viva + ordenação por `em` + `ms` do turno), `frontend/src/components/Chat.tsx` (trilha ordenada, linha viva, "Preparando…", tempo do turno), `frontend/src/index.css` (40px no celular), `frontend/src/components/Config.tsx` (contagem + restaurar padrão), `frontend/src/types.ts`. |
 | **Dependências** | T184 do IA_GO (fonte do bloco de instrução final). |
 | **Riscos** | **Idioma**: a regra de raciocínio em português é instrução de prompt, não garantia — modelo pequeno pode escorregar; a medição é o rastro. **Narração**: regra obrigatória reduz, mas o modelo pode narrar em toda rodada (ruído) ou esquecer; se virar ruído, encurtar o exemplo. **Prompt editável**: quem apagar o campo perde narração e idioma — o botão de restaurar existe para isso. |
+
+<a id="t042"></a>
+### T042 — Ferramentas de máquina erram o SO do Windows (`win32 …` × `windows`)
+| Campo | Conteúdo |
+|---|---|
+| **Módulo** | maquinas-tools + cliente |
+| **Prioridade** | 🔴 Crítica — nenhuma das 20 ferramentas de máquina funciona num PC Windows |
+| **Status** | ✅ v3.37.0 — `plataforma()` normaliza o SO num ponto só; bloco `v3.37` prova com PC falso anunciando `win32 10.0.19045` |
+| **Descrição** | O cliente anuncia o sistema como `process.platform + " " + os.release()` (`agente/cliente.js:561`), ou seja **`win32 10.0.26200`**. O servidor decide o ramo comparando `ctx.so === "windows"` em ~20 pontos (`src/maquinas_tools.ts`), e `soDaMaquina()` devolve a string viva **sem normalizar** — logo a comparação nunca é verdadeira e toda ferramenta de máquina em Windows cai no ramo Unix. Medido pelos dois lados: `janelas` → 422 "janelas so em Windows (host JPPCINFODEV01 e win32 10.0.26200)"; `rede info` → "'ifconfig' não é reconhecido"; `estado_maquina` e `processos` → 502 "exit=255: O sistema não pode encontrar o caminho especificado"; `listar_arquivos` em `C:\`, `C:/`, `C:/Users` e `C:\Windows` → `{"ok":true,"total":0,"itens":[]}` (sempre vazio, sem erro). As máquinas estavam online (`maquinas_online`: DESKTOP-0NTAOUP e JPPCINFODEV01), então não é conexão: é o ramo de plataforma. |
+| **Escopo** | Normalizar num lugar só: `plataforma(so)` em `src/maquinas_tools.ts` (ou em `maquinas.ts`) mapeando `/^win/` → `windows`, `/^linux/` → `linux`, `/^darwin/` → `macos`, aplicada onde o `ctx.so` é montado (~linha 855) — o valor cru de `maquinas.so` continua como está para exibição. Teste: bloco com hub falso anunciando `win32 10.0.19045` provando que `janelas`, `rede info` e `processos` pegam o ramo PowerShell (e que `linux` continua pegando o ramo shell). |
+| **Riscos** | Baixo para o código; **médio para o parque**: clientes antigos podem anunciar outras formas (`Windows`, `win32`), então o normalizador tem de ser tolerante (prefixo, caixa). Enquanto não subir, qualquer automação que dependa de ferramenta de máquina em Windows falha calada (`listar_arquivos` devolve vazio **com ok:true**). |
 
 ## Lotes recomendados (executados — saíram na v3.18)
 
