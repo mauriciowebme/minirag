@@ -180,7 +180,12 @@ function rodar(cmd, esperaSeg, bg) {
     return new Promise((resolve) => {
       try {
         const b = EH_WIN
-          ? spawn("cmd.exe", ["/d", "/s", "/c", `"${cmd}"`], { detached: true, stdio: "ignore", windowsHide: true })
+          ? spawn("cmd.exe", ["/d", "/c", cmd], {
+              detached: true,
+              stdio: "ignore",
+              windowsHide: true,
+              windowsVerbatimArguments: true,
+            })
           : spawn("/bin/sh", ["-c", cmd], { detached: true, stdio: "ignore" });
         b.unref();
         resolve({
@@ -194,10 +199,11 @@ function rodar(cmd, esperaSeg, bg) {
     });
   }
   return new Promise((resolve) => {
-    /* /s + aspas externas preservam o quoting interno: sem isso o Node refazia a
-       linha e `type "C:\Pasta com espaco\x.bat"` chegava sem as aspas. */
+    /* Windows: `windowsVerbatimArguments` impede o Node de reescrever a linha.
+       Sem ele o argumento com espaço era embrulhado em aspas e as aspas internas
+       viravam \" — o cmd tratava `"echo oi"` como nome de programa (v3.39.1). */
     const filho = EH_WIN
-      ? spawn("cmd.exe", ["/d", "/s", "/c", `"${cmd}"`], { windowsHide: true })
+      ? spawn("cmd.exe", ["/d", "/c", cmd], { windowsHide: true, windowsVerbatimArguments: true })
       : spawn("/bin/sh", ["-c", cmd], { detached: true }); // detached = grupo próprio; matamos o grupo
     let stdout = "";
     let stderr = "";
