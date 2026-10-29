@@ -8,6 +8,7 @@ import {
   apagarMaquina,
   controleDeMaquinaAtivo,
   criarPareamento,
+  criarRecebimento, consumirRecebimento,
   gerarClienteBinario, emitirBilheteCliente, resgatarBilheteCliente,
   revogarChaveCliente,
   gravarControleDeMaquina,
@@ -17,6 +18,7 @@ import {
   rodar,
 } from "./maquinas";
 import { consumirUpload } from "./maquinas_tools";
+import { gravarAnexo, lerAnexo } from "./anexos";
 import { HttpError, iso } from "./errors";
 import { authenticate, ipCliente } from "./auth";
 import { embedderDim, embedderDisponivel } from "./embed";
@@ -153,6 +155,14 @@ export function criarApp(): FastifyInstance {
     bodyLimit: Math.max(4 * 1024 * 1024, CONFIG.maxContentChars * 3),
     trustProxy: true,
   });
+
+  /* v3.44: corpo BINÁRIO de verdade (a máquina manda o arquivo/print por POST).
+     Sem este parser o Fastify recusa o content-type com 415. */
+  app.addContentTypeParser(
+    "application/octet-stream",
+    { parseAs: "buffer", bodyLimit: 40 * 1024 * 1024 },
+    (_req, body, done) => done(null, body),
+  );
 
   app.setErrorHandler((err, req, reply) => {
     if (err instanceof HttpError) {
@@ -668,6 +678,30 @@ export function criarApp(): FastifyInstance {
       .send(dados);
   });
 
+  /* canal de VOLTA: a máquina manda o arquivo (print, imagem, log) por POST.
+     A chave é one-time e presa ao host; o anexo nasce com o tenant da máquina. */
+  app.post("/maquina/r", async (req, reply) => {
+    const s = req.query as Record<string, string>;
+    const ticket = consumirRecebimento(String(s.k ?? ""), String(s.host ?? ""));
+    if (!ticket) throw new HttpError(404, "chave expirada, ja usada, ou maquina errada");
+    const dados = req.body as unknown;
+    if (!Buffer.isBuffer(dados) || dados.length === 0) throw new HttpError(422, "corpo vazio — nada foi guardado");
+    const meta = await gravarAnexo(dados, { tenant: ticket.tenant, host: ticket.host, nome: ticket.nome, mime: ticket.mime });
+    return reply.status(201).send(meta);
+  });
+
+  /* o chat busca o anexo com a chave no header (o <img> puro não manda header) */
+  app.get("/anexos/:id", async (req, reply) => {
+    const u = usuario(req);
+    const p = req.params as Record<string, string>;
+    const a = await lerAnexo(p.id, u);
+    return reply
+      .header("content-type", a.mime)
+      .header("content-length", String(a.dados.length))
+      .header("content-disposition", `inline; filename*=UTF-8''${encodeURIComponent(a.nome)}`)
+      .send(a.dados);
+  });
+
   /* ------------------------------------------------------------- painel */
 
   /** Números do acervo em uma chamada (o Painel não faz 6 requisições). */
@@ -1038,7 +1072,7 @@ export function criarApp(): FastifyInstance {
     /* 3. corrida: tarefa terminou/falhou enquanto a conexão se montava */
     if (t.status === "terminou") {
       enviar({ tipo: "parcial", texto: t.parcial });
-      enviar({ tipo: "fim", dados: { resposta: t.parcial, ferramentas: t.ferramentas, aviso: t.aviso, telas: t.telas ?? [] } });
+      enviar({ tipo: "fim", dados: { resposta: t.parcial, ferramentas: t.ferramentas, aviso: t.aviso, telas: t.telas ?? [], anexos: t.anexos ?? [] } });
       fechar();
       return;
     }

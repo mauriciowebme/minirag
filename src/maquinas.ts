@@ -622,3 +622,29 @@ export function httpBaseDaMaquina(alvo: string, host: string): string | null {
 export function alvoMaquina(u: Usuario, arg?: string | null): string {
   return u.operador ? String(arg ?? "").trim() || u.tenant : u.tenant;
 }
+
+/* ------------------------------- canal de VOLTA (máquina -> servidor) -------
+   O upload de ida (`criarUpload` + `GET /maquina/u`) leva arquivo do servidor
+   para a máquina. Este é o sentido contrário: a máquina faz POST do arquivo e
+   o servidor guarda como ANEXO (print, imagem, log) — sem base64 no WebSocket
+   e sem o teto de resposta. Chave one-time, presa à máquina, TTL de 5 min. */
+
+export type Recebimento = { tenant: string; host: string; nome: string; mime: string; expira: number };
+const recebimentos = new Map<string, Recebimento>();
+
+export function criarRecebimento(tenant: string, host: string, nome: string, mime: string): string {
+  const chave = randomBytes(16).toString("hex");
+  recebimentos.set(chave, { tenant, host, nome, mime, expira: Date.now() + 5 * 60_000 });
+  if (recebimentos.size > 64) {
+    const agora = Date.now();
+    for (const [k, r] of recebimentos) if (r.expira < agora || recebimentos.size > 64) recebimentos.delete(k);
+  }
+  return chave;
+}
+
+export function consumirRecebimento(chave: string, host: string): Recebimento | null {
+  const r = recebimentos.get(chave);
+  if (!r || r.expira < Date.now() || r.host !== host) return null;
+  recebimentos.delete(chave);
+  return r;
+}

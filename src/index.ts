@@ -7,6 +7,7 @@ import { embedderDim, esperarEmbedder, marcarEmbedder } from "./embed";
 import { detectarOcr } from "./ocr";
 import { pararWorker, workerLoop } from "./ingest";
 import { iniciarDecayLoop, pararDecayLoop } from "./decay";
+import { iniciarAnexos } from "./anexos";
 import { criarApp } from "./app";
 import { initUsuarios } from "./usuarios";
 import { criarTabelaEsquecimento, lerEsquecimento } from "./esquecimento";
@@ -83,6 +84,7 @@ async function main(): Promise<void> {
   await initFerramentas(); // v2.8: servidores MCP que dão ferramentas ao chat
   await initMetricas();
   await initMaquinas(); // v3.6: máquinas por usuário (túnel absorvido)
+  await iniciarAnexos(); // v3.44: arquivos que a máquina manda para o chat
   await initMcpAcesso(); // v3.36: quem usa o minirag como servidor MCP e o que cada conta liberou
   const esq = await lerEsquecimento();
   log(
