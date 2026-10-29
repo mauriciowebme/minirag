@@ -67,13 +67,19 @@ const saida = (so: string, res: { stdout: string }): string => {
   return txt.replace(/\r\n/g, "\n").replace(/\r/g, "");
 };
 
-/** T043: o PS 5.1 despeja a moldura do erro nativo (No linha:/CategoryInfo) no stderr */
+/** T043: o PS 5.1 despeja a moldura do erro nativo (No linha:/CategoryInfo) no stderr.
+ *  Ele vem colado numa linha só quando o erro atravessa o `2>&1` — então corta no marcador
+ *  antes de filtrar linha a linha, senão o ruído sobrevive inteiro. */
 function semRuidoPs(txt: string): string {
-  return String(txt)
+  let s = String(txt).replace(/\r/g, "");
+  const corte = s.search(/(No linha:|At line:|CategoryInfo|FullyQualifiedErrorId)/i);
+  if (corte > 0) s = s.slice(0, corte);
+  return s
     .split("\n")
     .filter((l) => !/^\s*(\+|No linha:|At line:|CategoryInfo|FullyQualifiedErrorId|RemoteException)/i.test(l))
     .filter((l) => !/^\s*[~^]+\s*$/.test(l))
-    .join("\n");
+    .join("\n")
+    .trim();
 }
 
 /** PowerShell -EncodedCommand cospe throw em CLIXML no stderr: fica só o texto do erro */
@@ -848,7 +854,13 @@ async function gitRemoto(ctx: Ctx, args: Record<string, unknown>): Promise<unkno
     cmd = shCmd(`{ git ${base.map(sq).join(" ")} 2>&1; echo "EXIT=$?"; } | tail -c 60000`);
   }
   const res = await exec(ctx, cmd, 60, 60000);
-  if (res.exit !== 0) throw new HttpError(502, `git_remoto falhou (git instalado?): ${(saida(ctx.so, res).slice(0, 200) || stderrLimpo(res))}`);
+  /* T043: pasta que não é repositório virava 502 com o CLIXML cru do PowerShell na cara.
+     É erro de uso, não de servidor: 422 curto, sem ruído. O PS sai != 0 por causa do
+     NativeCommandError, então a detecção tem de vir ANTES do 502. */
+  const brutoErro = semRuidoPs(`${saida(ctx.so, res)}\n${stderrLimpo(res, 800)}`);
+  if (/not a git repository|not a git dir|n[ãa]o [ée] um reposit[óo]rio/i.test(brutoErro))
+    throw new HttpError(422, `git_remoto: '${repo}' nao e repositorio git (nenhum .git encontrado) — nada foi executado`);
+  if (res.exit !== 0) throw new HttpError(502, `git_remoto falhou (exit=${res.exit}): ${brutoErro.slice(0, 200)}`);
   let txt = saida(ctx.so, res);
   let exitCode = -1;
   const i = txt.lastIndexOf("EXIT=");

@@ -22,6 +22,12 @@ parecidos com a pergunta, com uma nota de 0 a 1.
 
 ---
 ---
+## v3.38.1 (28/10) — `git_remoto` fora de repositório responde 422, sem o XML do PowerShell
+- **O que você vê:** apontar `git_remoto` para uma pasta que não é repositório devolve uma linha — *"'C:/IA' não é repositório git (nenhum .git encontrado) — nada foi executado"* — em vez de 502 com `No linha:`, `CategoryInfo` e o `&amp;` escapado.
+- **Por que:** a correção da 3.38.0 tratava o erro depois do `EXIT=`, mas nesse caso o próprio PowerShell sai com código diferente de zero por causa do `NativeCommandError` — o 502 disparava antes. Medido ao vivo no JPPCINFODEV01 logo após o deploy da 3.38.0.
+- **Como funciona:** a detecção ("not a git repository") passou a rodar **antes** do 502, sobre o texto já sem a moldura do PowerShell; e o limpador de ruído agora corta no primeiro marcador (`No linha:`, `CategoryInfo`, `FullyQualifiedErrorId`) porque o erro chega colado numa linha só quando atravessa o `2>&1`.
+- **Como é provado:** chamada ao vivo em `C:/IA` nas duas máquinas após o deploy.
+
 ## v3.38.0 (28/10) — Ferramentas de máquina: o que estava torto, medido e corrigido
 - **O que você vê:** (1) caminho de arquivo vem limpo — `C:\Windows`, sem o `\r` grudado no fim; (2) `rede info` respeita o `alvo` e filtra IP/interface/gateway/DNS em vez de devolver tudo; (3) `git_remoto` numa pasta que não é repositório responde em uma linha ("não é repositório git") em vez de despejar o XML do PowerShell; (4) `area_transferencia` no Windows cai para o modo alternativo quando a sessão remota trava o clipboard, e a recusa vem como **422** explicando, não como 502 com stack; (5) máquina que reconecta no meio do comando responde **503 "reconectando"** — antes parecia defeito do PC; (6) `rodar_lote` deixou de recusar lote pequeno: 3 comandos de 367 caracteres batiam num teto de 4.000 que era medido **depois** da codificação.
 - **Por que:** varredura das 20 ferramentas nas duas máquinas (T043) e um lote recusado sem motivo aparente (T044). Quinze funcionavam; cinco tinham defeito, todos medidos em produção antes de mexer.
