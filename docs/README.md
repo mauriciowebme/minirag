@@ -6,7 +6,8 @@ O que vai onde (lugares canônicos da casa — padrão `organizacao-documentacao
 
 | Conteúdo | Lugar | Estado |
 |---|---|---|
-| Fila do que falta (T###) | `docs/proximos-passos.md` | ✅ existe |
+| Fila do que falta (T###) | `docs/proximos-passos.md` | ✅ existe (só o que está em aberto) |
+| Histórico do que já foi entregue (T###) | `docs/concluidos.md` | ✅ existe (criado em 30/10: 51 tarefas entregues) |
 | Prova de como se testa (contrato por rota) | `docs/testes.md` (dono do método: skill `suite-de-testes`) | ✅ existe |
 | Planos de trabalho temporários | `docs/planos/NNN-assunto.md` | ✅ pasta criada na rodada do plano 001; o plano legado v3.4 (concluído) saiu do repo em 25/10 por ordem do dono — histórico fica no `git log` |
 | Specs por módulo | `docs/specs/NN-modulo.md` | _nasce na primeira regra escrita_ (pasta sem primeiro doc não se cria) |
@@ -15,12 +16,13 @@ O que vai onde (lugares canônicos da casa — padrão `organizacao-documentacao
 | Histórico do entregue | `CHANGELOG.md` na raiz | ⚠️ pendência declarada — o histórico hoje mora no `README.md` da raiz (seções `## v…`); migrar exige OK do dono |
 | Guia de uso / API | `README.md` da raiz + seção de exemplos | ✅ existe (raiz) |
 
-## Índice do estado atual (medido 2026-10-25)
+## Índice do estado atual (medido 2026-10-30)
 
 | Arquivo | Assunto | Linhas |
 |---|---|---|
-| `proximos-passos.md` | 22 tarefas do chat (T001–T022), análise vs Open WebUI/Hermes — **lote em execução 25/10** | ~315 |
-| `planos/001-basico-chat.md` | checklist vivo T001–T022 (o que está entregue a cada momento) | ~55 |
+| `proximos-passos.md` | **só o aberto**: T052 (sandbox Python) + ideias não numeradas | ~35 |
+| `concluidos.md` | histórico das 51 tarefas entregues, com o detalhe de cada uma | ~1.100 |
+| `planos/001-basico-chat.md` | checklist do lote v3.18 (histórico) | ~55 |
 | `testes.md` | contrato da suíte do nexos (ponteiro para `suite-de-testes`) | 105 |
 
 Nada neste mapa autoriza execução: tarefas viram código com OK explícito do dono (25/10, regra gravada no roadmap).
