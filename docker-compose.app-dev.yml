@@ -1,4 +1,4 @@
-# minirag — app de DESENVOLVIMENTO (código montado + watch), mesmo banco.
+# nexos — app de DESENVOLVIMENTO (código montado + watch), mesmo banco.
 #
 # Sobe a MESMA imagem de produção, mas:
 #   - `src/`, `frontend/src` e `dist` vêm do host (edita e o watch recompila)
@@ -20,17 +20,17 @@ services:
     environment:
       NODE_ENV: development
       PYTHONUNBUFFERED: "1"
-      MINIRAG_MODEL: ${MINIRAG_MODEL:-nomic-ai/nomic-embed-text-v1.5}
-      MINIRAG_MODEL_DIR: /app/models
-      MINIRAG_DB_HOST: minirag-db
-      MINIRAG_DB_PORT: "5432"
-      MINIRAG_DB_USER: ${MINIRAG_DB_USER:-minirag}
-      MINIRAG_DB_PASSWORD: ${MINIRAG_DB_PASSWORD:-minirag}
-      MINIRAG_DB_NAME: ${MINIRAG_DB_NAME:-minirag}
-      MINIRAG_USERS: ${MINIRAG_USERS:-}
-      MINIRAG_ADMIN: ${MINIRAG_ADMIN:-}
-      MINIRAG_OPERADOR: ${MINIRAG_OPERADOR:-}
-      MINIRAG_EMBEDDER_MODO: filho
+      NEXOS_MODEL: ${NEXOS_MODEL:-${MINIRAG_MODEL:-nomic-ai/nomic-embed-text-v1.5}}
+      NEXOS_MODEL_DIR: /app/models
+      NEXOS_DB_HOST: minirag-db
+      NEXOS_DB_PORT: "5432"
+      NEXOS_DB_USER: ${NEXOS_DB_USER:-${NEXOS_DB_USER:-${MINIRAG_DB_USER:-minirag}}}
+      NEXOS_DB_PASSWORD: ${NEXOS_DB_PASSWORD:-${NEXOS_DB_PASSWORD:-${MINIRAG_DB_PASSWORD:-minirag}}}
+      NEXOS_DB_NAME: ${NEXOS_DB_NAME:-${NEXOS_DB_NAME:-${MINIRAG_DB_NAME:-minirag}}}
+      NEXOS_USERS: ${NEXOS_USERS:-${MINIRAG_USERS:-}}
+      NEXOS_ADMIN: ${NEXOS_ADMIN:-${MINIRAG_ADMIN:-}}
+      NEXOS_OPERADOR: ${NEXOS_OPERADOR:-${MINIRAG_OPERADOR:-}}
+      NEXOS_EMBEDDER_MODO: filho
     volumes:
       - ./src:/app/src
       - ./dist:/app/dist

@@ -1,19 +1,19 @@
-# minirag — banco (Postgres + pgvector). Um só, serve produção e dev.
+# nexos — banco (Postgres + pgvector). Um só, serve produção e dev.
 #
 # Volume com nome FIXO de propósito: é o mesmo dado que o serviço atual usa
-# (`minirag_data`). Não renomeie — renomear aqui = subir banco vazio.
+# (`nexos_data`). Não renomeie — renomear aqui = subir banco vazio.
 services:
   minirag-db:
     image: pgvector/pgvector:pg17
     restart: unless-stopped
     environment:
-      POSTGRES_USER: ${MINIRAG_DB_USER:-minirag}
-      POSTGRES_PASSWORD: ${MINIRAG_DB_PASSWORD:-minirag}
-      POSTGRES_DB: ${MINIRAG_DB_NAME:-minirag}
+      POSTGRES_USER: ${NEXOS_DB_USER:-${MINIRAG_DB_USER:-minirag}}
+      POSTGRES_PASSWORD: ${NEXOS_DB_PASSWORD:-${MINIRAG_DB_PASSWORD:-minirag}}
+      POSTGRES_DB: ${NEXOS_DB_NAME:-${MINIRAG_DB_NAME:-minirag}}
     volumes:
       - minirag_data:/var/lib/postgresql/data
     healthcheck:
-      test: ["CMD-SHELL", "pg_isready -U ${MINIRAG_DB_USER:-minirag} -d ${MINIRAG_DB_NAME:-minirag}"]
+      test: ["CMD-SHELL", "pg_isready -U ${NEXOS_DB_USER:-${MINIRAG_DB_USER:-minirag}} -d ${NEXOS_DB_NAME:-${MINIRAG_DB_NAME:-minirag}}"]
       interval: 10s
       timeout: 5s
       retries: 10

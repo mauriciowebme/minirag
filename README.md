@@ -80,7 +80,7 @@ sha256 igual ao da máquina, arquivo confirmado no volume em pasta do usuário, 
 com `completo=true`, `Range` devolvendo 206 com o pedaço byte-a-byte igual, reenvio do mesmo
 arquivo instantâneo (retomada) e bloco sem chave assinada recusado com 401 (11 checks).
 
-Limites: 10 GB por arquivo (`MINIRAG_MAX_ARQUIVO_MB`), faxina em 7 dias (`MINIRAG_ARQUIVOS_DIAS`),
+Limites: 10 GB por arquivo (`NEXOS_MAX_ARQUIVO_MB`), faxina em 7 dias (`NEXOS_ARQUIVOS_DIAS`),
 e o tempo depende do upload da sua internet (10 GB a 100 Mbps ≈ 14 min).
 
 ## v3.44.0 (29/10) — a máquina manda arquivo para a conversa (print, imagem, log)
@@ -668,19 +668,19 @@ conectadas e online na tela, listagem e histórico seguem lendo; o estado vive n
 ### v3.2.3 — cadastro de usuário: só o admin vem do ambiente, o resto nasce na tela
 
 - **Política decidida pelo dono (21/10)**: a única conta criada por variável de ambiente é a
-  do **admin** (`MINIRAG_ADMIN`). Usuário comum é cadastrado **dentro da plataforma**, na
+  do **admin** (`NEXOS_ADMIN`). Usuário comum é cadastrado **dentro da plataforma**, na
   tela **Usuários**, pelo admin — `POST /usuarios` já existia desde a v2.7; aqui muda o uso,
   não o código. Auto-cadastro (pessoa se inscreve sozinha) foi avaliado e **não** é objetivo:
   cada usuário é um tenant isolado com chave própria.
 - **Guarda nova no apagar**: `DELETE /usuarios/:nome` agora responde `409`
   (`este e o ultimo operador ativo: crie outro antes de apagar`) quando se tenta apagar o
   último operador ativo. A guarda já existia no `PATCH` (desativar/rebaixar); faltava no
-  `DELETE` — e com o `MINIRAG_USERS` vazio isso viraria **trancamento sem volta**, porque não
+  `DELETE` — e com o `NEXOS_USERS` vazio isso viraria **trancamento sem volta**, porque não
   haveria mais semente no ambiente para recriar o admin no boot seguinte.
 - **Efeito colateral desejado**: usuário criado pela tela não existe no env, então **deixa de
-  voltar** no deploy seguinte. Antes, um usuário apagado que ainda constasse em `MINIRAG_USERS`
+  voltar** no deploy seguinte. Antes, um usuário apagado que ainda constasse em `NEXOS_USERS`
   era recriado no boot, com a chave antiga (o seed é `ON CONFLICT DO NOTHING`).
-- **Ação pendente do dono (no painel Dokploy)**: esvaziar `MINIRAG_USERS` em produção.
+- **Ação pendente do dono (no painel Dokploy)**: esvaziar `NEXOS_USERS` em produção.
 
 - **Versão**: `3.2.3`.
 
@@ -868,7 +868,7 @@ não são itens de menu — são passos do caminho `usuários → gavetas → ar
   mede a latência e falha com mensagem legível. Cada usuário tem a sua configuração;
   o operador pode gravar o padrão de todos (`global: true`, escopo `*`).
 - **Usuários no banco (`/usuarios`)**: tabela `usuarios` (nome, `chave_hash`
-  sha256, `chave_hint`, `papel`, `ativo`). `MINIRAG_USERS`/`MINIRAG_ADMIN`
+  sha256, `chave_hint`, `papel`, `ativo`). `NEXOS_USERS`/`NEXOS_ADMIN`
   passam a ser **semente** do boot (entram uma vez, sem sobrescrever). Criar pela
   tela devolve a chave **uma única vez**; desativar vale na hora; o último operador
   ativo não pode ser rebaixado/desativado; usuário com documentos não pode ser
@@ -890,7 +890,7 @@ Agora os dois entram: o texto é **lido da imagem** e indexado como qualquer doc
 - **Tipos novos**: `png`, `jpg`, `jpeg`, `webp`, `tif`, `tiff` → `tipo_detectado: "imagem"`.
 - **PDF escaneado**: quando a camada de texto tem menos de 20 caracteres, o PDF é
   rasterizado com `pdftoppm` (poppler) a 150 dpi e cada página passa pelo OCR.
-- **Limite**: 6 páginas de PDF escaneado por arquivo (`MINIRAG_OCR_PAGINAS_MAX`) —
+- **Limite**: 6 páginas de PDF escaneado por arquivo (`NEXOS_OCR_PAGINAS_MAX`) —
   medido ~4 s por foto/print e ~12 s por página A4 nesta VPS. Acima disso o envio é
   recusado com orientação para dividir o arquivo.
 - **Aviso honesto**: OCR erra **número** e embaralha tabela/coluna. O original fica
@@ -967,13 +967,13 @@ pela tool MCP `criar_usuario`); a chave é gravada como **sha256** + os 4 últim
 caracteres para exibição. Sem uma chave válida de usuário **ativo** no cabeçalho
 `Authorization`, nenhum pedido é atendido (401).
 
-As variáveis `MINIRAG_USERS` / `MINIRAG_ADMIN` (o apelido antigo `MINIRAG_OPERADOR` ainda é aceito) continuam existindo como
+As variáveis `NEXOS_USERS` / `NEXOS_ADMIN` (o apelido antigo `NEXOS_OPERADOR` ainda é aceito) continuam existindo como
 **semente**: no boot cada `nome:chave` é inserido **se ainda não existir** — não
 sobrescreve quem já está no banco (nem reativa quem foi desativado pela tela).
 
 ```
-MINIRAG_USERS=sistema:abc123
-MINIRAG_ADMIN=admin:def456
+NEXOS_USERS=sistema:abc123
+NEXOS_ADMIN=admin:def456
 ```
 
 - `sistema` — o backend do sistema (uma chave só, atende todas as empresas)
@@ -1019,7 +1019,7 @@ Content-Type: application/json
 |-------|------|-------------|-----------|
 | `doc_id` | string | sim | id do documento (re-ingestão com mesmo `doc_id` **substitui**, só quando o job termina) |
 | `title` | string | não | título (aparece nos resultados) |
-| `content` | string | sim | o **texto puro** (extraído do arquivo antes, se for .md/.pdf/.docx); máx. `MINIRAG_MAX_CONTENT_CHARS` (default 500.000) |
+| `content` | string | sim | o **texto puro** (extraído do arquivo antes, se for .md/.pdf/.docx); máx. `NEXOS_MAX_CONTENT_CHARS` (default 500.000) |
 | `memoria` | string | não | gaveta (ex.: id da empresa); máx. 128 chars; vazio = gaveta padrão do login |
 | `tenant` | string | não | **v1.8**: só a chave operador consegue mirar outro tenant; login comum tem o campo ignorado (sempre cai no próprio) |
 
@@ -1097,7 +1097,7 @@ Content-Type: application/json
 
 | campo | tipo | default | descrição |
 |-------|------|---------|-----------|
-| `query` | string | — | a pergunta (texto); máx. `MINIRAG_MAX_QUERY_CHARS` (default 2.000) |
+| `query` | string | — | a pergunta (texto); máx. `NEXOS_MAX_QUERY_CHARS` (default 2.000) |
 | `memoria` | string | `""` | gaveta (mesma regra do ingest) |
 | `k` | int | `5` | quantos pedaços devolver (1 a 50) |
 | `min_score` | float | `0.55` | nota mínima pra valer (0 a 1); itens abaixo são cortados |
@@ -1238,10 +1238,10 @@ e o modelo responde só com o que sabe (é a "conversa pura" pedida).
 ### `POST /decay` — rodar o "esquecimento" agora
 
 > No painel, a ação aparece como **"arquivar esquecidos"** (nome de tela).
-> O endereço `/decay`, o campo `decay` dos JSONs e as variáveis `MINIRAG_DECAY_*`
+> O endereço `/decay`, o campo `decay` dos JSONs e as variáveis `NEXOS_DECAY_*`
 > continuam como estão — só o texto que o usuário vê mudou.
 
-O serviço já roda o decay sozinho a cada `MINIRAG_DECAY_INTERVALO_MINUTOS`.
+O serviço já roda o decay sozinho a cada `NEXOS_DECAY_INTERVALO_MINUTOS`.
 Este endpoint força a execução na hora (útil pra teste/operação manual).
 
 **Request:**
@@ -1304,7 +1304,7 @@ ou fica inteiro. A busca com `include_archived` revive o **documento inteiro**.
 (segurança); chave operador roda global. O loop de fundo segue global.
 
 ### Chave operador (nível novo, opcional)
-`MINIRAG_ADMIN="nome:chave"` (formato idêntico ao `MINIRAG_USERS`).
+`NEXOS_ADMIN="nome:chave"` (formato idêntico ao `NEXOS_USERS`).
 A mesma rota, alcance decidido pela credencial:
 
 | endpoint | login comum | operador |
@@ -1397,8 +1397,8 @@ Rotas novas (todas com o mesmo login; `?tenant=` só vale para a chave operador)
 | `POST /jobs/{id}/retry` | reenfileira job `erro` ou `cancelado` (zera progresso e erro) |
 | `GET /docs?q=&limit=&offset=` | filtro por título/doc_id + paginação (ver acima) |
 
-**Freio de força bruta no login** (v1.10): `MINIRAG_LOGIN_MAX_FALHAS` (default
-10) falhas de chave por IP dentro de `MINIRAG_LOGIN_JANELA_SEG` (default 300 s)
+**Freio de força bruta no login** (v1.10): `NEXOS_LOGIN_MAX_FALHAS` (default
+10) falhas de chave por IP dentro de `NEXOS_LOGIN_JANELA_SEG` (default 300 s)
 → todas as tentativas daquele IP recebem `429` até a janela passar, inclusive
 com chave certa. Um login bem-sucedido zera o contador do IP. O IP vem de
 `X-Forwarded-For` (primeiro valor) ou do socket.
@@ -1503,9 +1503,9 @@ mesmo nome (substitui) ou edita texto (`edit_doc`).
 
 | código | situação |
 |--------|----------|
-| `401` | chave não está na lista `MINIRAG_USERS` (ou falta o header `Authorization`) |
+| `401` | chave não está na lista `NEXOS_USERS` (ou falta o header `Authorization`) |
 | `400` | `content` com só espaços em ingest (nada pra cortar em pedaço) |
-| `413` | cota de `MINIRAG_MAX_CHUNKS_TENANT` atingida (medido: `limite de 10 chunks por usuario atingido (voce tem 2; este arquivo precisaria de 42)`) — a checagem é **na entrada da fila**, nada é gravado nem perdido |
+| `413` | cota de `NEXOS_MAX_CHUNKS_TENANT` atingida (medido: `limite de 10 chunks por usuario atingido (voce tem 2; este arquivo precisaria de 42)`) — a checagem é **na entrada da fila**, nada é gravado nem perdido |
 | `422` | JSON malformado, `content` vazio **ou > 500.000 chars**, `query` > 2.000 chars, `doc_id` ausente, `memoria` > 128 chars, `k` fora de 1–50 |
 
 Exemplo de 401:
@@ -1577,8 +1577,8 @@ for d in docs["docs"]:
 
 ```bash
 # 1) Defina as variáveis
-export MINIRAG_USERS="sistema:abc123,operador:def456"
-export MINIRAG_DB_PASSWORD="senha-forte"
+export NEXOS_USERS="sistema:abc123,operador:def456"
+export NEXOS_DB_PASSWORD="senha-forte"
 
 # 2) Build e subida (primeira vez: ~15 min — assa o modelo de 768 dim na imagem)
 docker-compose up -d --build
@@ -1598,12 +1598,12 @@ npm run build           # tsc (servidor, src/ → dist/)
 (cd frontend && npm install && npm run build)   # React → frontend/dist
 
 # terminal 1 — embedder (precisa de python com sentence-transformers + modelo)
-MINIRAG_EMBEDDER_MODO=externo \
+NEXOS_EMBEDDER_MODO=externo \
   python3 -m uvicorn embedder.embed_server:app --port 8001
 
 # terminal 2 — aplicação
-MINIRAG_EMBEDDER_MODO=externo MINIRAG_DB_HOST=127.0.0.1 \
-MINIRAG_USERS="teste:chave" node dist/index.js
+NEXOS_EMBEDDER_MODO=externo NEXOS_DB_HOST=127.0.0.1 \
+NEXOS_USERS="teste:chave" node dist/index.js
 ```
 
 ### Testes
@@ -1632,9 +1632,9 @@ O nexos roda em qualquer ambiente com Docker. Segue um exemplo prático
 
 1. Crie um **projeto tipo "docker"**, aponte para a pasta do repo.
 2. Na aba **Environment** (ou `.env`), preencha:
-   - `MINIRAG_USERS` — lista `nome:chave` (ex.: `sistema:abc123`)
-   - `MINIRAG_DB_USER` / `MINIRAG_DB_PASSWORD` — usuário e senha do Postgres
-   - `MINIRAG_CORS_ORIGINS` — origens que podem chamar **a partir de navegador**
+   - `NEXOS_USERS` — lista `nome:chave` (ex.: `sistema:abc123`)
+   - `NEXOS_DB_USER` / `NEXOS_DB_PASSWORD` — usuário e senha do Postgres
+   - `NEXOS_CORS_ORIGINS` — origens que podem chamar **a partir de navegador**
      (ex.: `https://seusite.com`). Só importa pra chamada de JavaScript no
      navegador; em uso servidor-para-servidor (o padrão) pode ficar vazio
 3. Suba os dois containers pelo painel (Dokploy) ou `docker compose up -d` e exponha a porta via seu proxy.
@@ -1649,7 +1649,7 @@ O nexos roda em qualquer ambiente com Docker. Segue um exemplo prático
 > **Produção atual:** Dokploy do Contabo, serviço `nexos` (fonte github,
 > branch `main`, **autoDeploy ligado** — todo push em `main` reimplanta),
 > domínio `https://nexos.techupsistemas.com`. O `docker-compose.yml` é a
-> receita; as chaves (`MINIRAG_USERS`) ficam na aba Environment do painel.
+> receita; as chaves (`NEXOS_USERS`) ficam na aba Environment do painel.
 
 > **Persistência:** o Postgres guarda os dados num volume nomeado
 > (`minirag_data`). O volume sobrevive a reinícios e redeploys; pra zerar
@@ -1663,7 +1663,7 @@ O nexos roda em qualquer ambiente com Docker. Segue um exemplo prático
 > o único passo excluído). Sinais: `docker ps -a` sem o `minirag-api`, `GET
 > /health` respondendo 404 pelo domínio, banco continuando `Up`.
 > **Corrigido na v1.7:** a API espera o banco aceitar conexão antes de servir
-> (`MINIRAG_DB_WAIT_TRIES` × `MINIRAG_DB_WAIT_SECONDS`, padrão 30 × 2s = 60s) e
+> (`NEXOS_DB_WAIT_TRIES` × `NEXOS_DB_WAIT_SECONDS`, padrão 30 × 2s = 60s) e
 > o serviço usa `restart: always`. Se o banco nunca aparecer, o processo morre
 > com `RuntimeError` no log — nunca finge saúde — e o Docker tenta o boot de
 > novo. Recuperar um serviço já apagado: qualquer push em `main` reimplanta (o
@@ -1673,43 +1673,47 @@ O nexos roda em qualquer ambiente com Docker. Segue um exemplo prático
 
 ## Variáveis de ambiente
 
+> **Nome novo e nome antigo valem.** O app lê `NEXOS_*` e, no boot, copia qualquer
+> `MINIRAG_*` que ainda exista para o nome novo — então env antigo continua
+> funcionando e `NEXOS_*` tem precedência quando os dois estão definidos.
+
 | variável | default | o que controla |
 |----------|---------|----------------|
-| `MINIRAG_USERS` | `""` | lista `nome:chave` de logins (obrigatório) |
-| `MINIRAG_MODEL` | `nomic-ai/nomic-embed-text-v1.5` | modelo de embedding |
-| `MINIRAG_MODEL_DIR` | `/app/models` | onde o modelo está assado na imagem |
-| `MINIRAG_EMBEDDER_MODO` | `filho` | `filho` = Node sobe o Python; `externo` = já está no ar |
-| `MINIRAG_EMBEDDER_PORT` | `8001` | porta local (loopback) do embedder |
-| `MINIRAG_OCR_PAGINAS_MAX` | `6` | máximo de páginas de PDF escaneado lidas por arquivo |
-| `MINIRAG_OCR_DPI` | `150` | resolução da rasterização do PDF escaneado (mais dpi = mais lento) |
-| `MINIRAG_OCR_LARGURA_MIN` | `900` | imagem mais estreita que isso é ampliada 2× antes do OCR |
-| `MINIRAG_EMBEDDER_URL` | `http://127.0.0.1:8001` | URL usada pelo Node |
-| `MINIRAG_PYTHON` | `python3` | binário do Python no container |
-| `MINIRAG_WORKER_ATIVO` | `1` | liga o worker da fila (desligue em réplica só-API) |
-| `MINIRAG_DB_HOST` | `minirag-db` | host do Postgres |
-| `MINIRAG_DB_PORT` | `5432` | porta do Postgres |
-| `MINIRAG_DB_USER` | `nexos` | usuário do Postgres |
-| `MINIRAG_DB_PASSWORD` | `nexos` | senha do Postgres |
-| `MINIRAG_DB_NAME` | `nexos` | nome do banco |
-| `MINIRAG_DB_WAIT_TRIES` | `30` | tentativas de esperar o Postgres no boot |
-| `MINIRAG_DB_WAIT_SECONDS` | `2` | pausa entre tentativas (30x2 = ate 60s) |
-| `MINIRAG_MAX_CHUNK_WORDS` | `500` | palavras por pedaço |
-| `MINIRAG_CHUNK_OVERLAP` | `80` | palavras de sobreposição entre pedaços |
-| `MINIRAG_TOP_K` | `5` | quantos resultados por busca |
-| `MINIRAG_MIN_SCORE` | `0.55` | nota mínima pra devolver |
-| `MINIRAG_MAX_CONTENT_CHARS` | `500000` | teto de `content` por ingest (~5.000 linhas; estourou = 422) |
-| `MINIRAG_MAX_QUERY_CHARS` | `2000` | teto da `query` de busca (estourou = 422) |
-| `MINIRAG_MAX_CHUNKS_TENANT` | `10000` | cota de chunks por login (estourou = 413) |
-| `MINIRAG_DECAY_ATIVO` | `1` | `0` desliga o esquecimento automático |
-| `MINIRAG_DECAY_DIAS` | `180` | sem acesso por N dias → arquiva (v3.5: o valor salvo na tela vence) |
-| `MINIRAG_DECAY_MIN_ACESSOS` | `2` | usado N+ vezes nunca é arquivado |
-| `MINIRAG_DECAY_INTERVALO_MINUTOS` | `60` | de quanto em quanto o loop roda (decay + faxina) |
-| `MINIRAG_EXPURGO_ARQUIVADO_DIAS` | `365` | arquivado por N dias ou mais é apagado de vez (tela vence) |
-| `MINIRAG_CARENCIA_DIAS` | `30` | janela entre apagar usuário e a exclusão dos dados dele (tela vence) |
-| `MINIRAG_CORS_ORIGINS` | `""` | origens de navegador que podem chamar; em uso servidor-para-servidor pode ficar vazio |
-| `MINIRAG_ADMIN` | `""` | login do admin, escopo total (`nome:chave`), vê todas as gavetas. Desde a v3.4; o nome antigo `MINIRAG_OPERADOR` ainda vale como apelido |
-| `MINIRAG_LOGIN_MAX_FALHAS` | `10` | falhas de chave por IP antes de bloquear (429) |
-| `MINIRAG_LOGIN_JANELA_SEG` | `300` | janela (segundos) do freio de força bruta |
+| `NEXOS_USERS` | `""` | lista `nome:chave` de logins (obrigatório) |
+| `NEXOS_MODEL` | `nomic-ai/nomic-embed-text-v1.5` | modelo de embedding |
+| `NEXOS_MODEL_DIR` | `/app/models` | onde o modelo está assado na imagem |
+| `NEXOS_EMBEDDER_MODO` | `filho` | `filho` = Node sobe o Python; `externo` = já está no ar |
+| `NEXOS_EMBEDDER_PORT` | `8001` | porta local (loopback) do embedder |
+| `NEXOS_OCR_PAGINAS_MAX` | `6` | máximo de páginas de PDF escaneado lidas por arquivo |
+| `NEXOS_OCR_DPI` | `150` | resolução da rasterização do PDF escaneado (mais dpi = mais lento) |
+| `NEXOS_OCR_LARGURA_MIN` | `900` | imagem mais estreita que isso é ampliada 2× antes do OCR |
+| `NEXOS_EMBEDDER_URL` | `http://127.0.0.1:8001` | URL usada pelo Node |
+| `NEXOS_PYTHON` | `python3` | binário do Python no container |
+| `NEXOS_WORKER_ATIVO` | `1` | liga o worker da fila (desligue em réplica só-API) |
+| `NEXOS_DB_HOST` | `minirag-db` | host do Postgres |
+| `NEXOS_DB_PORT` | `5432` | porta do Postgres |
+| `NEXOS_DB_USER` | `minirag` | usuário do Postgres (o volume já foi criado com esse nome) |
+| `NEXOS_DB_PASSWORD` | `minirag` | senha do Postgres (idem: o volume manda) |
+| `NEXOS_DB_NAME` | `minirag` | nome do banco (idem) |
+| `NEXOS_DB_WAIT_TRIES` | `30` | tentativas de esperar o Postgres no boot |
+| `NEXOS_DB_WAIT_SECONDS` | `2` | pausa entre tentativas (30x2 = ate 60s) |
+| `NEXOS_MAX_CHUNK_WORDS` | `500` | palavras por pedaço |
+| `NEXOS_CHUNK_OVERLAP` | `80` | palavras de sobreposição entre pedaços |
+| `NEXOS_TOP_K` | `5` | quantos resultados por busca |
+| `NEXOS_MIN_SCORE` | `0.55` | nota mínima pra devolver |
+| `NEXOS_MAX_CONTENT_CHARS` | `500000` | teto de `content` por ingest (~5.000 linhas; estourou = 422) |
+| `NEXOS_MAX_QUERY_CHARS` | `2000` | teto da `query` de busca (estourou = 422) |
+| `NEXOS_MAX_CHUNKS_TENANT` | `10000` | cota de chunks por login (estourou = 413) |
+| `NEXOS_DECAY_ATIVO` | `1` | `0` desliga o esquecimento automático |
+| `NEXOS_DECAY_DIAS` | `180` | sem acesso por N dias → arquiva (v3.5: o valor salvo na tela vence) |
+| `NEXOS_DECAY_MIN_ACESSOS` | `2` | usado N+ vezes nunca é arquivado |
+| `NEXOS_DECAY_INTERVALO_MINUTOS` | `60` | de quanto em quanto o loop roda (decay + faxina) |
+| `NEXOS_EXPURGO_ARQUIVADO_DIAS` | `365` | arquivado por N dias ou mais é apagado de vez (tela vence) |
+| `NEXOS_CARENCIA_DIAS` | `30` | janela entre apagar usuário e a exclusão dos dados dele (tela vence) |
+| `NEXOS_CORS_ORIGINS` | `""` | origens de navegador que podem chamar; em uso servidor-para-servidor pode ficar vazio |
+| `NEXOS_ADMIN` | `""` | login do admin, escopo total (`nome:chave`), vê todas as gavetas. Desde a v3.4; o nome antigo `NEXOS_OPERADOR` ainda vale como apelido |
+| `NEXOS_LOGIN_MAX_FALHAS` | `10` | falhas de chave por IP antes de bloquear (429) |
+| `NEXOS_LOGIN_JANELA_SEG` | `300` | janela (segundos) do freio de força bruta |
 
 ---
 
@@ -1734,5 +1738,5 @@ Quem decide qual empresa existe e qual usuário pertence a qual é o sistema.
 - **Não lê arquivos** (PDF, .docx, .md) — quem extrai o texto é o cliente.
 - **Não responde perguntas em linguagem natural** — entrega pedaços; o LLM
   redige a resposta.
-- **Não gerencia empresas/usuários** — a lista `MINIRAG_USERS` é fixa no
+- **Não gerencia empresas/usuários** — a lista `NEXOS_USERS` é fixa no
   ambiente; criar/alterar logins = editar variável + reiniciar.
