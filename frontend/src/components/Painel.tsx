@@ -37,9 +37,10 @@ export function Painel({ tenant, operador }: { tenant: string; operador: boolean
   return (
     <section className="flex flex-col gap-4" id="telaPainel">
       <div className="barra">
-        <h2>
-          Painel <span className="sub2">— visão geral do acervo</span>
-        </h2>
+        <div>
+          <h1>Painel</h1>
+          <div className="mt-1 text-[12.8px] text-txt3">visão geral do acervo</div>
+        </div>
         <span className="flex-1" />
         <button className="btn btn-sutil" title="recarregar números" onClick={() => void carregar()}>
           ⟳

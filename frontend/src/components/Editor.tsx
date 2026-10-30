@@ -190,13 +190,13 @@ export function Editor({
   return (
     <section>
       <div className="barra">
-        <h2>
-          Editor{" "}
-          <span id="edOnde" className="sub2">
-            {escopo.tenant ? `— 👤 ${escopo.tenant} ▸ gaveta ${escopo.memoria || "padrão"}` : "—"}
+        <div>
+          <h1>Editor</h1>
+          <div id="edOnde" className="mt-1 text-[12.8px] text-txt3">
+            {escopo.tenant ? `${escopo.tenant} ▸ gaveta ${escopo.memoria || "padrão"}` : "—"}
             {idAtual ? ` · ${idAtual}` : ""}
-          </span>
-        </h2>
+          </div>
+        </div>
         <span className="flex-1" />
         <span id="edStatus" className="sub2">
           {status}

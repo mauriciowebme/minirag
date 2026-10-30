@@ -102,6 +102,10 @@ export function Mcp({ versao }: { versao?: string }) {
 
   return (
     <div className="space-y-4">
+      <div>
+        <h1>MCP</h1>
+        <div className="mt-1 text-[12.8px] text-txt3">conectar seu agente ao nexos e escolher o que ele pode fazer</div>
+      </div>
       <div className="cartao">
         <h2 className="mb-1 text-[13px] font-semibold text-txt2">Usar o nexos como servidor MCP</h2>
         <p className="dica mt-0 mb-3">

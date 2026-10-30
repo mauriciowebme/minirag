@@ -58,10 +58,10 @@ export function Config({
   return (
     <section className="flex flex-col gap-3" id="telaConfig">
       <div className="barra">
-        <h2>
-          Configurações{" "}
-          <span className="sub2">— {SECOES.find(([id]) => id === aba)?.[1] ?? ""}</span>
-        </h2>
+        <div>
+          <h1>Configurações</h1>
+          <div className="mt-1 text-[12.8px] text-txt3">{SECOES.find(([id]) => id === aba)?.[1] ?? ""}</div>
+        </div>
       </div>
       {/* v3.21: sem accordion interno — a seção vem da lateral (data-menu-filho).
           A tela só exibe o conteúdo da seção ativa. */}

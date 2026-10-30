@@ -2,6 +2,37 @@
 @tailwind components;
 @tailwind utilities;
 
+/* v3.49 — a fonte do sistema passa a ser a Inter (self-hosted, sem CDN):
+   a mesma família usada no desenho aprovado da tela de Arquivos. */
+@font-face {
+  font-family: "Inter";
+  font-style: normal;
+  font-weight: 400;
+  font-display: swap;
+  src: url("./assets/fonts/Inter-Regular.woff2") format("woff2");
+}
+@font-face {
+  font-family: "Inter";
+  font-style: normal;
+  font-weight: 500;
+  font-display: swap;
+  src: url("./assets/fonts/Inter-Medium.woff2") format("woff2");
+}
+@font-face {
+  font-family: "Inter";
+  font-style: normal;
+  font-weight: 600;
+  font-display: swap;
+  src: url("./assets/fonts/Inter-SemiBold.woff2") format("woff2");
+}
+@font-face {
+  font-family: "Inter";
+  font-style: normal;
+  font-weight: 700;
+  font-display: swap;
+  src: url("./assets/fonts/Inter-Bold.woff2") format("woff2");
+}
+
 /* Tokens vivos da v1.11 (mesma paleta), agora como variáveis para o modo escuro
    e para os componentes que usam transparência. */
 :root {
@@ -16,8 +47,8 @@
   --borda: #232b38;
   --bordaforte: #313b4b;
   --txt: #e7edf6;
-  --txt2: #a8b3c3;
-  --txt3: #7d8899;
+  --txt2: #bfc9d6;
+  --txt3: #9aa7b7;
   --verde: #3fb950;
   --vermelho: #f85149;
 }
@@ -40,20 +71,23 @@
     background: var(--azul-suave);
   }
   h1 {
-    @apply text-[20px] tracking-[-0.2px];
+    @apply text-[22px] font-semibold tracking-[-0.5px];
   }
   h2 {
-    @apply text-[16px] tracking-[-0.1px];
+    @apply text-[17px] font-semibold tracking-[-0.3px];
+  }
+  h3 {
+    @apply text-[14px] font-semibold tracking-[-0.1px];
   }
 }
 
 @layer components {
   /* ---------------------------------------------------------------- botões */
   .btn {
-    @apply inline-flex h-[34px] cursor-pointer items-center justify-center gap-[7px]
-      rounded-campo border border-bordaforte bg-sup2 px-[13px] text-[14px]
-      text-txt transition-[background,border-color,transform] duration-150
-      hover:border-[#3b4658] hover:bg-sup3 active:translate-y-px
+    @apply inline-flex h-[38px] cursor-pointer items-center justify-center gap-[8px]
+      rounded-campo border border-borda bg-sup px-[14px] text-[13px] font-medium
+      text-txt transition-[background,border-color,box-shadow,transform] duration-150
+      hover:border-bordaforte hover:bg-sup2 active:translate-y-px
       disabled:cursor-not-allowed disabled:opacity-45
       focus-visible:border-azul focus-visible:outline-none
       focus-visible:ring-[3px] focus-visible:ring-[color:var(--azul-suave)];
@@ -61,10 +95,12 @@
   .btn-primario {
     @apply border-verde bg-verde font-semibold text-vermelho-escuro
       hover:border-verde-claro hover:bg-verde-claro;
+    background-image: linear-gradient(180deg, #3fb950, #349445);
+    box-shadow: 0 2px 10px rgba(63, 185, 80, 0.18);
   }
   .btn-sutil {
-    @apply border-transparent bg-transparent px-[9px] text-txt2
-      hover:bg-sup2 hover:text-txt;
+    @apply border border-borda bg-transparent px-[11px] text-txt2
+      hover:border-bordaforte hover:bg-sup2 hover:text-txt;
   }
   .btn-perigo {
     @apply border-[rgba(248,81,73,.35)] bg-[color:var(--vermelho-suave)] text-vermelho
@@ -72,6 +108,19 @@
   }
   .btn-mini {
     @apply h-7 rounded-lg px-2.5 text-[13px];
+  }
+  /* v3.49 — ação de linha: quadrado discreto, sem moldura até o hover */
+  .btn-icone {
+    @apply grid h-[30px] w-[30px] cursor-pointer place-items-center rounded-[7px]
+      border-0 bg-transparent text-txt3 transition-colors
+      hover:bg-sup3 hover:text-txt focus-visible:outline-none
+      focus-visible:ring-[3px] focus-visible:ring-[color:var(--azul-suave)];
+  }
+  .btn-icone svg {
+    @apply h-[15px] w-[15px];
+  }
+  .btn-icone-perigo:hover {
+    @apply bg-[rgba(248,81,73,.12)] text-vermelho;
   }
   /* papéis da barra de ações (mesma semântica da v1.11) */
   .btn-arquivar {
@@ -90,9 +139,9 @@
 
   /* ----------------------------------------------------------- formulários */
   .campo {
-    @apply h-9 w-full rounded-campo border border-bordaforte bg-[#0c1017] px-[11px]
-      text-txt transition-[border-color,box-shadow] duration-150
-      placeholder:text-txt3 hover:border-[#3b4658]
+    @apply h-[38px] w-full rounded-campo border border-borda bg-[#0d1117] px-[12px]
+      text-[13px] text-txt transition-[border-color,box-shadow] duration-150
+      placeholder:text-txt3 hover:border-bordaforte
       focus:border-azul focus:outline-none focus:ring-[3px]
       focus:ring-[color:var(--azul-suave)];
   }
@@ -109,9 +158,43 @@
   /* --------------------------------------------------------------- painéis */
   .cartao {
     @apply rounded-cartao border border-borda bg-sup p-5;
+    box-shadow: 0 8px 24px rgba(0, 0, 0, 0.18);
   }
   .barra {
     @apply mb-4 flex flex-wrap items-center gap-2;
+  }
+  /* v3.49 — seletor de visão (abas): pílula única, o ativo emendado no corpo.
+     Substitui os botões soltos que brigavam com o título da tela. */
+  .seg {
+    @apply mb-4 inline-flex items-center gap-[2px] rounded-[12px] border border-borda
+      bg-[#101419] p-[3px];
+  }
+  .seg-b {
+    @apply inline-flex h-[36px] cursor-pointer items-center gap-[9px] rounded-[9px]
+      border-0 bg-transparent px-[15px] text-[13px] font-medium text-txt2
+      transition-colors hover:text-txt;
+  }
+  .seg-b-on {
+    @apply text-txt;
+    background: linear-gradient(180deg, #212a38, #1b232e);
+    box-shadow: inset 0 0 0 1px rgba(54, 65, 82, 0.5), 0 1px 2px rgba(0, 0, 0, 0.35);
+  }
+  .seg-n {
+    @apply rounded-full bg-[#1a212b] px-[7px] py-[1px] text-[11px] font-semibold text-txt3;
+    min-width: 22px;
+    text-align: center;
+  }
+  .seg-b-on .seg-n {
+    @apply text-verde;
+    background: #0f1a12;
+    box-shadow: inset 0 0 0 1px rgba(47, 143, 63, 0.33);
+  }
+  .seg-b .ic,
+  .seg-b svg {
+    @apply h-[15px] w-[15px] opacity-80;
+  }
+  .seg-b-on svg {
+    @apply text-verde opacity-100;
   }
   .faixa {
     @apply mb-3.5 flex flex-wrap items-center gap-2.5;
@@ -135,16 +218,20 @@
     @apply w-full border-collapse text-[14px];
   }
   .tabela thead th {
-    @apply border-b border-borda px-2.5 py-2 text-left text-[12px]
-      font-medium uppercase tracking-[0.4px] text-txt3;
+    @apply border-b border-borda bg-[#0d1117] px-3 py-[9px] text-left text-[11px]
+    font-semibold uppercase tracking-[0.6px] text-txt3;
   }
   .tabela tbody td {
-    @apply border-b border-borda/60 px-2.5 py-2.5 align-middle;
+    @apply border-b border-[#171d27] px-3 py-[13px] align-middle text-[13px];
+  }
+  .tabela tbody tr {
+    @apply transition-colors;
   }
   .tabela tbody tr:hover {
-    @apply bg-sup2;
+    @apply bg-[#121822];
   }
-  .tabela .num {
+  .tabela .num,
+  .tabela thead th.num {
     @apply text-right tabular-nums;
   }
   .tabela .arquivada {
@@ -159,8 +246,8 @@
 
   /* ------------------------------------------------------------------ tags */
   .tag {
-    @apply inline-flex items-center gap-1 rounded-full border px-2 py-0.5
-      text-[12px] font-medium;
+    @apply inline-flex items-center gap-1 rounded-full border px-[9px] py-[2px]
+      text-[11px] font-semibold;
   }
   .tag-ativo {
     @apply border-[rgba(63,185,80,.35)] bg-[color:var(--verde-suave)] text-verde;
@@ -178,8 +265,8 @@
     @apply border-[rgba(210,153,34,.35)] bg-[rgba(210,153,34,.12)] text-amarelo;
   }
   .chip {
-    @apply inline-flex items-center rounded-full border border-borda bg-sup2
-      px-2 py-0.5 text-[12px] text-txt3;
+    @apply inline-flex items-center gap-[7px] rounded-full border border-borda bg-sup
+      px-[11px] py-[4px] text-[11.5px] text-txt2;
   }
   .chip-op {
     @apply border-[rgba(108,182,255,.35)] bg-[color:var(--azul-suave)] text-azul;
@@ -313,14 +400,20 @@
 /* ---------------------------------------------------------------- v2.7: menu lateral, painel, chat */
 @layer components {
   .nav-item {
-    @apply flex w-full items-center gap-2.5 rounded-[9px] px-2.5 py-[9px] text-left
+    @apply flex w-full items-center gap-[11px] rounded-[9px] px-[10px] py-[8px] text-left
       text-[13.5px] text-txt2 transition-colors hover:bg-sup2 hover:text-txt
       focus-visible:outline-none focus-visible:ring-[3px] focus-visible:ring-[color:var(--azul-suave)];
     min-height: 44px; /* v3.19.2: ritmo unico — pai e filho com o mesmo alvo de toque */
   }
   .nav-item-on {
-    @apply bg-sup3 font-[550] text-txt;
-    box-shadow: inset 2px 0 0 #3fb950;
+    @apply text-txt;
+    font-weight: 550;
+    background: linear-gradient(180deg, #1d2532, #1a212c);
+    box-shadow: inset 0 0 0 1px #313b4b, 0 1px 2px rgba(0, 0, 0, 0.3);
+  }
+  .nav-item-on svg {
+    color: #4ccd60;
+    opacity: 1;
   }
   /* v3.20: pai expandido usa o filho como marca — um verde por vez, sem
      duas barras empilhadas (o dono mostrou o choque no print) */
@@ -386,19 +479,24 @@
   /* painel */
   .grade-kpi {
     @apply grid gap-2.5;
-    grid-template-columns: repeat(6, minmax(0, 1fr));
+    /* v3.49 — 6 colunas fixas espremiam o rótulo e ele quebrava no meio da palavra */
+    grid-template-columns: repeat(auto-fit, minmax(148px, 1fr));
   }
   .kpi {
-    @apply rounded-cartao border border-borda bg-sup px-3 py-2.5;
+    @apply rounded-cartao border border-borda bg-sup px-[14px] py-[11px];
+    box-shadow: 0 6px 18px rgba(0, 0, 0, 0.16);
   }
   .kpi-rot {
-    @apply text-[11px] text-txt3;
+    @apply text-[11.5px] text-txt2;
+    white-space: nowrap;
+    overflow: hidden;
+    text-overflow: ellipsis;
   }
   .kpi-val {
     @apply mt-0.5 text-[22px] font-semibold leading-tight tracking-[-0.4px];
   }
   .kpi-pe {
-    @apply mt-0.5 text-[11px] text-txt3;
+    @apply mt-0.5 truncate text-[11px] text-txt3;
   }
   .grade-2 {
     /* v3.20: colunas IGUAIS — 1.35fr/1fr fazia pares de campos parecerem acidente */
@@ -458,8 +556,8 @@
     @apply mb-3 whitespace-pre-wrap text-[14.5px] leading-relaxed;
   }
   .msg-eu {
-    @apply ml-auto max-w-[min(560px,88%)] rounded-[18px] rounded-br-[7px] border border-bordaforte
-      bg-sup3 px-3.5 py-2.5;
+    @apply ml-auto max-w-[min(560px,88%)] rounded-[16px] rounded-br-[6px] border border-borda
+      bg-sup2 px-3.5 py-2.5;
   }
   /* v3.14 — a resposta do assistente é texto solto na coluna (sem caixa): com resposta
      comprida, a borda virava uma moldura de página inteira no celular */
@@ -890,7 +988,7 @@
   /* altura honesta: a caixa é o que sobra da janela depois do cabeçalho do app, da
      pílula do topo, do pé e do rodapé — no celular o campo nunca passa do fim da tela */
   .chat-caixa {
-    @apply flex min-h-0 flex-1 flex-col overflow-hidden rounded-[18px] border border-borda bg-sup;
+    @apply flex min-h-0 flex-1 flex-col overflow-hidden rounded-[16px] border border-borda bg-[#0f1319];
   }
   .chat-msgs {
     @apply px-4 pt-4 pb-2;
@@ -937,10 +1035,10 @@
     }
   }
   .chat-composer {
-    @apply mx-auto flex items-end gap-2 rounded-xl border border-bordaforte
-      bg-sup2 py-1.5 pl-3.5 pr-1.5;
+    @apply mx-auto flex items-end gap-2 rounded-[14px] border border-borda
+      bg-[#111721] py-1.5 pl-3.5 pr-1.5;
     max-width: 780px;
-    min-height: 48px;
+    min-height: 50px;
   }
   .chat-composer:focus-within {
     border-color: rgba(108, 182, 255, 0.5);
@@ -961,8 +1059,9 @@
     text-overflow: ellipsis;
   }
   .chat-enviar {
-    @apply grid h-[34px] w-[34px] flex-none cursor-pointer place-items-center rounded-[10px]
+    @apply grid h-[36px] w-[36px] flex-none cursor-pointer place-items-center rounded-[10px]
       border-0 bg-verde text-vermelho-escuro hover:bg-verde-claro;
+    box-shadow: 0 2px 10px rgba(63, 185, 80, 0.18);
   }
   .chat-enviar:disabled {
     @apply cursor-default bg-sup3 text-txt3;
@@ -1166,8 +1265,17 @@
   /* v3.22 (preview aprovado) — estado vazio: boas-vindas + exemplos clicáveis
      (duas linhas por chip: pergunta + legenda, seta à direita) */
   .chat-vazio {
-    @apply mx-auto mt-8 flex flex-col;
+    @apply mx-auto flex w-full flex-col;
     max-width: 560px;
+  }
+  /* v3.49 — a conversa vazia fica no meio da janela, não grudada no topo.
+     A coluna do chat não é flex; o :has() liga o centralizador só quando o
+     estado vazio está na tela (mensagens continuam nascendo no topo). */
+  .chat-msgs:has(.chat-vazio) .chat-coluna {
+    display: flex;
+    min-height: 100%;
+    flex-direction: column;
+    justify-content: center;
   }
   .chat-vazio-titulo {
     font-size: 16px;

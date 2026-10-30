@@ -311,7 +311,10 @@ export function Gavetas({ operador, tenant, usuario, onAbrirUsuario, onVoltar, o
     return (
       <section>
         <div className="barra">
-          <h2>Usuários</h2>
+          <div>
+            <h1>Usuários</h1>
+            <div className="mt-1 text-[12.8px] text-txt3">cada pessoa tem a própria pasta de memória</div>
+          </div>
           <span className="flex-1" />
           <button
             id="btnNovoUsuario"

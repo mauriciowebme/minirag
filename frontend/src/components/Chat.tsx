@@ -1166,7 +1166,11 @@ export function Chat({
                         <span className="chat-chip-tit">{ex.t}</span>
                         <span className="chat-chip-sub">{ex.sub}</span>
                       </span>
-                      <span className="chat-chip-seta" aria-hidden="true">"▸"</span>
+                      <span className="chat-chip-seta" aria-hidden="true">
+                        <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round" strokeLinejoin="round">
+                          <path d="M9 6l6 6-6 6" />
+                        </svg>
+                      </span>
                     </button>
                   ))}
                 </div>
@@ -1497,7 +1501,10 @@ export function Chat({
               aria-label="nova conversa"
               onClick={() => void limpar()}
             >
-              ＋<span className="chat-nova-rotulo">nova conversa</span>
+              <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" aria-hidden="true">
+                <path d="M12 5v14M5 12h14" />
+              </svg>
+              <span className="chat-nova-rotulo">nova conversa</span>
             </button>
             <div
               className="chat-composer"

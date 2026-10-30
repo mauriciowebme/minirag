@@ -15,16 +15,28 @@ import type { GavetasResp, HealthResp, ProviderResp, Vista } from "./types";
 /* A ordem é do dono (27/10, v3.26.1): Chat é o PRINCIPAL (primeiro item, é a porta
    de entrada do app); Painel logo abaixo. Usuários/Gavetas em cima de Configurações.
    Arquivos e Editor são passos internos (usuário → gaveta → arquivos → nota). */
-const MENU: { id: Vista; rotulo: string; icone: string }[] = [
-  { id: "chat", rotulo: "Chat", icone: "💬" },
-  { id: "painel", rotulo: "Painel", icone: "▦" },
-  { id: "maquinas", rotulo: "Máquinas", icone: "🖥" },
+/* v3.49 — o menu deixa os emojis (cada um de um tamanho e cor) e passa a usar
+   o mesmo traço dos ícones do resto do sistema. */
+const IC = {
+  chat: <path d="M21 11.5a8.4 8.4 0 0 1-9 8.4 9.9 9.9 0 0 1-3.3-.5L3 21l1.6-4.7A8.2 8.2 0 0 1 3.6 11.5a8.4 8.4 0 0 1 9-8.4 8.4 8.4 0 0 1 8.4 8.4z" />,
+  painel: <><rect x="3" y="3" width="7" height="7" rx="1.5" /><rect x="14" y="3" width="7" height="7" rx="1.5" /><rect x="3" y="14" width="7" height="7" rx="1.5" /><rect x="14" y="14" width="7" height="7" rx="1.5" /></>,
+  maquinas: <><rect x="2.5" y="4" width="19" height="13" rx="2" /><path d="M8 21h8M12 17v4" /></>,
+  mcp: <><path d="M9 3v6M15 3v6M7 9h10v3a5 5 0 0 1-10 0V9zM12 17v4" /></>,
+  arquivos: <path d="M3 7.5A2.5 2.5 0 0 1 5.5 5h3.2a2 2 0 0 1 1.6.8l.9 1.2h7.3A2.5 2.5 0 0 1 21 9.5v7A2.5 2.5 0 0 1 18.5 19h-13A2.5 2.5 0 0 1 3 16.5v-9z" />,
+  gavetas: <><path d="M16 21v-2a4 4 0 0 0-4-4H6a4 4 0 0 0-4 4v2" /><circle cx="9" cy="7" r="4" /><path d="M22 21v-2a4 4 0 0 0-3-3.87" /></>,
+  config: <><circle cx="12" cy="12" r="3" /><path d="M19.4 15a1.7 1.7 0 0 0 .3 1.9l.1.1a2 2 0 1 1-2.8 2.8l-.1-.1a1.7 1.7 0 0 0-1.9-.3 1.7 1.7 0 0 0-1 1.5V21a2 2 0 1 1-4 0v-.1A1.7 1.7 0 0 0 9 19.4a1.7 1.7 0 0 0-1.9.3l-.1.1a2 2 0 1 1-2.8-2.8l.1-.1a1.7 1.7 0 0 0 .3-1.9 1.7 1.7 0 0 0-1.5-1H3a2 2 0 1 1 0-4h.1A1.7 1.7 0 0 0 4.6 9a1.7 1.7 0 0 0-.3-1.9l-.1-.1a2 2 0 1 1 2.8-2.8l.1.1a1.7 1.7 0 0 0 1.9.3H9a1.7 1.7 0 0 0 1-1.5V3a2 2 0 1 1 4 0v.1a1.7 1.7 0 0 0 1 1.5 1.7 1.7 0 0 0 1.9-.3l.1-.1a2 2 0 1 1 2.8 2.8l-.1.1a1.7 1.7 0 0 0-.3 1.9V9a1.7 1.7 0 0 0 1.5 1H21a2 2 0 1 1 0 4h-.1a1.7 1.7 0 0 0-1.5 1z" /></>,
+};
+
+const MENU: { id: Vista; rotulo: string; icone: keyof typeof IC }[] = [
+  { id: "chat", rotulo: "Chat", icone: "chat" },
+  { id: "painel", rotulo: "Painel", icone: "painel" },
+  { id: "maquinas", rotulo: "Máquinas", icone: "maquinas" },
   /* v3.36 — onde o usuário vê que a conta dele pode ser servidor MCP e escolhe o que liberar */
-  { id: "mcp", rotulo: "MCP", icone: "🔌" },
+  { id: "mcp", rotulo: "MCP", icone: "mcp" },
   /* v3.48 (T050): Buscar e Fila viraram DENTRO da tela Arquivos (aba RAG) */
-  { id: "arquivos", rotulo: "Arquivos", icone: "📁" },
-  { id: "gavetas", rotulo: "Gavetas", icone: "👤" },
-  { id: "config", rotulo: "Configurações", icone: "⚙" },
+  { id: "arquivos", rotulo: "Arquivos", icone: "arquivos" },
+  { id: "gavetas", rotulo: "Gavetas", icone: "gavetas" },
+  { id: "config", rotulo: "Configurações", icone: "config" },
 ];
 
 const DENTRO_DO_CAMINHO = new Set<Vista>(["gavetas", "arquivos", "editor"]);
@@ -252,9 +264,18 @@ export default function App() {
             className={"nav-item" + (ativo ? (m.id === "config" && cfgAberto ? " nav-item-suave" : " nav-item-on") : "")}
             onClick={() => (m.id === "config" ? cliqueConfig() : navegar(m.id))}
           >
-            <span className="w-4 text-center opacity-90" aria-hidden="true">
-              {m.icone}
-            </span>
+            <svg
+              className="h-4 w-4 flex-none opacity-80"
+              viewBox="0 0 24 24"
+              fill="none"
+              stroke="currentColor"
+              strokeWidth="1.6"
+              strokeLinecap="round"
+              strokeLinejoin="round"
+              aria-hidden="true"
+            >
+              {IC[m.icone]}
+            </svg>
             {rotulo}
             {m.id === "config" && (
               <span className={"nav-seta" + (cfgAberto ? " nav-seta-on" : "")} aria-hidden="true">
@@ -390,9 +411,8 @@ export default function App() {
           <button className="btn btn-sutil btn-mini lg:hidden" aria-label="abrir menu" onClick={() => setMenuAberto(true)}>
             ☰
           </button>
-          <h1 className="text-[15px] font-semibold">{titulo}</h1>
-          <span className="hidden text-[12px] text-txt3 sm:inline">
-            {vista === "painel" ? "visão geral do acervo" : vista === "config" ? "provider do chat, conta e limites" : ""}
+          <span className="text-[12.5px] font-medium text-txt3">
+            nexos <span className="mx-[5px] text-[#4a5462]">/</span> <span className="text-txt2">{titulo}</span>
           </span>
           <span className="flex-1" />
           {operador && tenant && (

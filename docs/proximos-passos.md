@@ -57,6 +57,7 @@
 | T044 | `rodar_lote` recusa 3 comandos curtos: limite de 4000 medido no comando JÁ codificado | maquinas-tools | 🟠 Alta | ✅ v3.38.1 | [#t044](#t044) |
 | T049 | Um único botão de anexo (imagem ou arquivo) | chat-ui | 🟢 Baixa | ✅ v3.48.0 | [#t049](#t049) |
 | T050 | Fusão de Buscar + Fila em **Arquivos** (abas RAG e Meus arquivos) | chat-ui + http + anexos | 🟡 Média | ✅ v3.48.0 | [#t050](#t050) |
+| T051 | Visual único no sistema inteiro (kit de componentes + 9 telas) | chat-ui | 🟡 Média | ✅ v3.49.0 | [#t051](#t051) |
 
 ---
 
@@ -716,6 +717,20 @@
 | **Trabalho medido** | Endpoints novos: `GET /anexos` (listar por usuário, do `anexos_maquina`, filtro e paginação) e `DELETE /anexos/:id` (apagar ficha + arquivo no disco, respeitando a retenção de 7 dias). Front: `Arquivos.tsx` ganha abas e busca; `Buscar.tsx` e `Jobs.tsx` saem do menu (Jobs vira componente embutido ou vai para o Painel do operador). Rota `#/buscar` e `#/fila` viram redirecionamento para `#/arquivos` para não quebrar link salvo. |
 | **Riscos** | Exclusão de arquivo no disco precisa de cuidado com `id`/nome (o `nomeLimpo` já existe) e nunca sair de `dados/<usuário>/`; a fila do operador (todos os tenants) não pode se perder na fusão — vai para a aba RAG filtrada por tenant ou para o Painel; e o menu do usuário comum precisa continuar com o que ele já enxerga hoje (Chat, Arquivos). |
 | **Prova exigida na execução** | Clicar de verdade: subir um pdf pela aba RAG e ver o status mudar na linha até concluído; forçar erro e ver o "tentar de novo"; buscar por nome e por sentido; abrir a aba Meus arquivos com anexo real do chat, baixar (sha256 igual) e apagar (some da lista e do disco); conferir que `#/buscar` cai em `#/arquivos`. |
+
+### T051 — Visual único no sistema inteiro
+
+| Campo | Conteúdo |
+|---|---|
+| **Módulo** | chat-ui (index.css, tailwind.config.js, App e 9 componentes) |
+| **Prioridade** | 🟡 Média — não muda função, muda a leitura do produto |
+| **Status** | ✅ Entregue na v3.49.0 (30/10) — tsc limpo + 9 telas no navegador + suíte 32/0 |
+| **Pedido** | "gostei da primeira mas quero que todo o sistema fique assim!" |
+| **Antes (medido)** | 6.148 linhas de tela em 10 componentes + 1.280 de CSS, cada tela com botão, campo, tabela e selo próprios; paleta com `txt3` em #7d8899 (contraste baixo no tema escuro); KPIs em 6 colunas fixas quebravam o rótulo no meio da palavra; chat vazio grudado no topo. |
+| **Desenho aprovado** | Prévia A: Meus arquivos como padrão, abas segmentadas com contador, tabela de verdade, busca larga, ação principal única. Base única de tipografia/espaçamento e componentes (botão, campo, aba, tabela, cartão, etiqueta, selo, modal, aviso). |
+| **O que foi feito** | `index.css` com tokens (`--txt2`, `--txt3`, `--borda`, `--sup`) e as classes-base; `tailwind.config.js` alinhado; App com cabeçalho e menu no padrão; Arquivos com abas + tabela; Chat com vazio centralizado e ícones em SVG; Painel com KPIs em `auto-fit` e rótulo em uma linha; Máquinas, MCP, Gavetas, Editor e Configurações migrados para a mesma casca. |
+| **Fora de escopo** | Login (palco próprio) e qualquer mudança de lógica, rota, campo ou permissão. |
+| **Prova exigida na execução** | `tsc --noEmit` limpo; rebuild do ambiente de teste; navegador real em #/painel, #/maquinas, #/mcp, #/arquivos (as duas abas, contador batendo com `GET /anexos`), #/gavetas, #/config e #/chat; suíte completa 32/0. |
 
 ## Lotes recomendados (executados — saíram na v3.18)
 

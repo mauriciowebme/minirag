@@ -108,9 +108,10 @@ export function Maquinas({ operador }: { operador: boolean }) {
   return (
     <section className="flex flex-col gap-3" id="telaMaquinas">
       <div className="barra">
-        <h2>
-          Máquinas <span className="sub2">— {operador ? "todas as máquinas (admin)" : "as suas máquinas"}</span>
-        </h2>
+        <div>
+          <h1>Máquinas</h1>
+          <div className="mt-1 text-[12.8px] text-txt3">{operador ? "todas as máquinas (admin)" : "as suas máquinas"}</div>
+        </div>
       </div>
 
       <div className="cartao">

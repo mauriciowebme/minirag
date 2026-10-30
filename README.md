@@ -22,6 +22,25 @@ parecidos com a pergunta, com uma nota de 0 a 1.
 
 ---
 ---
+## v3.49.0 (30/10) — o sistema inteiro com a mesma cara
+
+**O que você vê:** a tela de Arquivos deixou de ser um caso isolado e virou o padrão. Paleta mais clara
+para o texto secundário, cartões com sombra e borda iguais em toda parte, abas segmentadas com contador
+("Meus arquivos 48 · Base de conhecimento 12"), tabela com cabeçalho fixo e ações discretas na linha,
+selo de estado (pronto / processando / erro), mensagens de vazio com ícone, e a mesma tipografia e
+espaçamento em Chat, Painel, Máquinas, MCP, Arquivos, Usuários, Gavetas, Editor e Configurações.
+
+**Por que:** cada tela reescrevia botão, campo, tabela e selo do seu jeito — era o que fazia o conjunto
+parecer de várias mãos. Agora existe uma base única (`index.css` + `tailwind.config.js`) e as telas
+consomem essa base.
+
+**Como funciona:** não há rota, campo ou regra nova. É só casca visual: os mesmos dados, as mesmas
+permissões, as mesmas chamadas. O login ficou de fora (tem palco próprio).
+
+**Como é provado:** `tsc` limpo; ambiente de teste reconstruído; navegador real percorrendo as nove
+telas com clique de verdade nas abas de Arquivos (contador conferido contra `GET /anexos`); suíte
+completa **32 pass / 0 fail**.
+
 ## v3.48.0 (30/10) — Arquivos: uma tela para o RAG e para a pasta do usuário
 
 **O que você vê:** o menu ficou menor — Buscar e Fila sumiram e entrou **Arquivos**, com duas abas.
