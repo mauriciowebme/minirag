@@ -21,6 +21,7 @@ import { NOMES_MAQUINA_TOOLS } from "./maquinas_tools";
 
 /** Nomes que só o operador pode chamar (bate com o exigirOperador do src/mcp.ts). */
 export const SO_OPERADOR = new Set([
+  "rodar_python",
   "listar_usuarios",
   "criar_usuario",
   "apagar_usuario",
@@ -43,7 +44,7 @@ const GRUPOS: Record<string, Grupo> = {
   rename_doc: "documentos", archive_doc: "documentos",
   list_gavetas: "gavetas", create_gaveta: "gavetas", delete_gaveta: "gavetas",
   health: "operação", list_jobs: "operação", chat: "operação", config_provider: "operação",
-  mostrar_tela: "operação", web_search: "operação", web_open: "operação",
+  mostrar_tela: "operação", web_search: "operação", web_open: "operação", rodar_python: "operação",
   listar_usuarios: "usuários", criar_usuario: "usuários", apagar_usuario: "usuários",
   esquecimento: "usuários", listar_mcp: "usuários", gerir_mcp: "usuários",
   gerar_pareamento: "pareamento",

@@ -1,6 +1,6 @@
 /** MCP sobre POST /mcp — JSON-RPC 2.0 stateless, espelho das rotas REST. */
 import { Usuario, tenantFor } from "./config";
-import { HttpError } from "./errors";
+import { HttpError, erro403 } from "./errors";
 import {
   criarGaveta,
   deleteDoc,
@@ -69,6 +69,19 @@ type Tool = {
 };
 
 export const TOOLS: Tool[] = [
+  {
+    name: "rodar_python",
+    description:
+      "Roda um script Python no servidor e devolve o que ele imprimiu. Dentro do script, as ferramentas do nexos aparecem como funcoes do modulo nexos: `import nexos` e depois nexos.web_search(query=\"...\"), nexos.search(query=\"...\"), nexos.web_open(url=\"...\"), nexos.rodar_comando(...), etc (nexos.ferramentas() lista todas). Use quando o pedido exigir repetir, comparar, filtrar, juntar resultados ou salvar arquivo - em vez de chamar ferramenta por ferramenta. O script roda em pasta temporaria, com teto de 120s (parametro segundos) e sem acesso direto a internet (use as ferramentas). stdout e stderr voltam inteiros; cada chamada de ferramenta fica registrada na resposta.",
+    inputSchema: {
+      type: "object",
+      properties: {
+        codigo: { type: "string", description: "codigo Python a executar (obrigatorio)" },
+        segundos: { type: "integer", description: "teto de tempo em segundos (5 a 600; padrao 120)" },
+      },
+      required: ["codigo"],
+    },
+  },
   {
     name: "health",
     description:
@@ -813,6 +826,15 @@ async function executarTool(
   deps: { health: () => unknown },
 ) {
   switch (name) {
+    case "rodar_python": {
+      if (!user.operador) throw erro403("somente o operador pode rodar scripts");
+      const codigo = String(args.codigo ?? "");
+      if (!codigo.trim()) throw new Error("parametros invalidos: campo obrigatorio: codigo");
+      const { rodarPython } = await import("./sandbox");
+      return rodarPython(codigo, user, {
+        segundos: args.segundos === undefined ? undefined : Number(args.segundos),
+      });
+    }
     case "health":
       return deps.health();
     case "analisar_imagem":
