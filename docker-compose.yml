@@ -24,13 +24,13 @@ services:
     image: pgvector/pgvector:pg17
     restart: unless-stopped
     environment:
-      POSTGRES_USER: ${MINIRAG_DB_USER:-minirag}
-      POSTGRES_PASSWORD: ${MINIRAG_DB_PASSWORD:-minirag}
-      POSTGRES_DB: ${MINIRAG_DB_NAME:-minirag}
+      POSTGRES_USER: ${NEXOS_DB_USER:-${MINIRAG_DB_USER:-minirag}}
+      POSTGRES_PASSWORD: ${NEXOS_DB_PASSWORD:-${MINIRAG_DB_PASSWORD:-minirag}}
+      POSTGRES_DB: ${NEXOS_DB_NAME:-${MINIRAG_DB_NAME:-minirag}}
     volumes:
       - minirag_data:/var/lib/postgresql/data
     healthcheck:
-      test: ["CMD-SHELL", "pg_isready -U ${MINIRAG_DB_USER:-minirag} -d ${MINIRAG_DB_NAME:-minirag}"]
+      test: ["CMD-SHELL", "pg_isready -U ${NEXOS_DB_USER:-${MINIRAG_DB_USER:-minirag}} -d ${NEXOS_DB_NAME:-${MINIRAG_DB_NAME:-minirag}}"]
       interval: 10s
       timeout: 5s
       retries: 10
@@ -45,45 +45,45 @@ services:
     environment:
       # stdout sem buffer: log de boot aparece no docker logs / no painel
       PYTHONUNBUFFERED: "1"
-      MINIRAG_MODEL: ${MINIRAG_MODEL:-nomic-ai/nomic-embed-text-v1.5}
-      MINIRAG_MODEL_DIR: /app/models
-      MINIRAG_DB_HOST: minirag-db
-      MINIRAG_DB_PORT: "5432"
-      MINIRAG_DB_USER: ${MINIRAG_DB_USER:-minirag}
-      MINIRAG_DB_PASSWORD: ${MINIRAG_DB_PASSWORD:-minirag}
-      MINIRAG_DB_NAME: ${MINIRAG_DB_NAME:-minirag}
+      NEXOS_MODEL: ${NEXOS_MODEL:-${MINIRAG_MODEL:-nomic-ai/nomic-embed-text-v1.5}}
+      NEXOS_MODEL_DIR: /app/models
+      NEXOS_DB_HOST: minirag-db
+      NEXOS_DB_PORT: "5432"
+      NEXOS_DB_USER: ${NEXOS_DB_USER:-${MINIRAG_DB_USER:-minirag}}
+      NEXOS_DB_PASSWORD: ${NEXOS_DB_PASSWORD:-${MINIRAG_DB_PASSWORD:-minirag}}
+      NEXOS_DB_NAME: ${NEXOS_DB_NAME:-${MINIRAG_DB_NAME:-minirag}}
       # espera o banco no boot (no do host o Docker religa sem depends_on)
-      MINIRAG_DB_WAIT_TRIES: ${MINIRAG_DB_WAIT_TRIES:-30}
-      MINIRAG_DB_WAIT_SECONDS: ${MINIRAG_DB_WAIT_SECONDS:-2}
-      MINIRAG_MAX_CHUNK_WORDS: ${MINIRAG_MAX_CHUNK_WORDS:-500}
-      MINIRAG_CHUNK_OVERLAP: ${MINIRAG_CHUNK_OVERLAP:-80}
-      MINIRAG_TOP_K: ${MINIRAG_TOP_K:-5}
-      MINIRAG_MIN_SCORE: ${MINIRAG_MIN_SCORE:-0.55}
+      NEXOS_DB_WAIT_TRIES: ${NEXOS_DB_WAIT_TRIES:-${MINIRAG_DB_WAIT_TRIES:-30}}
+      NEXOS_DB_WAIT_SECONDS: ${NEXOS_DB_WAIT_SECONDS:-${MINIRAG_DB_WAIT_SECONDS:-2}}
+      NEXOS_MAX_CHUNK_WORDS: ${NEXOS_MAX_CHUNK_WORDS:-${MINIRAG_MAX_CHUNK_WORDS:-500}}
+      NEXOS_CHUNK_OVERLAP: ${NEXOS_CHUNK_OVERLAP:-${MINIRAG_CHUNK_OVERLAP:-80}}
+      NEXOS_TOP_K: ${NEXOS_TOP_K:-${MINIRAG_TOP_K:-5}}
+      NEXOS_MIN_SCORE: ${NEXOS_MIN_SCORE:-${MINIRAG_MIN_SCORE:-0.55}}
       # Limites de seguranca (uso normal nunca estoura)
-      MINIRAG_MAX_CONTENT_CHARS: ${MINIRAG_MAX_CONTENT_CHARS:-500000}
-      MINIRAG_MAX_QUERY_CHARS: ${MINIRAG_MAX_QUERY_CHARS:-2000}
-      MINIRAG_MAX_CHUNKS_TENANT: ${MINIRAG_MAX_CHUNKS_TENANT:-10000}
+      NEXOS_MAX_CONTENT_CHARS: ${NEXOS_MAX_CONTENT_CHARS:-${MINIRAG_MAX_CONTENT_CHARS:-500000}}
+      NEXOS_MAX_QUERY_CHARS: ${NEXOS_MAX_QUERY_CHARS:-${MINIRAG_MAX_QUERY_CHARS:-2000}}
+      NEXOS_MAX_CHUNKS_TENANT: ${NEXOS_MAX_CHUNKS_TENANT:-${MINIRAG_MAX_CHUNKS_TENANT:-10000}}
       # Memoria inteligente (decay): arquiva DOCUMENTO pouco usado (soma dos
       # acessos dos chunks do doc) ha N dias; reversivel (busca com
       # include_archived acha e revive o documento inteiro)
-      MINIRAG_DECAY_ATIVO: ${MINIRAG_DECAY_ATIVO:-1}
-      MINIRAG_DECAY_DIAS: ${MINIRAG_DECAY_DIAS:-30}
-      MINIRAG_DECAY_MIN_ACESSOS: ${MINIRAG_DECAY_MIN_ACESSOS:-2}
-      MINIRAG_DECAY_INTERVALO_MINUTOS: ${MINIRAG_DECAY_INTERVALO_MINUTOS:-60}
-      MINIRAG_USERS: ${MINIRAG_USERS:-}
+      NEXOS_DECAY_ATIVO: ${NEXOS_DECAY_ATIVO:-${MINIRAG_DECAY_ATIVO:-1}}
+      NEXOS_DECAY_DIAS: ${NEXOS_DECAY_DIAS:-${MINIRAG_DECAY_DIAS:-30}}
+      NEXOS_DECAY_MIN_ACESSOS: ${NEXOS_DECAY_MIN_ACESSOS:-${MINIRAG_DECAY_MIN_ACESSOS:-2}}
+      NEXOS_DECAY_INTERVALO_MINUTOS: ${NEXOS_DECAY_INTERVALO_MINUTOS:-${MINIRAG_DECAY_INTERVALO_MINUTOS:-60}}
+      NEXOS_USERS: ${NEXOS_USERS:-${MINIRAG_USERS:-}}
       # v2: embedder Python roda DENTRO deste container, em 127.0.0.1:8001
       # (filho do Node). "externo" só para desenvolvimento fora do Docker.
-      MINIRAG_EMBEDDER_MODO: ${MINIRAG_EMBEDDER_MODO:-filho}
-      MINIRAG_EMBEDDER_PORT: ${MINIRAG_EMBEDDER_PORT:-8001}
+      NEXOS_EMBEDDER_MODO: ${NEXOS_EMBEDDER_MODO:-${MINIRAG_EMBEDDER_MODO:-filho}}
+      NEXOS_EMBEDDER_PORT: ${NEXOS_EMBEDDER_PORT:-${MINIRAG_EMBEDDER_PORT:-8001}}
       # v1.8: chave(s) de operador "nome:chave" — veem TODAS as gavetas e
       # operam em tenant alheio (?tenant=). Login comum permanece por-tenant.
-      MINIRAG_ADMIN: ${MINIRAG_ADMIN:-}
-      MINIRAG_OPERADOR: ${MINIRAG_OPERADOR:-}
-      MINIRAG_CORS_ORIGINS: ${MINIRAG_CORS_ORIGINS:-}
+      NEXOS_ADMIN: ${NEXOS_ADMIN:-${MINIRAG_ADMIN:-}}
+      NEXOS_OPERADOR: ${NEXOS_OPERADOR:-${MINIRAG_OPERADOR:-}}
+      NEXOS_CORS_ORIGINS: ${NEXOS_CORS_ORIGINS:-${MINIRAG_CORS_ORIGINS:-}}
       # v3.45: pasta dos arquivos que as máquinas mandam (volume por usuário)
-      MINIRAG_ARQUIVOS_DIR: ${MINIRAG_ARQUIVOS_DIR:-/app/dados/anexos}
-      MINIRAG_MAX_ARQUIVO_MB: ${MINIRAG_MAX_ARQUIVO_MB:-10240}
-      MINIRAG_ARQUIVOS_DIAS: ${MINIRAG_ARQUIVOS_DIAS:-7}
+      NEXOS_ARQUIVOS_DIR: ${NEXOS_ARQUIVOS_DIR:-${MINIRAG_ARQUIVOS_DIR:-/app/dados/anexos}}
+      NEXOS_MAX_ARQUIVO_MB: ${NEXOS_MAX_ARQUIVO_MB:-${MINIRAG_MAX_ARQUIVO_MB:-10240}}
+      NEXOS_ARQUIVOS_DIAS: ${NEXOS_ARQUIVOS_DIAS:-${MINIRAG_ARQUIVOS_DIAS:-7}}
     depends_on:
       minirag-db:
         condition: service_healthy
