@@ -22,6 +22,22 @@ parecidos com a pergunta, com uma nota de 0 a 1.
 
 ---
 ---
+## v3.49.2 (30/10) — reenviar o mesmo arquivo deixou de dar "offset fora de ordem"
+
+**O que você vê:** `baixar_arquivo`, `copiar_arquivo` e `capturar_tela` funcionam também quando o
+arquivo já tinha sido enviado antes; o envio não fica mais preso em 0%.
+
+**Por que quebrava:** o comando que pergunta ao servidor "quantos bytes você já tem" montava a URL
+sem aspas. A URL tem `&` (id, chave, host, tenant) e o PowerShell trata `&` como operador — o
+comando morria, o status voltava sempre 0 e o cliente recomeçava do zero um arquivo que já estava
+completo. O servidor recusava com "offset fora de ordem".
+
+**Como ficou:** URL entre aspas; progresso do PowerShell silenciado (`$ProgressPreference`), que
+sujava o stderr com CLIXML; e `enviar_para_maquina` agora põe aspas no caminho de destino.
+
+**Como é provado:** na máquina Windows real, o mesmo arquivo baixado duas vezes seguidas (a segunda
+é o caso que falhava), captura de tela e cópia de ida e volta.
+
 ## v3.49.1 (30/10) — as três ferramentas que mexem em arquivo voltam a funcionar no Windows
 
 **O que você vê:** `capturar_tela`, `baixar_arquivo` e `copiar_arquivo` param de responder

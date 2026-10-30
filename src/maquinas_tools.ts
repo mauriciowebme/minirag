@@ -32,7 +32,11 @@ const b64 = (buf: Buffer): string => buf.toString("base64");
 
 /** powershell -NoProfile -EncodedCommand <b64 utf-16le> (roundtrip garantido: utf16le nunca falha) */
 export function psEncoded(script: string): string {
-  const enc = Buffer.from(script, "utf16le").toString("base64");
+  /* v3.49.2 — o Add-Type escreve progresso em stderr (CLIXML) na primeira execução de cada
+     processo, e isso sujava a leitura do resultado (o upload "parava em 0%"). Progresso
+     silenciado em TODO script: stdout volta limpo. */
+  const corpo = "$ProgressPreference='SilentlyContinue'\n" + script;
+  const enc = Buffer.from(corpo, "utf16le").toString("base64");
   return `powershell -NoProfile -EncodedCommand ${enc}`;
 }
 
@@ -1045,7 +1049,10 @@ async function statusDoEnvio(ctx: Ctx, base: string, id: string, chave: string):
   const url = `${base}/maquina/r/status?id=${id}&k=${encodeURIComponent(chave)}` +
     `&host=${encodeURIComponent(ctx.host)}&tenant=${encodeURIComponent(ctx.alvo)}`;
   const cmd = ctx.so === "windows"
-    ? psEncoded(`$r = curl.exe -sS --fail --max-time 60 ${pq(url)}\nif ($LASTEXITCODE -ne 0) { exit 7 }\nWrite-Output $r\n`)
+    /* v3.49.2 — a URL tem & (id, k, host, tenant). Sem aspas o PowerShell lê o & como
+       operador e o comando morre: o status voltava sempre 0 e o reenvio de um arquivo já
+       completo batia em "offset fora de ordem". */
+    ? psEncoded(`$r = curl.exe -sS --fail --max-time 60 '${pq(url)}'\nif ($LASTEXITCODE -ne 0) { exit 7 }\nWrite-Output $r\n`)
     : shCmd(`curl -sS --fail --max-time 60 ${sq(url)}`);
   const res = await exec(ctx, cmd, 90, 2000);
   if (res.exit !== 0) return 0; // servidor sem ficha: começa do zero
@@ -1241,7 +1248,11 @@ async function enviarParaMaquina(ctx: Ctx, args: Record<string, unknown>): Promi
     (soDestino === "windows" ? `%USERPROFILE%\\Downloads\\${nomeSeguro}` : `~/Downloads/${nomeSeguro}`);
   /* O pedaço que vai para o shell tem QUOTE próprio: caminho com espaço não quebra,
      e o caminho padrão usa a pasta do usuário da máquina (ExpandEnvironment / $HOME). */
-  const caminhoWin = destino ? pq(destino) : `(Join-Path (Join-Path $env:USERPROFILE 'Downloads') ${pq(nomeSeguro)})`;
+  /* v3.49.2 — pq() só duplica aspas simples; sem as aspas de fora o PS lia o caminho como
+     nome de comando ("O termo 'C:\...' não é reconhecido como nome de cmdlet"). */
+  const caminhoWin = destino
+    ? `'${pq(destino)}'`
+    : `(Join-Path (Join-Path $env:USERPROFILE 'Downloads') '${pq(nomeSeguro)}')`;
   const caminhoUnix = destino ? sq(destino) : `"$HOME/Downloads/${nomeSeguro}"`;
 
   const chave = criarUploadDeArquivo(ficha.caminho, ficha.nome, ficha.bytes, hostDestino);

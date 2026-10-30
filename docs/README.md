@@ -1,6 +1,6 @@
 # Mapa da documentação — Nexos
 
-> **Última atualização:** 2026-10-30 · **Versão:** 3.49.1 · **Dono:** Mauricio
+> **Última atualização:** 2026-10-30 · **Versão:** 3.49.2 · **Dono:** Mauricio
 
 O que vai onde (lugares canônicos da casa — padrão `organizacao-documentacao`; a tabela da skill é a dona, este mapa só registra o estado do repo):
 
