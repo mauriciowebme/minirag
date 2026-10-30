@@ -1,4 +1,4 @@
-"""Motor de embedding do minirag — processo filho do Node, só em 127.0.0.1.
+"""Motor de embedding do nexos — processo filho do Node, só em 127.0.0.1.
 
 Por que existe separado: o nomic-embed-text-v1.5 roda em torch/CPU e o
 sentence-transformers e o caminho estavel para ele. Manter este pedaco em
@@ -19,11 +19,11 @@ try:  # uvicorn importa como pacote (embedder.embed_server)
 except ImportError:  # execução direta / warmup do build (cwd = embedder/)
     import ocr as motor_ocr
 
-MODEL_NAME = os.environ.get("MINIRAG_MODEL", "nomic-ai/nomic-embed-text-v1.5")
-MODEL_DIR = os.environ.get("MINIRAG_MODEL_DIR", "/app/models")
-MAX_TEXTS = int(os.environ.get("MINIRAG_EMBED_MAX_TEXTS", "256"))
+MODEL_NAME = (os.environ.get("NEXOS_MODEL") or os.environ.get("MINIRAG_MODEL", "nomic-ai/nomic-embed-text-v1.5"))
+MODEL_DIR = (os.environ.get("NEXOS_MODEL_DIR") or os.environ.get("MINIRAG_MODEL_DIR", "/app/models"))
+MAX_TEXTS = int((os.environ.get("NEXOS_EMBED_MAX_TEXTS") or os.environ.get("MINIRAG_EMBED_MAX_TEXTS", "256")))
 
-app = FastAPI(title="minirag-embedder", docs_url=None, redoc_url=None)
+app = FastAPI(title="nexos-embedder", docs_url=None, redoc_url=None)
 
 _model = None
 _dim = 0

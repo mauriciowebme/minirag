@@ -1,8 +1,8 @@
 #!/usr/bin/env node
 /*
- * Cliente de máquina — minirag v3.6 (túnel absorvido)
+ * Cliente de máquina — nexos v3.6 (túnel absorvido)
  *
- * Um arquivo, sem instalação: conecta no hub do minirag, recebe comandos e
+ * Um arquivo, sem instalação: conecta no hub do nexos, recebe comandos e
  * executa NA MÁQUINA onde roda. Wire herdado do agent-tunel, tags intactas:
  *   cliente → servidor: {"token","host","os","user"}  (oi)
  *   servidor → cliente: {"cmd","rotulo","espera","bg"?}   (bg ausente = comportamento antigo)
@@ -11,7 +11,7 @@
  *
  * Cores do longo prazo (decisão do dono 22/10):
  *  - o token de pareamento é de uso único: ao receber o token de máquina no
- *    ack, o cliente ADOTA, persiste (~/.minirag-maquina.json) e reconecta com
+ *    ack, o cliente ADOTA, persiste (~/.nexos-maquina.json) e reconecta com
  *    ele — a suíte pegou exatamente esse defeito no cliente falso da primeira vez;
  *  - reconexão com backoff (400ms → 30s), heartbeat por ping do protocolo
  *    (o WebSocket nativo do Node responde pong sozinho), kill de ÁRVORE em timeout;
@@ -37,7 +37,7 @@ const https = require("node:https");
 const { spawn, spawnSync } = require("node:child_process");
 
 const EH_WIN = process.platform === "win32";
-const VERSAO_CLIENTE = process.env.MINIRAG_CLIENTE_VERSAO || "dev";
+const VERSAO_CLIENTE = process.env.NEXOS_CLIENTE_VERSAO || process.env.MINIRAG_CLIENTE_VERSAO || "dev";
 
 const argv = process.argv.slice(2);
 function flag(nome, padrao) {
@@ -46,8 +46,8 @@ function flag(nome, padrao) {
 }
 
 /* ---------------- alvo ---------------- */
-const confPath = flag("conf", process.env.MINIRAG_MAQUINA_CONF || path.join(os.homedir(), ".minirag-maquina.json"));
-let base = flag("url", process.env.MINIRAG_MAQUINA_URL || lerConf().url || "https://minirag.techupsistemas.com");
+const confPath = flag("conf", process.env.NEXOS_MAQUINA_CONF || process.env.MINIRAG_MAQUINA_CONF || path.join(os.homedir(), ".minirag-maquina.json"));
+let base = flag("url", process.env.NEXOS_MAQUINA_URL || process.env.MINIRAG_MAQUINA_URL || lerConf().url || "https://minirag.techupsistemas.com");
 if (!/^https?:/i.test(base)) base = "https://" + base;
 const URL_WS = (() => {
   const u = new URL(base);
@@ -55,7 +55,7 @@ const URL_WS = (() => {
   u.pathname = "/maquina/ws";
   return u.toString();
 })();
-const host = flag("host", process.env.MINIRAG_MAQUINA_HOST || os.hostname());
+const host = flag("host", process.env.NEXOS_MAQUINA_HOST || process.env.MINIRAG_MAQUINA_HOST || os.hostname());
 
 function lerConf() {
   try {
@@ -313,7 +313,7 @@ function iniciarPainel() {
       res.end(JSON.stringify({ saindo: true }));
       log("outro cliente desta máquina pediu para eu sair — ele vai assumir; adeus");
       morrendo = true;
-      fecharJanelasMinirag();
+      fecharJanelasNexos();
       try { if (ws) ws.close(); } catch { /* ignore */ }
       setTimeout(() => process.exit(0), 300);
       return;
@@ -422,8 +422,8 @@ function abrirJanela(url) {
   const navegador = acharNavegadorApp();
   if (navegador) {
     try {
-      const perfil = path.join(path.dirname(confPath), ".minirag-janela");
-      if (EH_WIN) fecharJanelasMiniragSync();
+      const perfil = path.join(path.dirname(confPath), ".nexos-janela");
+      if (EH_WIN) fecharJanelasNexosSync();
       // v3.16.5: --disable-gpu — seguro e de graça para esta tela de texto/botões.
       // v3.16.6: windowsHide FORA daqui — A/B medido 24/10 na Noot: janela nascida com
       // SW_HIDE (windowsHide) fica preta (compositor sem primeiro paint); o MESMO
@@ -451,9 +451,9 @@ function abrirNavegadorPadrao(url) {
  * fecho as janelas do painel que abre. A janela do Edge/Chrome --app é processo SEPARADO
  * de mim: se ficar viva, o dono vê DUAS telas depois da troca (a página congelada do
  * processo morto + a nova) — medido 24/10 na Noot. Mato só os processos com o MEU perfil
- * (.minirag-janela) na linha de comando; janelas normais do dono não são tocadas.
+ * (.nexos-janela) na linha de comando; janelas normais do dono não são tocadas.
  * Fire-and-forget detached: o powershell termina o serviço mesmo depois do meu exit. */
-function fecharJanelasMiniragSync() {
+function fecharJanelasNexosSync() {
   // v3.16.4: abrir janela SEMPRE em browser novo. Medido 24/10 na Noot: reabrir o exe
   // entrava no browser órfão do perfil (mesmo user-data-dir = um browser só) e herdava
   // o compositor quebrado dele — tela preta que reboot nenhum curava, porque a janela
@@ -463,17 +463,17 @@ function fecharJanelasMiniragSync() {
   // do cliente novo e matava só os render dele: quadro de janela vivo, corpo preto
   // (print np13 da Noot, 24/10). Browser recém-nascido é intocável; fantasma velho morre.
   try {
-    const ps = "Get-CimInstance Win32_Process -Filter \"Name='msedge.exe' OR Name='chrome.exe'\" | Where-Object { $_.CommandLine -match 'minirag-janela' -and $_.CreationDate -lt (Get-Date).AddSeconds(-5) } | ForEach-Object { Stop-Process -Id $_.ProcessId -Force -ErrorAction SilentlyContinue }";
+    const ps = "Get-CimInstance Win32_Process -Filter \"Name='msedge.exe' OR Name='chrome.exe'\" | Where-Object { $_.CommandLine -match 'nexos-janela' -and $_.CreationDate -lt (Get-Date).AddSeconds(-5) } | ForEach-Object { Stop-Process -Id $_.ProcessId -Force -ErrorAction SilentlyContinue }";
     spawnSync("powershell.exe", ["-NoProfile", "-Command", ps], { windowsHide: true, timeout: 5000, stdio: "ignore" });
   } catch { /* mudo: abrir sem expurgo > nao abrir */ }
 }
-function fecharJanelasMinirag() {
+function fecharJanelasNexos() {
   if (!EH_WIN) return;
   // v3.16.9: era fire-and-forget — o powershell continuava vivo DEPOIS do meu exit e o
   // CIM lento mordia o browser novo do sucessor (tela preta intermitente na troca e no
   // dois-cliques). Agora é SYNC: ninguém sai daqui com matador solto na praça.
   try {
-    const ps = "Get-CimInstance Win32_Process -Filter \"Name='msedge.exe' OR Name='chrome.exe'\" | Where-Object { $_.CommandLine -match 'minirag-janela' -and $_.CreationDate -lt (Get-Date).AddSeconds(-5) } | ForEach-Object { Stop-Process -Id $_.ProcessId -Force -ErrorAction SilentlyContinue }";
+    const ps = "Get-CimInstance Win32_Process -Filter \"Name='msedge.exe' OR Name='chrome.exe'\" | Where-Object { $_.CommandLine -match 'nexos-janela' -and $_.CreationDate -lt (Get-Date).AddSeconds(-5) } | ForEach-Object { Stop-Process -Id $_.ProcessId -Force -ErrorAction SilentlyContinue }";
     spawnSync("powershell.exe", ["-NoProfile", "-Command", ps], { windowsHide: true, timeout: 5000, stdio: "ignore" });
   } catch { /* mudo: melhor janela sobrando do que cliente travado */ }
 }
@@ -481,7 +481,7 @@ function fecharJanelasMinirag() {
  * Sem segredo algum na tela — o token nunca é exibido. */
 const PAINEL_HTML = "<!doctype html><html lang=pt-br><head><meta charset=utf-8>" +
 "<meta name=viewport content='width=device-width,initial-scale=1'>" +
-"<title>minirag · cliente</title><style>" +
+"<title>nexos · cliente</title><style>" +
 ":root{color-scheme:dark}*{box-sizing:border-box}body{margin:0;font:14px/1.45 system-ui,Segoe UI,Roboto,sans-serif;background:radial-gradient(1200px 600px at 70% -10%,#123 0,#0b1020 55%,#090d18 100%);color:#dbe4f3;min-height:100vh}" +
 "header{display:flex;align-items:center;gap:12px;padding:18px 22px;border-bottom:1px solid #1c2740}" +
 "header .logo{font-size:22px}h1{font-size:16px;margin:0;font-weight:600}header .dir{margin-left:auto;font-size:12px;color:#8fa1c0;text-align:right}" +
@@ -498,7 +498,7 @@ const PAINEL_HTML = "<!doctype html><html lang=pt-br><head><meta charset=utf-8>"
 ".ok{color:#3ddc84}.ruim{color:#ff5d5d}pre{margin:0;max-height:260px;overflow:auto;background:#0a0f1e;border-radius:8px;padding:10px;font-size:11.5px;color:#aebcd8;white-space:pre-wrap;word-break:break-word}" +
 "footer{padding:10px 22px 18px;font-size:11px;color:#5f6f90}" +
 "</style></head><body>" +
-"<header><span class=logo>🛰️</span><h1>minirag — cliente da máquina</h1><div class=dir id=dir></div></header>" +
+"<header><span class=logo>🛰️</span><h1>nexos — cliente da máquina</h1><div class=dir id=dir></div></header>" +
 "<main>" +
 "<section><h2>Conexão</h2><div class=linha><i class='dot off' id=dot></i><b id=ctxt>carregando…</b></div><div class=sub id=quando></div><div class=sub id=negado style='color:#ff8d8d'></div></section>" +
 "<section><h2>Máquina</h2><div class=grade id=mach></div></section>" +
@@ -511,7 +511,7 @@ const PAINEL_HTML = "<!doctype html><html lang=pt-br><head><meta charset=utf-8>"
 "function tempoDaUltima(e){if(!ultimo.host||!e.ultima_tentativa)return'';var s=Math.max(0,Math.round((Date.now()-new Date(e.ultima_tentativa))/1000));return 'última tentativa há '+s+'s — o programa continua tentando sozinho'}" +
 "function apply(e){" +
 "var d=document.getElementById('dot');d.className='dot '+(e.online?'on':'off');" +
-"document.getElementById('ctxt').textContent=e.online?'ONLINE no minirag':'desconectado — reconecta sozinho';" +
+"document.getElementById('ctxt').textContent=e.online?'ONLINE no nexos':'desconectado — reconecta sozinho';" +
 "document.getElementById('quando').textContent=e.online?'conectado desde '+new Date(e.conectou_em).toLocaleString('pt-BR'):tempoDaUltima(e);" +
 "document.getElementById('negado').textContent=e.negado?'servidor negou: '+e.negado:'';" +
 "document.getElementById('dir').textContent='v'+e.versao+(e.porta?' · porta '+e.porta:'');" +
@@ -617,7 +617,7 @@ function conectar() {
     if (m.ack) {
       if (m.ack === "ok") {
         negadoPermanente = false;
-        log("ONLINE no minirag");
+        log("ONLINE no nexos");
         setOnline(true);
         if (m.token && m.token !== token) {
           token = m.token; // PAREAMENTO → token de máquina: adota e persiste (reconexão não pode usar o pareamento queimado)
@@ -787,7 +787,7 @@ async function verificarAtualizacao() {
     setAtualizacao({ fase: "trocando", pct: 100 });
     const novoExe = trocarExe(eu, tmp, j.versao);
     log("exe novo no lugar (" + novoExe.split(/[\\/]/).pop() + ") — reabrindo em janela própria (minimizada, sem roubar tua tela)");
-    fecharJanelasMinirag(); // v3.16.3: não deixo minha janela velha viva atrás de mim (duas telas na Noot, 24/10)
+    fecharJanelasNexos(); // v3.16.3: não deixo minha janela velha viva atrás de mim (duas telas na Noot, 24/10)
     const semToken = (() => { const i = argv.indexOf("--token"); return i < 0 ? argv : [...argv.slice(0, i), ...argv.slice(i + 2)]; })();
     const err = await relancar(novoExe, semToken);
     if (err) log("update aplicado mas relancar falhou: " + err.message + " (reabra o exe; esta janela segue funcionando)");

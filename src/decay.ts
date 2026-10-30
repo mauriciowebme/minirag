@@ -73,7 +73,7 @@ export function iniciarDecayLoop(onArquivou: (n: number) => void): void {
       if (r.arquivados_agora) onArquivou(r.arquivados_agora);
     } catch (e) {
       // nunca derruba o servidor por manutenção
-      process.stdout.write(`[minirag] decay falhou: ${(e as Error).message}\n`);
+      process.stdout.write(`[nexos] decay falhou: ${(e as Error).message}\n`);
     }
   }, CONFIG.decayIntervaloMinutos * 60 * 1000);
   timer.unref?.();

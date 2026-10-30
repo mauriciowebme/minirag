@@ -59,7 +59,7 @@ export async function chamarToolInterna(name: string, args: Record<string, unkno
 }
 
 const PROTOCOLOS = ["2025-06-18", "2025-03-10", "2024-11-05"];
-const SERVER_INFO = { name: "minirag", version: CONFIG.versao };
+const SERVER_INFO = { name: "nexos", version: CONFIG.versao };
 
 type Tool = {
   name: string;
@@ -316,7 +316,7 @@ export const TOOLS: Tool[] = [
   {
     name: "chat",
     description:
-      "Pergunta para o chat do minirag. O modelo responde com o provider configurado, as instrucoes do system prompt e as ferramentas ligadas (mcp interno + servidores externos); devolve a resposta e o que foi chamado.",
+      "Pergunta para o chat do nexos. O modelo responde com o provider configurado, as instrucoes do system prompt e as ferramentas ligadas (mcp interno + servidores externos); devolve a resposta e o que foi chamado.",
     inputSchema: {
       type: "object",
       properties: {
@@ -384,7 +384,7 @@ export const TOOLS: Tool[] = [
         chave: { type: "string", description: "omita para manter a chave ja salva" },
         temperatura: { type: "number" },
         system_prompt: { type: "string", description: "instrucoes iniciais do modelo; vazio = nenhuma instrucao" },
-        mcp_interno: { type: "boolean", description: "ligar as ferramentas do proprio minirag no chat" },
+        mcp_interno: { type: "boolean", description: "ligar as ferramentas do proprio nexos no chat" },
         max_rodadas: { type: "integer", description: "rodadas de ferramenta por pergunta (0-60; default 5)" },
         ativo: { type: "boolean" },
         global: { type: "boolean", description: "gravar como padrao global (so operador)" },

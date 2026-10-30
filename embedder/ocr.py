@@ -1,4 +1,4 @@
-"""OCR do minirag — imagem e PDF escaneado, rodando no processo do embedder.
+"""OCR do nexos — imagem e PDF escaneado, rodando no processo do embedder.
 
 Por que aqui e nao no Node: o leitor de texto (rapidocr, modelos PP-OCRv6 em
 onnxruntime) e Python, e este processo ja existe como filho do Node. Assim o
@@ -22,10 +22,10 @@ import threading
 import time
 from typing import List, Optional, Tuple
 
-PAGINAS_MAX = int(os.environ.get("MINIRAG_OCR_PAGINAS_MAX", "6"))
-DPI = int(os.environ.get("MINIRAG_OCR_DPI", "150"))
+PAGINAS_MAX = int((os.environ.get("NEXOS_OCR_PAGINAS_MAX") or os.environ.get("MINIRAG_OCR_PAGINAS_MAX", "6")))
+DPI = int((os.environ.get("NEXOS_OCR_DPI") or os.environ.get("MINIRAG_OCR_DPI", "150")))
 # prints/cortes pequenos perdem linha no OCR: abaixo disso, dobra a resolucao
-LARGURA_MIN = int(os.environ.get("MINIRAG_OCR_LARGURA_MIN", "900"))
+LARGURA_MIN = int((os.environ.get("NEXOS_OCR_LARGURA_MIN") or os.environ.get("MINIRAG_OCR_LARGURA_MIN", "900")))
 ENGINE_NOME = "rapidocr/PP-OCRv6"
 
 _engine = None

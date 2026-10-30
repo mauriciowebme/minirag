@@ -1,5 +1,14 @@
-/** Configuração do minirag — mesmas variáveis MINIRAG_* da v1.x. */
+/** Configuração do Nexos — aceita as variáveis novas NEXOS_* e as antigas MINIRAG_*. */
 import os from "node:os";
+
+/* v3.47: o produto passou a se chamar Nexos. O Dokploy ainda injeta MINIRAG_*, e
+   ninguém precisa parar o deploy para migrar: aqui as antigas viram NEXOS_* quando
+   a nova não existe. Definir as duas = a NEXOS_* vence, sem aviso de conflito. */
+for (const [chave, valor] of Object.entries(process.env)) {
+  if (!chave.startsWith("MINIRAG_") || valor === undefined) continue;
+  const nova = "NEXOS_" + chave.slice("MINIRAG_".length);
+  if (process.env[nova] === undefined) process.env[nova] = valor;
+}
 
 function int(name: string, def: number): number {
   const raw = process.env[name];
@@ -22,61 +31,61 @@ function bool(name: string, def: boolean): boolean {
 }
 
 export const CONFIG = {
-  versao: "3.46.0",
-  model: process.env.MINIRAG_MODEL ?? "nomic-ai/nomic-embed-text-v1.5",
-  modelDir: process.env.MINIRAG_MODEL_DIR ?? "/app/models",
+  versao: "3.47.0",
+  model: process.env.NEXOS_MODEL ?? "nomic-ai/nomic-embed-text-v1.5",
+  modelDir: process.env.NEXOS_MODEL_DIR ?? "/app/models",
 
-  dbHost: process.env.MINIRAG_DB_HOST ?? "minirag-db",
-  dbPort: int("MINIRAG_DB_PORT", 5432),
-  dbUser: process.env.MINIRAG_DB_USER ?? "minirag",
-  dbPassword: process.env.MINIRAG_DB_PASSWORD ?? "minirag",
-  dbName: process.env.MINIRAG_DB_NAME ?? "minirag",
-  dbWaitTries: int("MINIRAG_DB_WAIT_TRIES", 30),
-  dbWaitSeconds: int("MINIRAG_DB_WAIT_SECONDS", 2),
+  dbHost: process.env.NEXOS_DB_HOST ?? "minirag-db",
+  dbPort: int("NEXOS_DB_PORT", 5432),
+  dbUser: process.env.NEXOS_DB_USER ?? "minirag",
+  dbPassword: process.env.NEXOS_DB_PASSWORD ?? "minirag",
+  dbName: process.env.NEXOS_DB_NAME ?? "minirag",
+  dbWaitTries: int("NEXOS_DB_WAIT_TRIES", 30),
+  dbWaitSeconds: int("NEXOS_DB_WAIT_SECONDS", 2),
 
-  maxChunkWords: int("MINIRAG_MAX_CHUNK_WORDS", 500),
-  chunkOverlap: int("MINIRAG_CHUNK_OVERLAP", 80),
-  topK: int("MINIRAG_TOP_K", 5),
-  minScore: flt("MINIRAG_MIN_SCORE", 0.55),
+  maxChunkWords: int("NEXOS_MAX_CHUNK_WORDS", 500),
+  chunkOverlap: int("NEXOS_CHUNK_OVERLAP", 80),
+  topK: int("NEXOS_TOP_K", 5),
+  minScore: flt("NEXOS_MIN_SCORE", 0.55),
 
   /* v3.45: arquivos da máquina vivem em DISCO (pasta por usuário), não no banco.
      O teto é o espaço do volume; 10 GB é o padrão pedido pelo dono. */
-  arquivosDir: process.env.MINIRAG_ARQUIVOS_DIR ?? "/app/dados/anexos",
-  maxArquivoBytes: int("MINIRAG_MAX_ARQUIVO_MB", 10_240) * 1024 * 1024,
-  arquivosDias: int("MINIRAG_ARQUIVOS_DIAS", 7),
+  arquivosDir: process.env.NEXOS_ARQUIVOS_DIR ?? "/app/dados/anexos",
+  maxArquivoBytes: int("NEXOS_MAX_ARQUIVO_MB", 10_240) * 1024 * 1024,
+  arquivosDias: int("NEXOS_ARQUIVOS_DIAS", 7),
 
-  maxContentChars: int("MINIRAG_MAX_CONTENT_CHARS", 500_000),
-  maxQueryChars: int("MINIRAG_MAX_QUERY_CHARS", 2_000),
-  maxChunksTenant: int("MINIRAG_MAX_CHUNKS_TENANT", 10_000),
+  maxContentChars: int("NEXOS_MAX_CONTENT_CHARS", 500_000),
+  maxQueryChars: int("NEXOS_MAX_QUERY_CHARS", 2_000),
+  maxChunksTenant: int("NEXOS_MAX_CHUNKS_TENANT", 10_000),
 
-  decayAtivo: bool("MINIRAG_DECAY_ATIVO", true),
+  decayAtivo: bool("NEXOS_DECAY_ATIVO", true),
   // v3.5 (dono, 21/10): o esquecimento padrão passou de 30 dias para 6 MESES, e os três
   // números (arquivar / morte do arquivado / carência do apagar usuário) podem ser
   // gravados na tela — a tabela `esquecimento_cfg` tem precedência sobre estes defaults.
-  decayDias: int("MINIRAG_DECAY_DIAS", 180),
-  expurgoArquivadoDias: int("MINIRAG_EXPURGO_ARQUIVADO_DIAS", 365),
-  carenciaDias: int("MINIRAG_CARENCIA_DIAS", 30),
-  decayMinAcessos: int("MINIRAG_DECAY_MIN_ACESSOS", 2),
-  decayIntervaloMinutos: int("MINIRAG_DECAY_INTERVALO_MINUTOS", 60),
+  decayDias: int("NEXOS_DECAY_DIAS", 180),
+  expurgoArquivadoDias: int("NEXOS_EXPURGO_ARQUIVADO_DIAS", 365),
+  carenciaDias: int("NEXOS_CARENCIA_DIAS", 30),
+  decayMinAcessos: int("NEXOS_DECAY_MIN_ACESSOS", 2),
+  decayIntervaloMinutos: int("NEXOS_DECAY_INTERVALO_MINUTOS", 60),
 
-  corsOrigins: (process.env.MINIRAG_CORS_ORIGINS ?? "")
+  corsOrigins: (process.env.NEXOS_CORS_ORIGINS ?? "")
     .split(",").map((s) => s.trim()).filter(Boolean),
 
-  loginMaxFalhas: int("MINIRAG_LOGIN_MAX_FALHAS", 10),
-  loginJanelaSeg: int("MINIRAG_LOGIN_JANELA_SEG", 300),
+  loginMaxFalhas: int("NEXOS_LOGIN_MAX_FALHAS", 10),
+  loginJanelaSeg: int("NEXOS_LOGIN_JANELA_SEG", 300),
 
-  port: int("MINIRAG_PORT", 8000),
-  host: process.env.MINIRAG_HOST ?? "0.0.0.0",
+  port: int("NEXOS_PORT", 8000),
+  host: process.env.NEXOS_HOST ?? "0.0.0.0",
 
-  embedderPort: int("MINIRAG_EMBEDDER_PORT", 8001),
-  embedderUrl: process.env.MINIRAG_EMBEDDER_URL ?? "http://127.0.0.1:8001",
-  embedderModo: (process.env.MINIRAG_EMBEDDER_MODO ?? "filho") as "filho" | "externo",
-  pythonBin: process.env.MINIRAG_PYTHON ?? "python3",
+  embedderPort: int("NEXOS_EMBEDDER_PORT", 8001),
+  embedderUrl: process.env.NEXOS_EMBEDDER_URL ?? "http://127.0.0.1:8001",
+  embedderModo: (process.env.NEXOS_EMBEDDER_MODO ?? "filho") as "filho" | "externo",
+  pythonBin: process.env.NEXOS_PYTHON ?? "python3",
 
   painelDir:
-    process.env.MINIRAG_PAINEL_DIR ??
+    process.env.NEXOS_PAINEL_DIR ??
     require("node:path").resolve(__dirname, "..", "frontend", "dist"),
-  workerAtivo: bool("MINIRAG_WORKER_ATIVO", true),
+  workerAtivo: bool("NEXOS_WORKER_ATIVO", true),
 } as const;
 
 export type Usuario = { tenant: string; operador?: boolean };
@@ -95,11 +104,11 @@ export function parseUsers(raw: string): Array<[string, string]> {
   return out;
 }
 
-export const USERS = parseUsers(process.env.MINIRAG_USERS ?? "");
+export const USERS = parseUsers(process.env.NEXOS_USERS ?? "");
 /* v3.4 (21/10): o nome canônico é MINIRAG_ADMIN. MINIRAG_OPERADOR continua valendo como
  * apelido antigo — ambiente que ainda não trocou a variável segue bootando igual.
  * Com as duas presentes, ADMIN vence. */
-const ENV_ADMIN = process.env.MINIRAG_ADMIN || process.env.MINIRAG_OPERADOR || "";
+const ENV_ADMIN = process.env.NEXOS_ADMIN || process.env.NEXOS_OPERADOR || "";
 export const OPERADOR = parseUsers(ENV_ADMIN);
 
 export function isOperador(u: Usuario): boolean {
@@ -123,5 +132,5 @@ export function tenantFilter(u: Usuario, arg?: string | null): string | null {
 
 export function log(msg: string): void {
   // stdout sem buffer, prefixo fixo (o docker logs fica legível)
-  process.stdout.write(`[minirag] ${msg}${os.EOL}`);
+  process.stdout.write(`[nexos] ${msg}${os.EOL}`);
 }

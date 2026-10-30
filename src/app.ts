@@ -175,7 +175,7 @@ export function criarApp(): FastifyInstance {
     if ((err as any).code === "FST_ERR_CTP_INVALID_JSON_BODY") {
       return reply.code(400).send({ detail: "corpo nao e JSON valido" });
     }
-    process.stdout.write(`[minirag] erro ${req.method} ${req.url}: ${(err as Error).stack}\n`);
+    process.stdout.write(`[nexos] erro ${req.method} ${req.url}: ${(err as Error).stack}\n`);
     return reply.code(500).send({ detail: "erro interno" });
   });
 
@@ -639,7 +639,7 @@ export function criarApp(): FastifyInstance {
      dele; o segredo está no token que o usuário cola ao rodar, e a parede do
      pareamento continua na chave da tela. O auto-update do cliente lê a
      versão daqui e baixa o exe por estas rotas (sem auth, same motivo). */
-  const BIN_CLI = process.env.MINIRAG_CLIENTE_DIR ?? path.join(process.cwd(), "agente", "bin");
+  const BIN_CLI = process.env.NEXOS_CLIENTE_DIR ?? path.join(process.cwd(), "agente", "bin");
   app.get("/maquina/atualizacao", async () => ({
     versao: CONFIG.versao,
     cliente: {
@@ -996,7 +996,7 @@ export function criarApp(): FastifyInstance {
     return atualizarFerramentas(String(b.nome ?? ""), u);
   });
 
-  /* v3.36 — interruptor do admin: "contas comuns podem usar o minirag como servidor MCP".
+  /* v3.36 — interruptor do admin: "contas comuns podem usar o nexos como servidor MCP".
      Desligado, só o operador continua entrando (senão ninguém conserta nada). */
   app.patch("/config/mcp/usuarios", async (req) => {
     const u = usuario(req);

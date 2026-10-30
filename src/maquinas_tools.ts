@@ -323,7 +323,7 @@ async function escreverArquivo(ctx: Ctx, args: Record<string, unknown>): Promise
       : `[System.IO.File]::WriteAllBytes('${pq(caminho)}', [System.IO.File]::ReadAllBytes($tmp))\n`;
     cmd = psEncoded(
       "$ErrorActionPreference='Stop'\n" + mkdir +
-        "$tmp = Join-Path $env:TEMP ('minirag_dl_' + [guid]::NewGuid().ToString('N') + '.bin')\n" +
+        "$tmp = Join-Path $env:TEMP ('nexos_dl_' + [guid]::NewGuid().ToString('N') + '.bin')\n" +
         `curl.exe -sS --fail --retry 2 -o $tmp '${pq(url)}'\n` +
         "if ($LASTEXITCODE -ne 0) { Remove-Item $tmp -Force -ErrorAction SilentlyContinue; exit 7 }\n" +
         entrega + "Remove-Item $tmp -Force\n" +
@@ -455,7 +455,7 @@ async function editarNoLocal(ctx: Ctx, args: Record<string, unknown>): Promise<u
   if (ctx.so === "windows") {
     cmd = psEncoded(
       "$ErrorActionPreference='Stop'\n" +
-        "$tmp = Join-Path $env:TEMP ('minirag_ed_' + [guid]::NewGuid().ToString('N') + '.json')\n" +
+        "$tmp = Join-Path $env:TEMP ('nexos_ed_' + [guid]::NewGuid().ToString('N') + '.json')\n" +
         `curl.exe -sS --fail --retry 2 -o $tmp '${pq(url)}'\n` +
         "if ($LASTEXITCODE -ne 0) { Remove-Item $tmp -Force -ErrorAction SilentlyContinue; throw 'download do pacote de edicao falhou' }\n" +
         "$d = Get-Content -LiteralPath $tmp -Raw -Encoding UTF8 | ConvertFrom-Json\n" +
@@ -1152,7 +1152,7 @@ function nomeLimpoEnvio(n: string): string {
 async function capturarTela(ctx: Ctx, args: Record<string, unknown>): Promise<unknown> {
   const tela = args.tela === undefined ? 1 : Math.max(1, Math.min(4, Number(args.tela) || 1));
   if (ctx.so === "windows") {
-    const tmp = `Join-Path $env:TEMP ('minirag_tela_' + [guid]::NewGuid().ToString('N') + '.jpg')`;
+    const tmp = `Join-Path $env:TEMP ('nexos_tela_' + [guid]::NewGuid().ToString('N') + '.jpg')`;
     const pegar = tela === 1
       ? "$b=[System.Windows.Forms.Screen]::PrimaryScreen.Bounds\n"
       : `$ss=[System.Windows.Forms.Screen]::AllScreens\nif (${tela} -gt $ss.Count) { throw 'so existem ' + $ss.Count + ' telas' }\n$b=$ss[${tela} - 1].Bounds\n`;
@@ -1178,7 +1178,7 @@ async function capturarTela(ctx: Ctx, args: Record<string, unknown>): Promise<un
     return { ok: true, host: ctx.host, tela, anexo: meta, resumo: `TELA CAPTURADA (${Math.round(meta.bytes / 1024)} KB) — a imagem vai na conversa` };
   }
   /* Linux: precisa de X/Wayland com sessão gráfica */
-  const tmp = `/tmp/minirag_tela_${Date.now()}.jpg`;
+  const tmp = `/tmp/nexos_tela_${Date.now()}.jpg`;
   const cmd = shCmd(
     `if command -v import >/dev/null 2>&1; then import -window root -quality 80 ${sq(tmp)}; ` +
       `elif command -v gnome-screenshot >/dev/null 2>&1; then gnome-screenshot -f ${sq(tmp)}; ` +

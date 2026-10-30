@@ -4,7 +4,7 @@
  *   - o Chat só precisa de um **provider** configurado; sem ele o Chat fica desligado;
  *   - **nenhuma regra embutida**: as instruções iniciais vêm do `system_prompt` da tela.
  *     Campo vazio = nenhuma instrução (o modelo conversa puro);
- *   - **ferramenta vem de MCP**: o do próprio minirag (botão) + servidores externos
+ *   - **ferramenta vem de MCP**: o do próprio nexos (botão) + servidores externos
  *     cadastrados (quantos o operador quiser). Nada ligado = nenhuma ferramenta;
  *   - a ferramenta **executa direto**, sem cartão de confirmação — mas o que foi chamado
  *     fica registrado na tela, no histórico e na resposta, com segredo mascarado;

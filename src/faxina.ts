@@ -120,11 +120,11 @@ export function iniciarFaxinaLoop(onUsuarioApagou: (nomes: string[]) => void): v
       if (r.usuarios_apagados.length || r.docs_expurgados) {
         if (r.usuarios_apagados.length) onUsuarioApagou(r.usuarios_apagados);
         process.stdout.write(
-          `[minirag] faxina: ${r.usuarios_apagados.length} conta(s), ${r.docs_expurgados} doc(s) arquivado(s) apagado(s)\n`,
+          `[nexos] faxina: ${r.usuarios_apagados.length} conta(s), ${r.docs_expurgados} doc(s) arquivado(s) apagado(s)\n`,
         );
       }
     } catch (e) {
-      process.stdout.write(`[minirag] faxina falhou: ${(e as Error).message}\n`);
+      process.stdout.write(`[nexos] faxina falhou: ${(e as Error).message}\n`);
     }
   }, CONFIG.decayIntervaloMinutos * 60 * 1000);
   timer.unref?.();

@@ -166,7 +166,7 @@ async function raizGravavel(): Promise<string> {
   if (await tentar(RAIZ)) return RAIZ;
   const alt = path.join(process.env.HOME || "/tmp", "dados", "anexos");
   if (await tentar(alt)) {
-    console.warn(`[minirag] ${RAIZ} nao e gravavel — usando ${alt} (volume nao montado com dono certo?)`);
+    console.warn(`[nexos] ${RAIZ} nao e gravavel — usando ${alt} (volume nao montado com dono certo?)`);
     return alt;
   }
   throw new Error(`nenhuma pasta gravavel para os arquivos (${RAIZ} e ${alt} falharam)`);

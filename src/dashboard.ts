@@ -118,7 +118,7 @@ export async function configPublica() {
       min_score: CONFIG.minScore,
       chunk_palavras: CONFIG.maxChunkWords,
       chunk_sobreposicao: CONFIG.chunkOverlap,
-      ocr_paginas_max: Number(process.env.MINIRAG_OCR_PAGINAS_MAX ?? 6),
+      ocr_paginas_max: Number(process.env.NEXOS_OCR_PAGINAS_MAX ?? 6),
     },
     esquecimento: {
       ativo: CONFIG.decayAtivo,

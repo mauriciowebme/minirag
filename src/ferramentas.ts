@@ -2,7 +2,7 @@
  *
  *  Regras aceitas pelo dono:
  *   - o Chat só precisa de um provider; ferramenta vem de MCP, nada embutido;
- *   - o MCP do próprio minirag é ligado/desligado por botão (e é chamado DENTRO do
+ *   - o MCP do próprio nexos é ligado/desligado por botão (e é chamado DENTRO do
  *     processo, sem HTTP — mesmo `switch` que serve o POST /mcp);
  *   - servidores externos por endereço HTTP, com cabeçalho de acesso guardado no
  *     servidor e devolvido mascarado;
@@ -273,7 +273,7 @@ export async function atualizarFerramentas(nomeBruto: string, usuario?: Usuario)
     params: {
       protocolVersion: "2025-03-10",
       capabilities: {},
-      clientInfo: { name: "minirag-chat", version: CONFIG.versao },
+      clientInfo: { name: "nexos-chat", version: CONFIG.versao },
     },
   });
   const problema = erroJsonRpc(ini.json);
@@ -313,12 +313,12 @@ export async function atualizarFerramentas(nomeBruto: string, usuario?: Usuario)
 export type PacoteFerramentas = {
   specs: Array<{ type: "function"; function: { name: string; description: string; parameters: Record<string, unknown> } }>;
   /** nome espaçado -> de onde vem e qual é o nome original */
-  rotas: Map<string, { servidor: "minirag" | string; original: string }>;
+  rotas: Map<string, { servidor: "nexos" | string; original: string }>;
   internos: number;
   externos: number;
 };
 
-/** Ferramentas ativas agora: as do minirag (se o botão estiver ligado) + as dos servidores ativos. */
+/** Ferramentas ativas agora: as do nexos (se o botão estiver ligado) + as dos servidores ativos. */
 export async function pacoteDeFerramentas(
   mcpInterno: boolean,
   /** v3.36: quem está conversando — o pacote interno respeita papel e a lista da tela MCP */
@@ -331,7 +331,7 @@ export async function pacoteDeFerramentas(
     const { toolsParaChat } = await import("./mcp");
     for (const t of toolsParaChat(user)) {
       specs.push({ type: "function", function: { name: t.name, description: t.description, parameters: t.inputSchema } });
-      rotas.set(t.name, { servidor: "minirag", original: t.name });
+      rotas.set(t.name, { servidor: "nexos", original: t.name });
     }
   }
 
@@ -363,7 +363,7 @@ export async function executarFerramenta(
   const argsUsados = { ...args };
   const inicio = Date.now();
   try {
-    if (rota.servidor === "minirag") {
+    if (rota.servidor === "nexos") {
       const { chamarToolInterna, toolsParaChat } = await import("./mcp");
       const espec = toolsParaChat().find((t) => t.name === rota.original);
       const aceitaMemoria = Boolean((espec?.inputSchema as any)?.properties?.memoria);
@@ -375,7 +375,7 @@ export async function executarFerramenta(
          o HTML viaja no campo `tela`, que só a camada do chat enxerga. */
       if (rota.original === "mostrar_tela" && r && typeof (r as Tela).html === "string") {
         const tela = r as Tela;
-        return { servidor: "minirag", nome: rota.original, saida: resumoTela(tela), ok: true, ms: Date.now() - inicio, args: argsUsados, tela };
+        return { servidor: "nexos", nome: rota.original, saida: resumoTela(tela), ok: true, ms: Date.now() - inicio, args: argsUsados, tela };
       }
       /* v3.44 — arquivo que a MÁQUINA mandou (print, imagem, log): a meta viaja em
          `anexo` para o chat desenhar a miniatura; o modelo recebe só o resumo. */
@@ -383,12 +383,12 @@ export async function executarFerramenta(
       if (meta && typeof meta.id === "string" && meta.id) {
         const limpo = { id: meta.id, nome: meta.nome, mime: meta.mime, bytes: meta.bytes };
         return {
-          servidor: "minirag", nome: rota.original, ok: okDaSaida(r), ms: Date.now() - inicio,
+          servidor: "nexos", nome: rota.original, ok: okDaSaida(r), ms: Date.now() - inicio,
           args: argsUsados, anexo: limpo as AnexoMeta,
           saida: paraTexto({ ...(r as Record<string, unknown>), anexo: limpo }),
         };
       }
-      return { servidor: "minirag", nome: rota.original, saida: paraTexto(r), ok: okDaSaida(r), ms: Date.now() - inicio, args: argsUsados };
+      return { servidor: "nexos", nome: rota.original, saida: paraTexto(r), ok: okDaSaida(r), ms: Date.now() - inicio, args: argsUsados };
     }
     const l = await linhaServidor(rota.servidor);
     const ini = await chamarServidor(l.url, l.cabecalho, {
@@ -398,7 +398,7 @@ export async function executarFerramenta(
       params: {
         protocolVersion: "2025-03-10",
         capabilities: {},
-        clientInfo: { name: "minirag-chat", version: CONFIG.versao },
+        clientInfo: { name: "nexos-chat", version: CONFIG.versao },
       },
     }).catch(() => ({ json: null, sessionId: null }));
     if (ini.sessionId) {

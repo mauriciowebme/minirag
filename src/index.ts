@@ -24,7 +24,7 @@ let encerrando = false;
 
 function subirEmbedder(): void {
   if (CONFIG.embedderModo === "externo") return;
-  const cwd = process.env.MINIRAG_APP_DIR ?? path.resolve(__dirname, "..");
+  const cwd = process.env.NEXOS_APP_DIR ?? path.resolve(__dirname, "..");
   const args = [
     "-m", "uvicorn", "embedder.embed_server:app",
     "--host", "127.0.0.1",
@@ -85,7 +85,7 @@ async function main(): Promise<void> {
   await initMetricas();
   await initMaquinas(); // v3.6: máquinas por usuário (túnel absorvido)
   await iniciarAnexos(); // v3.44: arquivos que a máquina manda para o chat
-  await initMcpAcesso(); // v3.36: quem usa o minirag como servidor MCP e o que cada conta liberou
+  await initMcpAcesso(); // v3.36: quem usa o nexos como servidor MCP e o que cada conta liberou
   const esq = await lerEsquecimento();
   log(
     `limites: content<=${CONFIG.maxContentChars} chars, query<=${CONFIG.maxQueryChars} chars, ` +
@@ -141,7 +141,7 @@ async function main(): Promise<void> {
 }
 
 main().catch((e) => {
-  process.stderr.write(`[minirag] boot falhou: ${(e as Error).stack ?? e}\n`);
+  process.stderr.write(`[nexos] boot falhou: ${(e as Error).stack ?? e}\n`);
   encerrarFilho();
   process.exit(1);
 });

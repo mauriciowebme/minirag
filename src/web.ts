@@ -288,7 +288,7 @@ export async function abrirPagina(
    * tem outra impressão digital e muitas vezes passa. Então o erro fica guardado e quem
    * decide é o resultado do chromium (quando disponível). */
   const bloqueado = r.status >= 400;
-  if (bloqueado && process.env.MINIRAG_NAVEGADOR === "0") throw new Error(`a pagina respondeu http ${r.status}`);
+  if (bloqueado && process.env.NEXOS_NAVEGADOR === "0") throw new Error(`a pagina respondeu http ${r.status}`);
   const tipo = r.ct.toLowerCase();
   if (tipo && !/text\/|html|xml|json/.test(tipo)) {
     throw new Error(`conteudo nao textual (${tipo}) — web_open le paginas, nao arquivos`);
@@ -306,7 +306,7 @@ export async function abrirPagina(
   const valeRenderizar =
     bloqueado || opcoes.js === true || texto.length < POUCO_TEXTO || (texto.length < 900 && sinalDeJs);
   const htmlGordo = r.bytes > 3000;
-  if (valeRenderizar && (htmlGordo || bloqueado) && process.env.MINIRAG_NAVEGADOR !== "0") {
+  if (valeRenderizar && (htmlGordo || bloqueado) && process.env.NEXOS_NAVEGADOR !== "0") {
     try {
       const nav = await renderizar(u.toString());
       if (nav.texto.length > texto.length) {

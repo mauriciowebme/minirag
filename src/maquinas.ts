@@ -1,7 +1,7 @@
 /**
- * v3.6 (dono, 22/10) — MÁQUINAS: o túnel absorvido pelo minirag.
+ * v3.6 (dono, 22/10) — MÁQUINAS: o túnel absorvido pelo nexos.
  *
- * Cada usuário pode parear as SUAS máquinas com o minirag. Um cliente leve
+ * Cada usuário pode parear as SUAS máquinas com o nexos. Um cliente leve
  * (mesma linguagem do servidor) abre WebSocket de SAÍDA para `/maquina/ws` e
  * obedece comandos — só quem tem a chave do usuário manda nas máquinas dele.
  *
@@ -26,7 +26,7 @@ import { HttpError } from "./errors";
 import { log, type Usuario } from "./config";
 import { hashChave, validarNome } from "./usuarios";
 
-const PAREAMENTO_SEG = Math.min(3600, Math.max(60, Number(process.env.MINIRAG_PAREAMENTO_SEG ?? 900) || 900));
+const PAREAMENTO_SEG = Math.min(3600, Math.max(60, Number(process.env.NEXOS_PAREAMENTO_SEG ?? 900) || 900));
 const TIMEOUT_PADRAO = 30;
 /* v3.39: era 120 e cortava comando legítimo (carga de modelo, build, varredura).
    O teto agora é 900s (15 min); acima disso o certo é background=true. */
@@ -326,7 +326,7 @@ function fila(l: Ligacao, espera: number, cmd: string, bg = false) {
 
 const MAGIC_CLIENTE = "MRQK";
 const CHAVE_CLIENTE_SEG = 365 * 24 * 3600; // v3.10.2: sem tela de chave, o arquivo baixado vale por um ano
-const BIN_CLI = process.env.MINIRAG_CLIENTE_DIR ?? path.join(process.cwd(), "agente", "bin");
+const BIN_CLI = process.env.NEXOS_CLIENTE_DIR ?? path.join(process.cwd(), "agente", "bin");
 
 export async function gerarClienteBinario(alvo: string, plataforma: "win" | "linux", nomeBruto: string) {
   const token = randomBytes(20).toString("hex");
@@ -341,7 +341,7 @@ export async function gerarClienteBinario(alvo: string, plataforma: "win" | "lin
   const rodape = Buffer.alloc(8);
   rodape.writeUInt32BE(payload.length, 0);
   rodape.write(MAGIC_CLIENTE, 4, "ascii");
-  const arquivo = plataforma === "win" ? `minirag-cliente-${alvo}.exe` : `minirag-cliente-${alvo}`;
+  const arquivo = plataforma === "win" ? `nexos-cliente-${alvo}.exe` : `nexos-cliente-${alvo}`;
   log(`maquinas: CLIENTE GERADO para ${alvo} (${plataforma}, nome="${nome}")`);
   return { buf: Buffer.concat([bin, payload, rodape]), arquivo };
 }

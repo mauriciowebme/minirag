@@ -18,7 +18,7 @@ import { isIP } from "node:net";
 import { readFileSync, readdirSync, rmSync } from "node:fs";
 
 const PORTA = 9377;
-const PERFIL = "/tmp/minirag-chromium";
+const PERFIL = "/tmp/nexos-chromium";
 const TETO_PAGINA_MS = 20000;
 const SOSSEGO_MS = 1200;
 const OCIOSO_MS = 180000;
@@ -118,7 +118,7 @@ function encerrar() {
 }
 
 async function abrirCliente(): Promise<Cliente> {
-  const bin = process.env.MINIRAG_CHROMIUM || "/usr/bin/chromium";
+  const bin = process.env.NEXOS_CHROMIUM || "/usr/bin/chromium";
   proc = spawn(
     bin,
     [

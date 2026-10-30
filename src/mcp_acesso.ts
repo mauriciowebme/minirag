@@ -1,5 +1,5 @@
 /**
- * v3.36 — O minirag como SERVIDOR MCP passa a ter dono de cada ferramenta.
+ * v3.36 — O nexos como SERVIDOR MCP passa a ter dono de cada ferramenta.
  *
  * Duas camadas, nesta ordem:
  *
