@@ -3936,6 +3936,72 @@ await bloco(t, "v3.6: máquinas por usuário — hub WS, pareamento, run, escopo
     f.fechar("v3.50");
   });
 
+  await bloco(t, "v3.51: pasta por usuário, venv e bibliotecas declaradas", async () => {
+    const f = fiscal();
+    const CONTAINER = process.env.CONTAINER ?? "";
+    /* a pasta da conta `op` é do ambiente de teste: começa limpa para provar a criação
+       e a instalação (rodar o bloco duas vezes no mesmo volume não pode mudar o resultado) */
+    if (CONTAINER) execFileSync("docker", ["exec", CONTAINER, "sh", "-c", "rm -rf /app/dados/usuarios/op"]);
+    const rpcTool = (key: string, args: Record<string, unknown>, id: unknown = 1) =>
+      call("POST", "/mcp", {
+        key,
+        corpo: { jsonrpc: "2.0", id, method: "tools/call", params: { name: "rodar_python", arguments: args } },
+      });
+    const saida = (r: any) => {
+      try {
+        return JSON.parse(r.json?.result?.content?.[0]?.text ?? "{}");
+      } catch {
+        return {};
+      }
+    };
+
+    /* 1. a pasta do usuário nasce com o venv e o Python do servidor é 3.12 */
+    let r = await rpcTool(OPKEY, { codigo: "import sys\nprint(sys.version.split()[0])" });
+    let s = saida(r);
+    f.check("v3.51 o script roda no Python 3.12", s.ok === true && String(s.saida).startsWith("3.12"), s.saida);
+    f.check("v3.51 a pasta do usuário foi criada", s.pasta === "usuarios/op/scripts/saida" && s.uso_mb > 0, `${s.pasta} ${s.uso_mb}MB`);
+
+    /* 2. biblioteca declarada é instalada e usada */
+    r = await rpcTool(OPKEY, { codigo: "import six\nprint('six', six.__version__)", dependencias: ["six"] }, 2);
+    s = saida(r);
+    f.check("v3.51 dependência declarada é instalada e importa", s.ok === true && /^six 1\./.test(String(s.saida)), JSON.stringify(s).slice(0, 200));
+    f.check("v3.51 a resposta diz o que foi instalado", Array.isArray(s.instalados) && s.instalados.includes("six"), JSON.stringify(s.instalados));
+
+    /* 3. fica guardado: a próxima execução importa sem declarar nada */
+    r = await rpcTool(OPKEY, { codigo: "import six\nprint('tem', six.__version__)" }, 3);
+    s = saida(r);
+    f.check("v3.51 biblioteca fica guardada entre execuções", s.ok === true && String(s.saida).startsWith("tem ") && (s.instalados ?? []).length === 0, JSON.stringify(s).slice(0, 200));
+
+    /* 4. arquivo criado pelo script sobrevive, na pasta do usuário */
+    r = await rpcTool(OPKEY, { codigo: "open('prova.txt','w').write('ok')" }, 4);
+    f.check("v3.51 script grava sem erro", saida(r).ok === true, JSON.stringify(saida(r)).slice(0, 160));
+    const ler = (caminho: string) => {
+      try {
+        return execFileSync("docker", ["exec", CONTAINER, "cat", caminho], { encoding: "utf8" }).trim();
+      } catch {
+        return "";
+      }
+    };
+    const dentro = CONTAINER ? ler("/app/dados/usuarios/op/scripts/saida/prova.txt") : "ok";
+    f.check("v3.51 o arquivo fica em usuarios/<conta>/scripts/saida", dentro === "ok", dentro);
+
+    /* 5. a lista de dependências é registrada em disco */
+    const registro = CONTAINER ? ler("/app/dados/usuarios/op/dependencias.txt") : "six";
+    f.check("v3.51 dependencias.txt registra o que foi instalado", registro.includes("six"), registro.slice(0, 80));
+
+    /* 6. dependência com URL/opção é recusada (nada de `pip install git+...`) */
+    r = await rpcTool(OPKEY, { codigo: "print(1)", dependencias: ["git+https://exemplo/x"] }, 5);
+    const recusa = r.json?.result?.content?.[0]?.text ?? "";
+    f.check("v3.51 dependencia invalida é recusada", /dependencia invalida/.test(recusa), String(recusa).slice(0, 120));
+
+    /* 7. com venv, a rede direta continua fechada */
+    r = await rpcTool(OPKEY, { codigo: "import urllib.request\ntry:\n    urllib.request.urlopen('http://example.com', timeout=3)\n    print('acessou')\nexcept Exception:\n    print('bloqueado')" }, 6);
+    s = saida(r);
+    f.check("v3.51 rede direta continua bloqueada", s.saida === "bloqueado", JSON.stringify(s).slice(0, 160));
+
+    f.fechar("v3.51");
+  });
+
   await bloco(t, "freio de força bruta (último: bloqueia o IP)", async () => {
     const f = fiscal();
     for (let i = 0; i < 10; i++) {
