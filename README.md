@@ -1474,7 +1474,7 @@ em [`docs/mcp.md`](docs/mcp.md).
 
 **Exemplo (curl):**
 ```bash
-curl -X POST https://minirag.techupsistemas.com/mcp \
+curl -X POST https://nexos.techupsistemas.com/mcp \
   -H "Authorization: Bearer $CHAVE" -H "Content-Type: application/json" \
   -d '{"jsonrpc":"2.0","id":1,"method":"tools/call","params":{"name":"search","arguments":{"query":"que horas é a reunião","memoria":"empresa42"}}}'
 ```
@@ -1648,7 +1648,7 @@ O nexos roda em qualquer ambiente com Docker. Segue um exemplo prático
 >
 > **Produção atual:** Dokploy do Contabo, serviço `nexos` (fonte github,
 > branch `main`, **autoDeploy ligado** — todo push em `main` reimplanta),
-> domínio `https://minirag.techupsistemas.com`. O `docker-compose.yml` é a
+> domínio `https://nexos.techupsistemas.com`. O `docker-compose.yml` é a
 > receita; as chaves (`MINIRAG_USERS`) ficam na aba Environment do painel.
 
 > **Persistência:** o Postgres guarda os dados num volume nomeado

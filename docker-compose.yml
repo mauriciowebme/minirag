@@ -1,7 +1,7 @@
 # RAG service v2 — Postgres(pgvector) + Node/TypeScript (embedder Python dentro)
 # 2 containers: minirag-db (banco) + minirag-api (serviço: Node + Python filho)
 #
-# Acesso: domínio público via Traefik do Dokploy (minirag.techupsistemas.com,
+# Acesso: domínio público via Traefik do Dokploy (nexos.techupsistemas.com,
 # HTTPS) + ports locais 127.0.0.1 e tailnet no api (ver seção ports:).
 # Sem container_name — no Dokploy ele some com os logs/métricas do painel.
 #

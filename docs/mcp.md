@@ -21,7 +21,7 @@ Este documento é sobre o terceiro papel: **usar o nexos como servidor MCP**. O 
 A chave do usuário é a credencial, e o escopo das ferramentas é o tenant dele.
 
 ```
-POST https://minirag.techupsistemas.com/mcp
+POST https://nexos.techupsistemas.com/mcp
 Authorization: Bearer <chave do usuário>
 Content-Type: application/json
 ```
@@ -62,7 +62,7 @@ autenticação/protocolo vem como JSON-RPC: `-32001` (auth), `-32601` (método),
 **Exemplo colável:**
 
 ```bash
-curl -X POST https://minirag.techupsistemas.com/mcp \
+curl -X POST https://nexos.techupsistemas.com/mcp \
   -H "Authorization: Bearer $MINIRAG_KEY" -H "Content-Type: application/json" \
   -d '{"jsonrpc":"2.0","id":1,"method":"tools/call","params":{"name":"health","arguments":{}}}'
 ```
@@ -125,7 +125,7 @@ conter `__`). A chave de acesso fica guardada no servidor e volta mascarada (`�
 # ~/.hermes/config.yaml
 mcp_servers:
   nexos:
-    url: https://minirag.techupsistemas.com/mcp
+    url: https://nexos.techupsistemas.com/mcp
     headers:
       Authorization: Bearer ${MINIRAG_KEY}
     timeout: 120
