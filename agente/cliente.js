@@ -47,8 +47,22 @@ function flag(nome, padrao) {
 
 /* ---------------- alvo ---------------- */
 const confPath = flag("conf", process.env.NEXOS_MAQUINA_CONF || process.env.MINIRAG_MAQUINA_CONF || path.join(os.homedir(), ".minirag-maquina.json"));
-let base = flag("url", process.env.NEXOS_MAQUINA_URL || process.env.MINIRAG_MAQUINA_URL || lerConf().url || "https://minirag.techupsistemas.com");
+
+/* v3.47.1: produção mora em nexos.techupsistemas.com. Quem já tem conf salva com o
+   endereço antigo é migrado no boot — sem isso a máquina reconecta num host que não
+   existe mais e fica offline sem dizer por quê. */
+const URL_PADRAO = "https://nexos.techupsistemas.com";
+const URL_ANTIGA = "minirag.techupsistemas.com";
+const migrarUrl = (u) =>
+  typeof u === "string" && u.includes(URL_ANTIGA) ? u.replace(URL_ANTIGA, "nexos.techupsistemas.com") : u;
+const confSalva = lerConf();
+let base = flag("url", process.env.NEXOS_MAQUINA_URL || process.env.MINIRAG_MAQUINA_URL || migrarUrl(confSalva.url) || URL_PADRAO);
 if (!/^https?:/i.test(base)) base = "https://" + base;
+if (confSalva.url && migrarUrl(confSalva.url) !== confSalva.url) {
+  gravarConf({ ...confSalva, url: migrarUrl(confSalva.url) });
+  log("conf: endereço antigo migrado para " + migrarUrl(confSalva.url));
+}
+
 const URL_WS = (() => {
   const u = new URL(base);
   u.protocol = u.protocol === "http:" ? "ws:" : "wss:";
