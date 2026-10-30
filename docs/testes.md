@@ -1,4 +1,4 @@
-# Testes do minirag — lacunas preenchidas pela skill canônica `suite-de-testes`
+# Testes do nexos — lacunas preenchidas pela skill canônica `suite-de-testes`
 
 > **Última atualização:** 2026-10-23 · **Dono:** Mauricio
 
@@ -13,7 +13,7 @@ bloco é destrutivo**. O método (regras, esqueleto, buracos clássicos) não se
 |---|---|
 | Modo (canônica §"Portas de alvo") | **Instância descartável** — sempre. `docker-compose.test.yml` com projeto, rede e volume próprios; banco zerado a cada rodada. |
 | Subida limpa | `scripts/up-test.sh` (derruba → apaga volume → **reconstrói a imagem** → sobe → gera chaves → espera `/health` → escreve o env da rodada). |
-| Arquivo de chaves/ambiente da rodada | `/opt/data/cache/scratch/minirag_test_keys.env` (o script regrava; o scratch expira em 24 h, por isso o script é o caminho, não o arquivo). |
+| Arquivo de chaves/ambiente da rodada | `/opt/data/cache/scratch/nexos_test_keys.env` (o script regrava; o scratch expira em 24 h, por isso o script é o caminho, não o arquivo). |
 | Porta local | `${MINIRAG_TEST_PORT:-8001}`; aqui usamos **8002** com bind `0.0.0.0` porque a suíte roda dentro de outro container e fala com a API pelo **gateway da rede do compose** — que é lido pelo script (`docker network inspect ${PROJ}_default`) e **muda de subnet a cada `down -v`** (vi `172.23.0.1` e depois `192.168.64.1` na mesma semana). Fixar IP de ponte no histórico é erro. O comando `ip` **não existe** no container do Hermes: nada no script pode depender dele (com `pipefail`, uma atribuição que falha derruba tudo em silêncio). |
 | Banco espelho de produção | **Nunca** alvo da suíte (regra 1). Serve só para conferência manual pontual. |
 | Produção | Jamais alvo. A suíte cria usuário, apaga documento e provoca o freio de força bruta de propósito. |
@@ -66,7 +66,7 @@ Ordem fixa: primeiro a prova de versão, por último o freio (regra 4).
 
 ```bash
 scripts/up-test.sh                       # sobe limpo e imprime a linha de export
-set -a; . /opt/data/cache/scratch/minirag_test_keys.env; set +a
+set -a; . /opt/data/cache/scratch/nexos_test_keys.env; set +a
 
 SO_BLOCOS="v3.2" npm test                # blocos afetados — antes de pedir OK do deploy (~1min)
 npm test                                 # SUÍTE COMPLETA — uma vez antes do push (~6min)

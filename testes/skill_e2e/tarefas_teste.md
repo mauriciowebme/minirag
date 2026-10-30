@@ -1,4 +1,4 @@
-# Lista de Tarefas de Teste E2E — minirag (camada VISUAL: clique real na tela)
+# Lista de Tarefas de Teste E2E — Nexos (camada VISUAL: clique real na tela)
 
 > **Legenda**: `[ ]` pendente | `[x]` concluído | `[!]` falhou | `[-]` em progresso
 > **Última atualização**: 21/10/2026 11:26

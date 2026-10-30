@@ -1,4 +1,4 @@
-# Próximos passos — minirag
+# Próximos passos — Nexos (histórico até a v3.46)
 
 > **Última atualização:** 2026-10-28 · **Versão/Dono:** minirag 3.37.0 · Mauricio
 **Fonte**: varredura do chat contra a linha de base de harnesses maduros (Open WebUI, Hermes), medida no código em 25/10/2026 — tudo o que está aqui foi confirmado por leitura/grep, nada é opinião de memória. Análise é o Mauricio quem conduz; execução de qualquer T### exige OK explícito dele.

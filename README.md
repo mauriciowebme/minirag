@@ -1,6 +1,6 @@
-# Minirag — Serviço RAG (Retrieval-Augmented Generation)
+# Nexos — memória, máquinas e arquivos
 
-Serviço de busca semântica em texto: você envia documentos, ele corta em pedaços,
+Memória pesquisável e agentes nas suas máquinas. Você envia documentos, ele corta em pedaços,
 cria uma "digital" numérica do significado de cada um (embedding) e guarda num
 banco Postgres com pgvector. Quando você pergunta, ele devolve os pedaços mais
 parecidos com a pergunta, com uma nota de 0 a 1.
@@ -144,7 +144,7 @@ tenant do usuário e não achava a que estava em foco.
 
 ## v3.42.0 (29/10) — fala no MEIO do turno (steering)
 
-O que o Hermes faz e o minirag não fazia: você manda uma mensagem enquanto a resposta
+O que o Hermes faz e o nexos não fazia: você manda uma mensagem enquanto a resposta
 está sendo produzida e ela **entra no turno em curso**, em vez de esperar na fila.
 
 - `POST /chat/tarefa/:id/fala` — guarda a fala na tarefa viva (409 se já encerrou, 422 se vazia)
@@ -360,7 +360,7 @@ está sendo produzida e ela **entra no turno em curso**, em vez de esperar na fi
 ## v3.15.0 (24/10) — O chat ganhou o Rastro do turno do jeito do IA_GO
 
 - **O que doía**: o pensamento, as falas de caminho e as ferramentas viviam em três lugares diferentes (o bloco "Pensou por Ns", balões soltos no meio da conversa e a linha dobrada "ferramentas chamadas"). Não dava para ver o turno como uma história: o que ele pensou, o que disse no caminho, o que consultou e quanto cada passo demorou — e, ao reabrir a conversa, a ordem entre as rodadas estava perdida (o banco guardava um `raciocinio` único, sem posição no tempo).
-- **O que muda**: uma trilha só por turno, na ordem real — `Rastro do turno · N etapas · Ns` — com bolinha e cor por tipo: pensamento em roxo com o tempo dele, fala de caminho em cinza, ferramenta em azul ("Consultando a busca semântica · 2s ✓"), cada linha abrindo o detalhe (argumento e resumo) da ferramenta. Aberto enquanto o turno vive, recolhido quando acaba; clicar na etiqueta grava a preferência (`minirag:rastro-expandido`) e ela vale para todas as mensagens, igual ao IA_GO. O bloco de pensamento continua colado na última linha que chega (v3.14.2) e para de puxar se você subir lá dentro.
+- **O que muda**: uma trilha só por turno, na ordem real — `Rastro do turno · N etapas · Ns` — com bolinha e cor por tipo: pensamento em roxo com o tempo dele, fala de caminho em cinza, ferramenta em azul ("Consultando a busca semântica · 2s ✓"), cada linha abrindo o detalhe (argumento e resumo) da ferramenta. Aberto enquanto o turno vive, recolhido quando acaba; clicar na etiqueta grava a preferência (`nexos:rastro-expandido`) e ela vale para todas as mensagens, igual ao IA_GO. O bloco de pensamento continua colado na última linha que chega (v3.14.2) e para de puxar se você subir lá dentro.
 - **Como**: o servidor agora grava a trilha na mensagem (`chat_mensagens.rastro JSONB`, coluna aditiva criada com `ALTER TABLE ... IF NOT EXISTS` no mesmo molde de `falas`), no formato `[{tipo:"pensamento",texto,ms},{tipo:"narracao",texto},{tipo:"ferramenta",servidor,nome,ok,ms}]`, e devolve no `fim` e no `GET /chat`. O tempo do pensamento para de contar quando a rodada DECIDE (fala, chama ferramenta ou responde) — senão o "Pensou por Ns" engoliria o tempo da ferramenta. A fala de caminho deixou de ser balão solto e passou a viver dentro da trilha (era esse o jeito do IA_GO); a linha dobrada de ferramentas saiu quando existe trilha, porque a trilha já mostra cada passo.
 - **Degradação honesta**: conversa antiga não ganha rastro inventado — mensagem sem `rastro` continua desenhando o bloco "Pensou por Ns" de antes e a linha dobrada de ferramentas. Turno sem streaming (superfície MCP) grava trilha vazia, porque sem stream não há como medir o tempo de cada passo.
 - **Como conferir**: pergunte algo que use ferramenta e deixe o bloco aberto: a trilha cresce na ordem (pensando… → fala → Consultando … → pensando de novo) e fecha sozinha no fim. Clique na etiqueta, recarregue a página: continua aberta. Reabra a conversa no dia seguinte: a trilha está lá, com o tempo de cada passo.
@@ -390,7 +390,7 @@ está sendo produzida e ela **entra no turno em curso**, em vez de esperar na fi
 - **Resposta sem moldura**: o texto do assistente é texto solto na coluna (balão só na sua fala), o raciocínio virou a pílula "Pensou por 2s ›" que abre ao toque, e cada resposta pronta ganhou um botão **copiar** (com reserva para o painel servido em http, onde a área de transferência do navegador pode não existir).
 - **Cabeçalho enxuto**: o seletor de gaveta virou uma pílula com o modelo em uso dentro dela; "nova conversa" subiu para o cabeçalho e no celular é só ícone; o subtítulo "— conversa com o modelo e as ferramentas do MCP" saiu (o topo do app já diz "Chat").
 - **Rodapé técnico dobrado**: uma linha com o essencial ("modelo · global · › ver detalhes"); o resto abre ao toque. No celular a máscara de chave sai da linha — continua dentro do detalhe.
-- **Ficou de fora de propósito**: microfone e botão "+" (no minirag nenhum dos dois teria o que fazer, e controle mudo não vai para a tela) e "refazer a resposta" (regenerar exige mexer no histórico lá no servidor, o que ainda não existe).
+- **Ficou de fora de propósito**: microfone e botão "+" (no nexos nenhum dos dois teria o que fazer, e controle mudo não vai para a tela) e "refazer a resposta" (regenerar exige mexer no histórico lá no servidor, o que ainda não existe).
 
 
 ## v3.13.1 (23/10) — o cliente para de ficar mudo quando o servidor reinicia
@@ -501,7 +501,7 @@ está sendo produzida e ela **entra no turno em curso**, em vez de esperar na fi
   (comando com token) **saiu da tela por ordem do dono** — o cliente gerado é a única porta dele;
   o endpoint de pareamento continua no servidor para o MCP, discreto. (3.7.1)
 
-## v3.6 — Máquinas por usuário: o túnel virou recurso do minirag (22/10/2026)
+## v3.6 — Máquinas por usuário: o túnel virou recurso do nexos (22/10/2026)
 
 Cada usuário pode ter máquinas suas conectadas (o seu PC, o servidor dele), e o
 chat / API / MCP executam comandos **apenas nas máquinas daquele usuário**.
@@ -522,7 +522,7 @@ Mesmo código, três portas — igual ao resto da casa.
 - **Cliente** (Go e PyInstaller ficaram para trás — antivírus): Node SEA,
   um arquivo sem instalação (`minirag-cliente-win.exe` / `minirag-cliente-linux`),
   assado na própria imagem (estágio `cliente` do Dockerfile, `scripts/build-cliente.sh`).
-  Adota e guarda o token de máquina (`~/.minirag-maquina.json`), reconecta com
+  Adota e guarda o token de máquina (`~/.nexos-maquina.json`), reconecta com
   backoff, mata ÁRVORE no timeout e se auto-atualiza comparando a versão do
   build com `GET /maquina/atualizacao`. Download na tela (`GET /maquina/cliente/win`).
 - **Tela**: aba **Máquinas** (também para o usuário comum — é o "cada usuário
@@ -820,7 +820,7 @@ Agora são **três peças separadas**, cada uma controlando uma coisa:
 - **Nada de regra dentro do código.** A antiga constante `SISTEMA` ("use só os trechos,
   cite `[documento]`") foi embora junto com a busca automática: quem quer rastreabilidade
   escreve isso no prompt; quem quer documento liga o MCP interno.
-- **MCP do próprio minirag como ferramenta** (`mcp_interno`): botão na tela. As ferramentas
+- **MCP do próprio nexos como ferramenta** (`mcp_interno`): botão na tela. As ferramentas
   são chamadas **dentro do mesmo processo** (`chamarToolInterna`), com a sessão de quem está
   logado — mesmo `switch` que serve o `POST /mcp`, sem HTTP e sem segunda autenticação.
   O isolamento por usuário/gaveta vem de graça. O `chat` fica de fora da lista (seria recursivo).
@@ -950,7 +950,7 @@ MELHORES PEDAÇOS + nota (0 a 1)
 ```
 
 Quem **responde** a pergunta (redige em linguagem natural) é o modelo de LLM
-(ex.: o LLM via gateway). O minirag é a **bibliotecária**: entrega
+(ex.: o LLM via gateway). O nexos é a **bibliotecária**: entrega
 os pedaços certos; o LLM é o **redator**.
 
 ---
@@ -1224,7 +1224,7 @@ POST /chat
 200 {
   "resposta": "O total é R$ 1.234,56, com vencimento em 10/11/2026.",
   "ferramentas": [
-    { "servidor": "minirag", "nome": "search", "args": { "query": "nota AC ME total" },
+    { "servidor": "nexos", "nome": "search", "args": { "query": "nota AC ME total" },
       "ok": true, "resumo": "[{\"doc_id\":\"nota-fiscal\" …", "ms": 120 }
   ],
   "rodadas": 2, "modelo": "claude-sonnet-4.5", "provider": "empresa42",
@@ -1279,7 +1279,7 @@ usuário comum só enxerga o próprio alcance.
 ## v1.8/v1.9 — documentos, decay POR DOCUMENTO, operador e painel (19/10/2026)
 
 ### Fonte da verdade: tabela `documents`
-O minirag passou a guardar o **arquivo original inteiro**, não só os pedaços
+O nexos passou a guardar o **arquivo original inteiro**, não só os pedaços
 embedados. `documents (tenant, memoria, doc_id, title, content, size_bytes,
 origem, criado_em, atualizado_em)` — PK = (tenant, memoria, doc_id). Os
 `chunks` agora são **índice derivado**: editar a fonte reindexa tudo.
@@ -1448,14 +1448,14 @@ Trabalho de UI/UX, sem mudança de rota ou regra:
 
 ## MCP — acesso por agentes (POST /mcp)
 
-Além da REST, o minirag fala **MCP (Model Context Protocol)** em
+Além da REST, o nexos fala **MCP (Model Context Protocol)** em
 `POST /mcp`: JSON-RPC 2.0 sobre HTTP, stateless (sem sessão, sem SSE),
 mesma porta, mesma chave Bearer, mesmas gavetas (`memoria`). É a porta
 que agentes de IA (ex.: o Hermes) usam; a REST continua intacta pro
 IA_GO.
 
 O guia completo — quem pode conectar, o que cada conta recebe, o que o
-operador controla e a receita para cadastrar o minirag num cliente — está
+operador controla e a receita para cadastrar o nexos num cliente — está
 em [`docs/mcp.md`](docs/mcp.md).
 
 **Fluxo do cliente MCP:**
@@ -1482,7 +1482,7 @@ curl -X POST https://minirag.techupsistemas.com/mcp \
 Erros de tool viram `result` com `isError: true` (linguagem do MCP); erro
 de auth/protocolo segue o padrão JSON-RPC (`-32001`, `-32601`, `-32700`).
 
-**O minirag também é cliente MCP (v2.8).** As ferramentas acima podem ser emprestadas ao
+**O nexos também é cliente MCP (v2.8).** As ferramentas acima podem ser emprestadas ao
 próprio Chat: com `mcp_interno` ligado o servidor chama `chamarToolInterna` — o mesmo
 `switch`, no mesmo processo, com a sessão de quem perguntou (sem HTTP, sem segunda chave).
 Servidores de fora entram por endereço em Configurações → Ferramentas (MCP); a chamada sai
@@ -1584,7 +1584,7 @@ export MINIRAG_DB_PASSWORD="senha-forte"
 docker-compose up -d --build
 
 # 3) Conferir
-docker ps --format '{{.Names}} {{.Status}}' | grep minirag
+docker ps --format '{{.Names}} {{.Status}}' | grep nexos
 curl http://127.0.0.1:8000/health   # {"versao":"2.0.0", "embedder":"ok", ...}
 ```
 
@@ -1612,7 +1612,7 @@ MINIRAG_USERS="teste:chave" node dist/index.js
 # subida limpa do ambiente DESCARTÁVEL (derruba, apaga volume, reconstrói a imagem,
 # gera chaves novas, espera /health e escreve o arquivo de ambiente da rodada)
 scripts/up-test.sh
-set -a; . /opt/data/cache/scratch/minirag_test_keys.env; set +a
+set -a; . /opt/data/cache/scratch/nexos_test_keys.env; set +a
 
 SO_BLOCOS="v3.2" npm test    # só os blocos afetados, antes de pedir OK do deploy
 npm test                     # suíte COMPLETA, uma vez antes do push
@@ -1627,7 +1627,7 @@ Modo/alvo, papéis reais, prova de versão e como fechar cada lacuna: **`docs/te
 
 ### Produção (qualquer plataforma Docker)
 
-O minirag roda em qualquer ambiente com Docker. Segue um exemplo prático
+O nexos roda em qualquer ambiente com Docker. Segue um exemplo prático
 (usando o Dokploy, mas vale pra qualquer orquestrador / host):
 
 1. Crie um **projeto tipo "docker"**, aponte para a pasta do repo.
@@ -1646,7 +1646,7 @@ O minirag roda em qualquer ambiente com Docker. Segue um exemplo prático
 > antes de a interface `tailscale0` existir e falhou com *cannot assign requested
 > address* — publicar porta num IP de VPN depende da VPN já estar de pé.
 >
-> **Produção atual:** Dokploy do Contabo, serviço `minirag` (fonte github,
+> **Produção atual:** Dokploy do Contabo, serviço `nexos` (fonte github,
 > branch `main`, **autoDeploy ligado** — todo push em `main` reimplanta),
 > domínio `https://minirag.techupsistemas.com`. O `docker-compose.yml` é a
 > receita; as chaves (`MINIRAG_USERS`) ficam na aba Environment do painel.
@@ -1688,9 +1688,9 @@ O minirag roda em qualquer ambiente com Docker. Segue um exemplo prático
 | `MINIRAG_WORKER_ATIVO` | `1` | liga o worker da fila (desligue em réplica só-API) |
 | `MINIRAG_DB_HOST` | `minirag-db` | host do Postgres |
 | `MINIRAG_DB_PORT` | `5432` | porta do Postgres |
-| `MINIRAG_DB_USER` | `minirag` | usuário do Postgres |
-| `MINIRAG_DB_PASSWORD` | `minirag` | senha do Postgres |
-| `MINIRAG_DB_NAME` | `minirag` | nome do banco |
+| `MINIRAG_DB_USER` | `nexos` | usuário do Postgres |
+| `MINIRAG_DB_PASSWORD` | `nexos` | senha do Postgres |
+| `MINIRAG_DB_NAME` | `nexos` | nome do banco |
 | `MINIRAG_DB_WAIT_TRIES` | `30` | tentativas de esperar o Postgres no boot |
 | `MINIRAG_DB_WAIT_SECONDS` | `2` | pausa entre tentativas (30x2 = ate 60s) |
 | `MINIRAG_MAX_CHUNK_WORDS` | `500` | palavras por pedaço |
@@ -1713,7 +1713,7 @@ O minirag roda em qualquer ambiente com Docker. Segue um exemplo prático
 
 ---
 
-## Como um sistema usa o minirag
+## Como um sistema usa o nexos
 
 O backend do **sistema** guarda **uma** `chaveapi` por ambiente (ex.: `abc123`
 para o backend em produção). Em cada operação:
@@ -1724,12 +1724,12 @@ para o backend em produção). Em cada operação:
   `memoria: "empresa42"` → pega os pedaços → manda pro LLM (via
   gateway) com a pergunta + os pedaços → o LLM responde.
 
-O minirag **não sabe** que o sistema existe. Ele só obedece à chave e à gaveta.
+O nexos **não sabe** que o sistema existe. Ele só obedece à chave e à gaveta.
 Quem decide qual empresa existe e qual usuário pertence a qual é o sistema.
 
 ---
 
-## O que o minirag NÃO faz
+## O que o nexos NÃO faz
 
 - **Não lê arquivos** (PDF, .docx, .md) — quem extrai o texto é o cliente.
 - **Não responde perguntas em linguagem natural** — entrega pedaços; o LLM

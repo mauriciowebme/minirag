@@ -1,8 +1,8 @@
-# minirag como servidor MCP
+# nexos como servidor MCP
 
 > **Última atualização:** 28/10/2026 · **Versão:** 3.35.1 · **Medido no ambiente de teste**
 
-O minirag é **três coisas ao mesmo tempo**, e é bom que isso esteja escrito num lugar só:
+O nexos é **três coisas ao mesmo tempo**, e é bom que isso esteja escrito num lugar só:
 
 | Papel | Quem usa | Como se fala com ele |
 |---|---|---|
@@ -10,7 +10,7 @@ O minirag é **três coisas ao mesmo tempo**, e é bom que isso esteja escrito n
 | **Central de memória** | quem precisa guardar e buscar | REST (`/documents`, `/search`, `/gavetas`) e as ferramentas do MCP |
 | **Provedor de conexões** | outros agentes (Hermes, Claude, Cursor, scripts) | **MCP** em `POST /mcp` — JSON-RPC 2.0 sobre HTTP, sem sessão e sem SSE |
 
-Este documento é sobre o terceiro papel: **usar o minirag como servidor MCP**. O mecanismo de dentro
+Este documento é sobre o terceiro papel: **usar o nexos como servidor MCP**. O mecanismo de dentro
 (camada `src/mcp.ts`, mesmo processo, sem HTTP interno) está descrito no README.
 
 ---
@@ -42,7 +42,7 @@ Para criar um usuário: painel → Usuários, ou, para o operador, a ferramenta 
 ```jsonc
 // 1. initialize
 {"jsonrpc":"2.0","id":1,"method":"initialize","params":{"protocolVersion":"2025-06-18"}}
-// → { protocolVersion, capabilities: { tools: {} }, serverInfo: { name: "minirag", version: "3.35.1" } }
+// → { protocolVersion, capabilities: { tools: {} }, serverInfo: { name: "nexos", version: "3.35.1" } }
 
 // 2. notifications/initialized  (aceito com 202, sem corpo)
 {"jsonrpc":"2.0","method":"notifications/initialized"}
@@ -100,7 +100,7 @@ ferramentas para agir na conta de outro; para usuário comum esse campo é ignor
 
 ---
 
-## 4. O minirag como cliente MCP (o sentido inverso)
+## 4. O nexos como cliente MCP (o sentido inverso)
 
 Em **Configurações → Ferramentas (MCP)** o operador cadastra servidores externos por URL. Cada
 ferramenta deles entra no chat como `<nome-do-servidor>__<ferramenta>` (o nome do servidor não pode
@@ -124,12 +124,12 @@ conter `__`). A chave de acesso fica guardada no servidor e volta mascarada (`�
 ```yaml
 # ~/.hermes/config.yaml
 mcp_servers:
-  minirag:
+  nexos:
     url: https://minirag.techupsistemas.com/mcp
     headers:
       Authorization: Bearer ${MINIRAG_KEY}
     timeout: 120
 ```
 
-Depois de reiniciar o agente, as ferramentas aparecem como `mcp_minirag_search`, `mcp_minirag_ingest`
+Depois de reiniciar o agente, as ferramentas aparecem como `mcp_nexos_search`, `mcp_nexos_ingest`
 etc. A chave sai do ambiente (`MINIRAG_KEY`), nunca do arquivo.

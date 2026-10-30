@@ -1,6 +1,6 @@
-# Mapa da documentação — minirag
+# Mapa da documentação — Nexos
 
-> **Última atualização:** 2026-10-25 · **Versão:** 3.18.0 · **Dono:** Mauricio
+> **Última atualização:** 2026-10-25 · **Versão:** 3.47.0 · **Dono:** Mauricio
 
 O que vai onde (lugares canônicos da casa — padrão `organizacao-documentacao`; a tabela da skill é a dona, este mapa só registra o estado do repo):
 
@@ -21,6 +21,6 @@ O que vai onde (lugares canônicos da casa — padrão `organizacao-documentacao
 |---|---|---|
 | `proximos-passos.md` | 22 tarefas do chat (T001–T022), análise vs Open WebUI/Hermes — **lote em execução 25/10** | ~315 |
 | `planos/001-basico-chat.md` | checklist vivo T001–T022 (o que está entregue a cada momento) | ~55 |
-| `testes.md` | contrato da suíte do minirag (ponteiro para `suite-de-testes`) | 105 |
+| `testes.md` | contrato da suíte do nexos (ponteiro para `suite-de-testes`) | 105 |
 
 Nada neste mapa autoriza execução: tarefas viram código com OK explícito do dono (25/10, regra gravada no roadmap).
