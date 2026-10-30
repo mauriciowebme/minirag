@@ -18,7 +18,7 @@ import {
   rodar,
 } from "./maquinas";
 import { consumirUpload, consumirUploadDeArquivo } from "./maquinas_tools";
-import { abrirAnexo, abrirEnvio, conferirChave, estadoDoEnvio, gravarBloco } from "./anexos";
+import { abrirAnexo, abrirEnvio, apagarAnexoDe, conferirChave, estadoDoEnvio, gravarBloco, listarAnexos } from "./anexos";
 import { HttpError, iso } from "./errors";
 import { authenticate, ipCliente } from "./auth";
 import { embedderDim, embedderDisponivel } from "./embed";
@@ -780,6 +780,27 @@ export function criarApp(): FastifyInstance {
     if (!e.tenant || (e.tenant !== u.tenant && !u.operador))
       return reply.send({ id, bytes: 0, completo: false, nome: "" });
     return reply.send({ id, bytes: e.bytes, completo: e.completo, nome: e.nome });
+  });
+
+  /* v3.48 (T050) — a pasta FÍSICA do usuário na tela Arquivos: lista as fichas
+     (nome, tamanho, data, máquina de origem) e apaga uma por vez. Operador vê
+     todos os usuários e filtra por `tenant`; o comum só enxerga o próprio. */
+  app.get("/anexos", async (req) => {
+    const u = usuario(req);
+    const s = req.query as Record<string, string>;
+    return listarAnexos(u, {
+      q: s.q ?? "",
+      limit: s.limit ? Number(s.limit) : 50,
+      offset: s.offset ? Number(s.offset) : 0,
+      tenant: s.tenant ?? "",
+    });
+  });
+
+  app.delete("/anexos/:id", async (req, reply) => {
+    const u = usuario(req);
+    const p = req.params as Record<string, string>;
+    await apagarAnexoDe(p.id, u);
+    return reply.send({ apagado: true, id: p.id });
   });
 
   /* o chat busca o anexo com a chave no header (o <img> puro não manda header).

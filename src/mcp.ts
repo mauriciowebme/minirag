@@ -17,6 +17,7 @@ import {
   uploadArquivo,
 } from "./service";
 import { enqueueIngest } from "./ingest";
+import { listarAnexos } from "./anexos";
 import { CONFIG } from "./config";
 import { healthAtual } from "./ferramentas";
 import { ocrDisponivel, ocrImagem } from "./ocr";
@@ -139,6 +140,18 @@ export const TOOLS: Tool[] = [
       properties: {
         memoria: { type: "string", description: "gaveta dentro do login (default '')" },
         include_archived: { type: "boolean" },
+      },
+    },
+  },
+  {
+    name: "list_anexos",
+    description:
+      "Lista os arquivos da pasta do chamador (nome, bytes, data, maquina de origem) — os mesmos da aba Meus arquivos. Nao devolve o conteudo.",
+    inputSchema: {
+      type: "object",
+      properties: {
+        q: { type: "string", description: "filtro por nome" },
+        limit: { type: "number", description: "1..200 (default 50)" },
       },
     },
   },
@@ -834,6 +847,8 @@ async function executarTool(
         { memoria: args.memoria ?? "", include_archived: Boolean(args.include_archived) },
         user,
       );
+    case "list_anexos":
+      return listarAnexos(user, { q: String(args.q ?? ""), limit: Number(args.limit ?? 50) });
     case "delete_doc":
       return deleteDoc(args.doc_id, args.memoria ?? "", args.tenant ?? null, user);
     case "upload_file": {

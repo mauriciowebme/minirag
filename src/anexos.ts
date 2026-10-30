@@ -368,3 +368,46 @@ export async function apagarAnexo(id: string): Promise<void> {
   await fsp.rm(path.dirname(caminhoDoArquivo(a.tenant, id, a.nome)), { recursive: true, force: true });
   await q(`DELETE FROM ${TABELA} WHERE id = $1`, [id]);
 }
+
+/** v3.48 (T050) — linha da aba "Meus arquivos" (a pasta física do usuário). */
+export type AnexoFicha = {
+  id: string;
+  nome: string;
+  mime: string;
+  bytes: number;
+  host: string;
+  completo: boolean;
+  criado_em: string;
+};
+
+/** v3.48 (T050) — lista as fichas do usuário; operador vê todos e pode filtrar por tenant. */
+export async function listarAnexos(
+  u: Usuario,
+  opts: { q?: string; limit?: number; offset?: number; tenant?: string } = {},
+): Promise<{ total: number; anexos: AnexoFicha[] }> {
+  const alvo = u.operador ? (opts.tenant ? String(opts.tenant) : null) : u.tenant;
+  const busca = String(opts.q ?? "").trim().slice(0, 120);
+  const limit = Math.min(Math.max(Number(opts.limit) || 50, 1), 200);
+  const offset = Math.max(Number(opts.offset) || 0, 0);
+  const filtro = `($1::text IS NULL OR tenant = $1) AND ($2::text = '' OR nome ILIKE '%' || $2 || '%')`;
+  const r = await q<AnexoFicha>(
+    `SELECT id, nome, mime, bytes, host, completo, criado_em
+       FROM ${TABELA} WHERE ${filtro}
+      ORDER BY criado_em DESC LIMIT $3 OFFSET $4`,
+    [alvo, busca, limit, offset],
+  );
+  const t = await q<{ n: string }>(`SELECT count(*)::text AS n FROM ${TABELA} WHERE ${filtro}`, [alvo, busca]);
+  /* BIGINT volta como string do driver: a tela precisa de número */
+  const anexos = r.rows.map((x) => ({ ...x, bytes: Number(x.bytes) }));
+  return { total: Number(t.rows[0]?.n ?? 0), anexos };
+}
+
+/** v3.48 (T050) — apaga SÓ o anexo do dono (operador pode em qualquer um). */
+export async function apagarAnexoDe(id: string, u: Usuario): Promise<void> {
+  const limpo = String(id ?? "").trim().slice(0, 64);
+  const r = await q<{ tenant: string }>(`SELECT tenant FROM ${TABELA} WHERE id = $1`, [limpo]);
+  const a = r.rows[0];
+  if (!a) throw new HttpError(404, "anexo não encontrado");
+  if (!u.operador && a.tenant !== u.tenant) throw new HttpError(403, "este anexo é de outro usuário");
+  await apagarAnexo(limpo);
+}
