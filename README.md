@@ -22,6 +22,22 @@ parecidos com a pergunta, com uma nota de 0 a 1.
 
 ---
 ---
+## v3.47.2 (30/10) — o nome novo agora vale também na infraestrutura
+
+A 3.47.1 trocou o que se vê. Esta troca o que fica por baixo:
+
+- **Containers**: `nexos-api` e `nexos-db` (antes `minirag-*`). Rede e volumes acompanham.
+- **Volumes**: `nexos_data` (Postgres) e `nexos_arquivos` (anexos das máquinas), com os
+  dados copiados do volume antigo — nada de banco vazio.
+- **Banco e papel**: database e usuário `nexos`, com todas as 23 tabelas e as mesmas linhas.
+- **Cliente de máquina**: o binário passou a se chamar `nexos-cliente-win.exe` /
+  `nexos-cliente-linux`; a rota `/maquina/cliente/:plataforma` aceita os dois nomes, então
+  máquina antiga que pedir o arquivo continua recebendo.
+- **Na máquina do usuário**: a config virou `.nexos-maquina.json` e o log
+  `nexos-cliente.log` — o cliente renomeia os antigos na primeira subida, sem perder
+  pareamento nem histórico.
+- **Variáveis**: `NEXOS_*` é o nome oficial; o fallback para `MINIRAG_*` continua no compose.
+
 ## v3.47.1 (30/10) — o produto agora se chama Nexos
 
 O nome antigo descrevia só a busca; a ferramenta hoje guarda memória, conversa, executa

@@ -8,18 +8,18 @@
 # Traefik: o domínio é configurado na aba Domains do serviço (o container só
 # expõe 8000). Os ports locais mantêm o caminho do IA_GO (127.0.0.1 e tailnet).
 services:
-  minirag-api:
+  nexos-api:
     build: .
     restart: always
     environment:
       PYTHONUNBUFFERED: "1"
       NEXOS_MODEL: ${NEXOS_MODEL:-${MINIRAG_MODEL:-nomic-ai/nomic-embed-text-v1.5}}
       NEXOS_MODEL_DIR: /app/models
-      NEXOS_DB_HOST: minirag-db
+      NEXOS_DB_HOST: nexos-db
       NEXOS_DB_PORT: "5432"
-      NEXOS_DB_USER: ${NEXOS_DB_USER:-${NEXOS_DB_USER:-${MINIRAG_DB_USER:-minirag}}}
-      NEXOS_DB_PASSWORD: ${NEXOS_DB_PASSWORD:-${NEXOS_DB_PASSWORD:-${MINIRAG_DB_PASSWORD:-minirag}}}
-      NEXOS_DB_NAME: ${NEXOS_DB_NAME:-${NEXOS_DB_NAME:-${MINIRAG_DB_NAME:-minirag}}}
+      NEXOS_DB_USER: ${NEXOS_DB_USER:-${NEXOS_DB_USER:-${MINIRAG_DB_USER:-nexos}}}
+      NEXOS_DB_PASSWORD: ${NEXOS_DB_PASSWORD:-${NEXOS_DB_PASSWORD:-${MINIRAG_DB_PASSWORD:-nexos}}}
+      NEXOS_DB_NAME: ${NEXOS_DB_NAME:-${NEXOS_DB_NAME:-${MINIRAG_DB_NAME:-nexos}}}
       NEXOS_DB_WAIT_TRIES: ${NEXOS_DB_WAIT_TRIES:-${MINIRAG_DB_WAIT_TRIES:-30}}
       NEXOS_DB_WAIT_SECONDS: ${NEXOS_DB_WAIT_SECONDS:-${MINIRAG_DB_WAIT_SECONDS:-2}}
       NEXOS_MAX_CHUNK_WORDS: ${NEXOS_MAX_CHUNK_WORDS:-${MINIRAG_MAX_CHUNK_WORDS:-500}}

@@ -71,7 +71,7 @@ COPY src/config.ts ./src/
 COPY agente/ ./agente/
 COPY scripts/ ./scripts/
 RUN bash scripts/build-cliente.sh \
-    && test -f agente/bin/minirag-cliente-win.exe && test -f agente/bin/minirag-cliente-linux
+    && test -f agente/bin/nexos-cliente-win.exe && test -f agente/bin/nexos-cliente-linux
 
 # ---------------------------------------------------------------- estágio 3
 # Imagem final: Node + Python no MESMO container (2 containers no total)

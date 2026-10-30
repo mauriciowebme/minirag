@@ -31,11 +31,11 @@ function bool(name: string, def: boolean): boolean {
 }
 
 export const CONFIG = {
-  versao: "3.47.1",
+  versao: "3.47.2",
   model: process.env.NEXOS_MODEL ?? "nomic-ai/nomic-embed-text-v1.5",
   modelDir: process.env.NEXOS_MODEL_DIR ?? "/app/models",
 
-  dbHost: process.env.NEXOS_DB_HOST ?? "minirag-db",
+  dbHost: process.env.NEXOS_DB_HOST ?? "nexos-db",
   dbPort: int("NEXOS_DB_PORT", 5432),
   dbUser: process.env.NEXOS_DB_USER ?? "minirag",
   dbPassword: process.env.NEXOS_DB_PASSWORD ?? "minirag",

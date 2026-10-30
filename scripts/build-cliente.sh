@@ -3,7 +3,7 @@
 # instalação, com a VERSÃO DO PRODUTO embutida (auto-update compara com o
 # servidor). Roda localmente e dentro do estágio `cliente` do Dockerfile.
 #
-# Saída: agente/bin/minirag-cliente-linux  +  agente/bin/minirag-cliente-win.exe
+# Saída: agente/bin/nexos-cliente-linux  +  agente/bin/nexos-cliente-win.exe
 #
 # Receita oficial do Node Single Executable Application:
 #   1. gera o blob (sea-config) com O MESMO node que vai receber a injeção;
@@ -30,10 +30,10 @@ node --experimental-sea-config agente/.build/sea-config.json 2>/dev/null || node
 
 # 2) linux: copia o node que está rodando o build e injeta
 LINUX_BIN=$(readlink -f "$(command -v node)")
-cp "$LINUX_BIN" agente/bin/minirag-cliente-linux
-chmod u+w agente/bin/minirag-cliente-linux
-npx --yes postject@1.0.0-alpha.5 agente/bin/minirag-cliente-linux NODE_SEA_BLOB agente/.build/sea.blob --sentinel-fuse "$FUSE" >/dev/null
-echo "==> agente/bin/minirag-cliente-linux ($(stat -c%s agente/bin/minirag-cliente-linux) bytes)"
+cp "$LINUX_BIN" agente/bin/nexos-cliente-linux
+chmod u+w agente/bin/nexos-cliente-linux
+npx --yes postject@1.0.0-alpha.5 agente/bin/nexos-cliente-linux NODE_SEA_BLOB agente/.build/sea.blob --sentinel-fuse "$FUSE" >/dev/null
+echo "==> agente/bin/nexos-cliente-linux ($(stat -c%s agente/bin/nexos-cliente-linux) bytes)"
 
 # 3) windows: mesmo node, versão do dist oficial, PE assinado -> tira a assinatura -> injeta
 if [ "${1:-}" != "--sem-win" ]; then
@@ -49,10 +49,10 @@ open(sys.argv[2], "wb").write(z.read(nome))
 PY
   python3 scripts/strip_pe_assinatura.py agente/.build/node.exe
   npx --yes postject@1.0.0-alpha.5 agente/.build/node.exe NODE_SEA_BLOB agente/.build/sea.blob --sentinel-fuse "$FUSE" >/dev/null
-  mv agente/.build/node.exe agente/bin/minirag-cliente-win.exe
+  mv agente/.build/node.exe agente/bin/nexos-cliente-win.exe
   # v3.11: sem console — o programa abre a própria janela e nada mais
-  python3 scripts/sem_console_pe.py agente/bin/minirag-cliente-win.exe
-  echo "==> agente/bin/minirag-cliente-win.exe ($(stat -c%s agente/bin/minirag-cliente-win.exe) bytes)"
+  python3 scripts/sem_console_pe.py agente/bin/nexos-cliente-win.exe
+  echo "==> agente/bin/nexos-cliente-win.exe ($(stat -c%s agente/bin/nexos-cliente-win.exe) bytes)"
 fi
 
 echo "==> pronto"

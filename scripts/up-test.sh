@@ -26,19 +26,19 @@ echo "== abaixo o ambiente anterior ($PROJ) =="
 $COMPOSE -p "$PROJ" -f docker-compose.test.yml down -v --remove-orphans >/dev/null 2>&1 || true
 
 echo "== build da imagem com o código atual do repo =="
-$COMPOSE -p "$PROJ" -f docker-compose.test.yml build minirag-api
+$COMPOSE -p "$PROJ" -f docker-compose.test.yml build nexos-api
 
 echo "== subida (volume novo, banco zerado) =="
 USUARIO_KEY="$(gerar_key)"   # nome OBRIGATORIAMENTE "teste": a suíte.assert nos blocos v1.8/MCP/v2.7
 #                                      compara tenant === "teste" (trocar o nome quebra 10 checagens)
 OPERADOR_KEY="$(gerar_key)"  # papel operador: gestão de usuários/config
-MINIRAG_USERS="teste:$USUARIO_KEY" \
-MINIRAG_ADMIN="op:$OPERADOR_KEY" \
-MINIRAG_TEST_BIND="$BIND" MINIRAG_TEST_PORT="$PORTA" \
+NEXOS_USERS="teste:$USUARIO_KEY" \
+NEXOS_ADMIN="op:$OPERADOR_KEY" \
+NEXOS_TEST_BIND="$BIND" NEXOS_TEST_PORT="$PORTA" \
 $COMPOSE -p "$PROJ" -f docker-compose.test.yml up -d
 
-API="${PROJ}-minirag-api-1"
-DB="${PROJ}-minirag-db-1"
+API="${PROJ}-nexos-api-1"
+DB="${PROJ}-nexos-db-1"
 
 # no Hermes a suíte roda DENTRO de um container: BASE = IP da ponte da rede do compose.
 # Cuidado: `ip` não existe em todo container e a rede muda de subnome a cada `down -v`,
@@ -55,7 +55,7 @@ for _ in $(seq 1 40); do
   sleep 3
   if curl -sf --max-time 5 "$BASE/health" >/dev/null; then ok=1; break; fi
 done
-[ -n "$ok" ] || { echo "FALHOU: api não respondeu em $BASE/health"; $COMPOSE -p "$PROJ" -f docker-compose.test.yml logs --tail 40 minirag-api; exit 1; }
+[ -n "$ok" ] || { echo "FALHOU: api não respondeu em $BASE/health"; $COMPOSE -p "$PROJ" -f docker-compose.test.yml logs --tail 40 nexos-api; exit 1; }
 curl -s "$BASE/health" | head -c 200; echo
 
 mkdir -p "$(dirname "$ENV_FILE")"

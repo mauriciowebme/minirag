@@ -3,17 +3,17 @@
 # Volume com nome FIXO de propósito: é o mesmo dado que o serviço atual usa
 # (`nexos_data`). Não renomeie — renomear aqui = subir banco vazio.
 services:
-  minirag-db:
+  nexos-db:
     image: pgvector/pgvector:pg17
     restart: unless-stopped
     environment:
-      POSTGRES_USER: ${NEXOS_DB_USER:-${MINIRAG_DB_USER:-minirag}}
-      POSTGRES_PASSWORD: ${NEXOS_DB_PASSWORD:-${MINIRAG_DB_PASSWORD:-minirag}}
-      POSTGRES_DB: ${NEXOS_DB_NAME:-${MINIRAG_DB_NAME:-minirag}}
+      POSTGRES_USER: ${NEXOS_DB_USER:-${MINIRAG_DB_USER:-nexos}}
+      POSTGRES_PASSWORD: ${NEXOS_DB_PASSWORD:-${MINIRAG_DB_PASSWORD:-nexos}}
+      POSTGRES_DB: ${NEXOS_DB_NAME:-${MINIRAG_DB_NAME:-nexos}}
     volumes:
-      - minirag_data:/var/lib/postgresql/data
+      - nexos_data:/var/lib/postgresql/data
     healthcheck:
-      test: ["CMD-SHELL", "pg_isready -U ${NEXOS_DB_USER:-${MINIRAG_DB_USER:-minirag}} -d ${NEXOS_DB_NAME:-${MINIRAG_DB_NAME:-minirag}}"]
+      test: ["CMD-SHELL", "pg_isready -U ${NEXOS_DB_USER:-${MINIRAG_DB_USER:-nexos}} -d ${NEXOS_DB_NAME:-${MINIRAG_DB_NAME:-nexos}}"]
       interval: 10s
       timeout: 5s
       retries: 10
@@ -22,8 +22,8 @@ services:
       - minirag-rede
 
 volumes:
-  minirag_data:
-    name: minirag_data
+  nexos_data:
+    name: nexos_data
 
 networks:
   minirag-rede:

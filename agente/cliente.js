@@ -19,12 +19,12 @@
  *    em TODA conexão; se o servidor fala versão maior, mostra o progresso na TELA,
  *    baixa, troca e reabre em janela própria minimizada (no Windows o exe velho vira
  *    .old porque não se apaga arquivo em execução);
- *  - UM log só (minirag-cliente.log), memória de 30 dias: faxina no boot apaga linhas
+ *  - UM log só (nexos-cliente.log), memória de 30 dias: faxina no boot apaga linhas
  *    mais velhas e corta o topo se estourar 2 MB — sem arquivo .old de log.
  *
  * Uso:
- *   minirag-cliente-win.exe --token <token-da-tela>
- *   minirag-cliente-linux   --token ... [--host nome] [--url minirag.techupsistemas.com]
+ *   nexos-cliente-win.exe --token <token-da-tela>
+ *   nexos-cliente-linux   --token ... [--host nome] [--url nexos.techupsistemas.com]
  *   MINIRAG_MAQUINA_URL / MINIRAG_MAQUINA_CONF sobrepõem os padrões.
  */
 "use strict";
@@ -46,7 +46,18 @@ function flag(nome, padrao) {
 }
 
 /* ---------------- alvo ---------------- */
-const confPath = flag("conf", process.env.NEXOS_MAQUINA_CONF || process.env.MINIRAG_MAQUINA_CONF || path.join(os.homedir(), ".minirag-maquina.json"));
+/* v3.47.2: a config oficial agora é .nexos-maquina.json. Quem já roda em campo tem
+   .minirag-maquina.json com host/token — renomear sem migrar faria o cliente pedir
+   pareamento de novo. Migra uma vez, no boot, antes de qualquer leitura. */
+const CONF_NOVO = path.join(os.homedir(), ".nexos-maquina.json");
+const CONF_ANTIGO = path.join(os.homedir(), ".minirag-maquina.json");
+let confPath = flag("conf", process.env.NEXOS_MAQUINA_CONF || process.env.MINIRAG_MAQUINA_CONF || "");
+if (!confPath) {
+  if (!fs.existsSync(CONF_NOVO) && fs.existsSync(CONF_ANTIGO)) {
+    try { fs.renameSync(CONF_ANTIGO, CONF_NOVO); } catch { try { fs.copyFileSync(CONF_ANTIGO, CONF_NOVO); } catch { /* segue com o antigo */ } }
+  }
+  confPath = CONF_NOVO;
+}
 
 /* v3.47.1: produção mora em nexos.techupsistemas.com. Quem já tem conf salva com o
    endereço antigo é migrado no boot — sem isso a máquina reconecta num host que não
@@ -124,7 +135,13 @@ try {
 } catch {
   LOG_DIR = __dirname;
 }
-const LOG_PATH = path.join(LOG_DIR, "minirag-cliente.log");
+const LOG_PATH = path.join(LOG_DIR, "nexos-cliente.log");
+/* v3.47.2: herda o log antigo na primeira subida — o histórico de reconexão do dono
+   não pode sumir só porque o arquivo trocou de nome. */
+try {
+  const LOG_ANTIGO = path.join(LOG_DIR, "minirag-cliente.log");
+  if (!fs.existsSync(LOG_PATH) && fs.existsSync(LOG_ANTIGO)) fs.renameSync(LOG_ANTIGO, LOG_PATH);
+} catch { /* log é acessório: nunca derruba o boot */ }
 let nivelBackoff = 0;
 let escritasLog = 0;
 /* v3.12: o log gira por TAMANHO também. Um laço de recusa do servidor enchia o

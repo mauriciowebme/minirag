@@ -2201,13 +2201,13 @@ test("nexos v2 — suíte completa", async (t) => {
     const DB = process.env.DBCONTAINER ?? CONTAINER.replace("-api-", "-db-");
     const psql = (sql: string) =>
       execFileSync("docker", ["exec", DB, "sh", "-c", `psql -U \"$POSTGRES_USER\" -d \"$POSTGRES_DB\" -tAc \"${sql}\"`], { encoding: "utf8" }).trim();
-    /* v3.4: o nome canônico da variável do admin é MINIRAG_ADMIN (apelido OPERADOR ainda vale).
+    /* v3.4: o nome canônico da variável do admin é NEXOS_ADMIN (MINIRAG_ADMIN e OPERADOR ainda valem).
        Esta suíte só prova que o boot com o nome NOVO funciona se o container nasceu com ela. */
     if (CONTAINER) {
-      const nomeSemente = execFileSync("docker", ["exec", CONTAINER, "sh", "-c", "printenv MINIRAG_ADMIN | cut -d: -f1"], { encoding: "utf8" }).trim();
-      f.check("boot semeou o admin pela variável MINIRAG_ADMIN", nomeSemente === "op", { nome: nomeSemente });
+      const nomeSemente = execFileSync("docker", ["exec", CONTAINER, "sh", "-c", "(printenv NEXOS_ADMIN || printenv MINIRAG_ADMIN) | cut -d: -f1"], { encoding: "utf8" }).trim();
+      f.check("boot semeou o admin pela variável NEXOS_ADMIN", nomeSemente === "op", { nome: nomeSemente });
     } else {
-      f.check("boot semeou o admin pela variável MINIRAG_ADMIN", false, "sem CONTAINER no ambiente");
+      f.check("boot semeou o admin pela variável NEXOS_ADMIN", false, "sem CONTAINER no ambiente");
     }
     /* política do dono (21/10): Painel, Usuários e Configurações são do ADMIN —
        na tela (filtro do menu) E na porta (a parede de verdade é aqui). */
@@ -2690,13 +2690,13 @@ await bloco(t, "v3.6: máquinas por usuário — hub WS, pareamento, run, escopo
 
     matarClientes();
     for (let i = 0; i < 30 && !portaLivre(48123); i++) await dormir(500);
-    execD("rm -f /tmp/conf-p39.json /tmp/conf-p39b.json /tmp/minirag-cliente.log");
+    execD("rm -f /tmp/conf-p39.json /tmp/conf-p39b.json /tmp/nexos-cliente.log");
     execD(`nohup env MINIRAG_MAQUINA_CONF=/tmp/conf-p39.json node /tmp/cliente-painel.js --token ${tokenS39} --url ${BASE} --host maq-s39 --sem-janela >/tmp/c39.out 2>&1 & sleep 1; echo ok`);
 
     /* porta REAL do painel: sai do log que acabou de nascer (só este cliente vivo) */
     let porta = 0;
     for (let i = 0; i < 30 && !porta; i++) {
-      const m = execD("grep -oE 'painel local em http://127.0.0.1:[0-9]+/' /tmp/minirag-cliente.log 2>/dev/null | tail -1").match(/:([0-9]+)\//);
+      const m = execD("grep -oE 'painel local em http://127.0.0.1:[0-9]+/' /tmp/nexos-cliente.log 2>/dev/null | tail -1").match(/:([0-9]+)\//);
       if (m) porta = Number(m[1]);
       else await dormir(500);
     }
@@ -2772,7 +2772,7 @@ await bloco(t, "v3.6: máquinas por usuário — hub WS, pareamento, run, escopo
     };
     const leLog = () => {
       try {
-        return execD("cat /tmp/minirag-cliente.log 2>/dev/null");
+        return execD("cat /tmp/nexos-cliente.log 2>/dev/null");
       } catch {
         return "";
       }
@@ -2802,7 +2802,7 @@ await bloco(t, "v3.6: máquinas por usuário — hub WS, pareamento, run, escopo
     f.check("v3.13.1 pareamento criado para a máquina do teste", rPar.status === 201 && token3131.length === 40, rPar.status);
 
     execD("node /tmp/procura3131.js /tmp/hubmodo3131.js mata >/dev/null 2>&1; node /tmp/procura3131.js /tmp/maq3131.js mata >/dev/null 2>&1");
-    execD("rm -f /tmp/minirag-cliente.log /tmp/c3131.json /tmp/c3131b.json /tmp/hubmodo3131.modo");
+    execD("rm -f /tmp/nexos-cliente.log /tmp/c3131.json /tmp/c3131b.json /tmp/hubmodo3131.modo");
     execD("nohup node /tmp/hubmodo3131.js >/tmp/hubmodo3131.out 2>&1 & sleep 1; echo ok");
 
     /* 1) handshake pendurado: o laço TEM que continuar remarcando (na 3.13.0 morria na 1ª) */
@@ -2838,7 +2838,7 @@ await bloco(t, "v3.6: máquinas por usuário — hub WS, pareamento, run, escopo
     f.check("v3.13.1 o log do servidor traz código e duração da conexão", /código \d+, vivo \d+s/.test(logServidor), logServidor || "(sem linha OFFLINE maq3131 no log)");
 
     execD("node /tmp/procura3131.js /tmp/hubmodo3131.js mata >/dev/null 2>&1; node /tmp/procura3131.js /tmp/maq3131.js mata >/dev/null 2>&1");
-    execD("rm -f /tmp/c3131.json /tmp/c3131b.json /tmp/maq3131.js /tmp/hubmodo3131.js /tmp/hubmodo3131.modo /tmp/procura3131.js /tmp/minirag-cliente.log");
+    execD("rm -f /tmp/c3131.json /tmp/c3131b.json /tmp/maq3131.js /tmp/hubmodo3131.js /tmp/hubmodo3131.modo /tmp/procura3131.js /tmp/nexos-cliente.log");
     await call("DELETE", `/maquinas/chave/${String(rPar.json?.id ?? "nao")}`, { key: TESTKEY });
     f.fechar("v3.13.1 cliente atravessa o deploy");
   });
@@ -3624,7 +3624,7 @@ await bloco(t, "v3.6: máquinas por usuário — hub WS, pareamento, run, escopo
     /* mata só o cliente deste bloco (a imagem slim pode não ter pkill) */
     const MATAR = "const fs=require('fs');for(const d of fs.readdirSync('/proc')){if(!/^[0-9]+$/.test(d))continue;"
       + "try{const c=fs.readFileSync('/proc/'+d+'/cmdline','utf8').split(String.fromCharCode(0)).join(' ');"
-      + "if(c.indexOf('minirag-cliente-linux')>=0&&c.indexOf('cli-real')>=0)process.kill(Number(d),'SIGKILL')}catch(e){}}";
+      + "if(c.indexOf('nexos-cliente-linux')>=0&&c.indexOf('cli-real')>=0)process.kill(Number(d),'SIGKILL')}catch(e){}}";
     const matar = () => {
       try { execFileSync("docker", ["exec", CONTAINER, "node", "-e", MATAR]); } catch { /* já morreu */ }
     };
@@ -3636,7 +3636,7 @@ await bloco(t, "v3.6: máquinas por usuário — hub WS, pareamento, run, escopo
     f.check("v3.43 pareamento do cliente real criado", Boolean(par), r0.texto.slice(0, 120));
 
     execFileSync("docker", ["exec", CONTAINER, "sh", "-c", "head -c 800000 /dev/zero > /tmp/e2e-grande.bin"]);
-    execFileSync("docker", ["exec", "-d", CONTAINER, "/app/agente/bin/minirag-cliente-linux",
+    execFileSync("docker", ["exec", "-d", CONTAINER, "/app/agente/bin/nexos-cliente-linux",
       "--url", "http://127.0.0.1:8000", "--token", par, "--host", "cli-real", "--conf", "/tmp/e2e-cli-real.json"]);
 
     let online = false;
@@ -3689,7 +3689,7 @@ await bloco(t, "v3.6: máquinas por usuário — hub WS, pareamento, run, escopo
     const HOST = "cli-arq";
     const MATAR = "const fs=require('fs');for(const d of fs.readdirSync('/proc')){if(!/^[0-9]+$/.test(d))continue;"
       + "try{const c=fs.readFileSync('/proc/'+d+'/cmdline','utf8').split(String.fromCharCode(0)).join(' ');"
-      + "if(c.indexOf('minirag-cliente-linux')>=0&&c.indexOf('" + HOST + "')>=0)process.kill(Number(d),'SIGKILL')}catch(e){}}";
+      + "if(c.indexOf('nexos-cliente-linux')>=0&&c.indexOf('" + HOST + "')>=0)process.kill(Number(d),'SIGKILL')}catch(e){}}";
     const matar = () => { try { execFileSync("docker", ["exec", CONTAINER, "node", "-e", MATAR]); } catch { /* ok */ } };
     const sh = (cmd: string) => execFileSync("docker", ["exec", CONTAINER, "sh", "-c", cmd], { encoding: "utf8" });
     const sha = (p: string) => sh(`sha256sum ${p} | cut -d' ' -f1`).trim();
@@ -3703,7 +3703,7 @@ await bloco(t, "v3.6: máquinas por usuário — hub WS, pareamento, run, escopo
     /* 70 MB passa de dois blocos de 32 MB — prova o fatiamento de verdade */
     sh("head -c 73400320 /dev/urandom > /tmp/e2e-arq.bin && rm -f /tmp/e2e-arq-copia.bin");
     const shaOrigem = sha("/tmp/e2e-arq.bin");
-    execFileSync("docker", ["exec", "-d", CONTAINER, "/app/agente/bin/minirag-cliente-linux",
+    execFileSync("docker", ["exec", "-d", CONTAINER, "/app/agente/bin/nexos-cliente-linux",
       "--url", "http://127.0.0.1:8000", "--token", par, "--host", HOST, "--conf", "/tmp/e2e-cli-arq.json"]);
 
     let online = false;
@@ -3797,7 +3797,7 @@ await bloco(t, "v3.6: máquinas por usuário — hub WS, pareamento, run, escopo
     const HOST = "cli-nav";
     const MATAR = "const fs=require('fs');for(const d of fs.readdirSync('/proc')){if(!/^[0-9]+$/.test(d))continue;"
       + "try{const c=fs.readFileSync('/proc/'+d+'/cmdline','utf8').split(String.fromCharCode(0)).join(' ');"
-      + "if(c.indexOf('minirag-cliente-linux')>=0&&c.indexOf('" + HOST + "')>=0)process.kill(Number(d),'SIGKILL')}catch(e){}}";
+      + "if(c.indexOf('nexos-cliente-linux')>=0&&c.indexOf('" + HOST + "')>=0)process.kill(Number(d),'SIGKILL')}catch(e){}}";
     const matar = () => { try { execFileSync("docker", ["exec", CONTAINER, "node", "-e", MATAR]); } catch { /* ok */ } };
     const sh = (cmd: string) => execFileSync("docker", ["exec", CONTAINER, "sh", "-c", cmd], { encoding: "utf8" });
     const sha = (p: string) => sh(`sha256sum ${p} | cut -d' ' -f1`).trim();
@@ -3852,7 +3852,7 @@ await bloco(t, "v3.6: máquinas por usuário — hub WS, pareamento, run, escopo
       noDisco.includes("/app/dados/anexos/teste/") && noDisco.endsWith(String(TOTAL)), noDisco.slice(0, 200));
 
     /* 5) ENVIAR PARA A MÁQUINA: o cliente real conectado baixa e confere o sha256 */
-    execFileSync("docker", ["exec", "-d", CONTAINER, "/app/agente/bin/minirag-cliente-linux",
+    execFileSync("docker", ["exec", "-d", CONTAINER, "/app/agente/bin/nexos-cliente-linux",
       "--url", "http://127.0.0.1:8000", "--token", par, "--host", HOST, "--conf", "/tmp/e2e-cli-nav.json"]);
     let online = false;
     for (let i = 0; i < 60; i++) {

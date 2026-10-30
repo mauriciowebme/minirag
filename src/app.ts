@@ -643,17 +643,20 @@ export function criarApp(): FastifyInstance {
   app.get("/maquina/atualizacao", async () => ({
     versao: CONFIG.versao,
     cliente: {
-      win: fs.existsSync(path.join(BIN_CLI, "minirag-cliente-win.exe")),
-      linux: fs.existsSync(path.join(BIN_CLI, "minirag-cliente-linux")),
+      win: fs.existsSync(path.join(BIN_CLI, "nexos-cliente-win.exe")) || fs.existsSync(path.join(BIN_CLI, "minirag-cliente-win.exe")),
+      linux: fs.existsSync(path.join(BIN_CLI, "nexos-cliente-linux")) || fs.existsSync(path.join(BIN_CLI, "minirag-cliente-linux")),
     },
   }));
 
   app.get("/maquina/cliente/:plataforma", async (req, reply) => {
     const p = req.params as Record<string, string>;
     const nome =
-      p.plataforma === "win" ? "minirag-cliente-win.exe" : p.plataforma === "linux" ? "minirag-cliente-linux" : null;
+      p.plataforma === "win" ? "nexos-cliente-win.exe" : p.plataforma === "linux" ? "nexos-cliente-linux" : null;
     if (!nome) throw new HttpError(404, "plataforma: win | linux");
-    const arq = path.join(BIN_CLI, nome);
+    // v3.47.2: o nome oficial é nexos-*; o antigo continua aceito enquanto houver
+    // cliente/roteiro velho apontando para ele.
+    const arq = [path.join(BIN_CLI, nome), path.join(BIN_CLI, nome.replace("nexos-cliente", "minirag-cliente"))]
+      .find((f) => fs.existsSync(f)) ?? path.join(BIN_CLI, nome);
     if (!fs.existsSync(arq)) throw new HttpError(404, "binário ainda não publicado neste servidor");
     const st = fs.statSync(arq);
     return reply

@@ -335,7 +335,7 @@ export async function gerarClienteBinario(alvo: string, plataforma: "win" | "lin
     `INSERT INTO chaves_cliente (tenant, nome, token_hash, expira_em) VALUES ($1, $2, $3, now() + make_interval(secs => $4))`,
     [alvo, nome, hashChave(token), CHAVE_CLIENTE_SEG],
   );
-  const arqBase = plataforma === "win" ? "minirag-cliente-win.exe" : "minirag-cliente-linux";
+  const arqBase = plataforma === "win" ? "nexos-cliente-win.exe" : "nexos-cliente-linux";
   const bin = fs.readFileSync(path.join(BIN_CLI, arqBase));
   const payload = Buffer.from(JSON.stringify({ v: 1, k: token }), "utf8");
   const rodape = Buffer.alloc(8);
