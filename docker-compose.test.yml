@@ -43,6 +43,9 @@ services:
     depends_on:
       minirag-db:
         condition: service_healthy
+    volumes:
+      # v3.45: mesma forma da produção — arquivos por usuário num volume nomeado
+      - miniragtest_arquivos:/app/dados
     ports:
       # bind configurável: no host 127.0.0.1 basta; de dentro de outro
       # container (CI/Hermes) use 0.0.0.0 e acesse pelo IP da ponte
@@ -50,3 +53,4 @@ services:
 
 volumes:
   miniragtest_data:
+  miniragtest_arquivos:

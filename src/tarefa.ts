@@ -80,13 +80,15 @@ export async function cancelarTarefa(u: Usuario, id: string, tenantArg?: string 
  *  (o projeto não tem handler global de unhandledRejection). */
 export async function criarTarefa(
   u: Usuario,
-  b: { pergunta: string; memoria: string; tenant?: string | null; provedor?: string; modelo?: string },
+  b: { pergunta: string; memoria: string; tenant?: string | null; provedor?: string; modelo?: string;
+       anexos?: { id: string; nome?: string; bytes?: number }[] },
   rodar: (id: string, u: Usuario) => Promise<void>,
 ): Promise<string> {
   const id = randomUUID();
   await q(
-    `INSERT INTO chat_tarefas (id, tenant, memoria, pergunta, provedor, modelo) VALUES ($1, $2, $3, $4, $5, $6)`,
-    [id, tenantFor(u, b.tenant ?? null), b.memoria, b.pergunta, b.provedor ?? "", b.modelo ?? ""],
+    `INSERT INTO chat_tarefas (id, tenant, memoria, pergunta, provedor, modelo, anexos) VALUES ($1, $2, $3, $4, $5, $6, $7::jsonb)`,
+    [id, tenantFor(u, b.tenant ?? null), b.memoria, b.pergunta, b.provedor ?? "", b.modelo ?? "",
+     JSON.stringify(b.anexos ?? [])],
   );
   queueMicrotask(() => {
     void rodar(id, u).catch((e) => log(`tarefa ${id}: disparo falhou: ${String(e)}`));
@@ -140,7 +142,8 @@ export async function rodarTarefa(id: string, u: Usuario): Promise<void> {
     if (!t) return;
     const resp = await responderChat(
       u,
-      { pergunta: t.pergunta, memoria: t.memoria, tenant: t.tenant, provedor: String(t.provedor ?? ""), modelo: String(t.modelo ?? "") },
+      { pergunta: t.pergunta, memoria: t.memoria, tenant: t.tenant, provedor: String(t.provedor ?? ""), modelo: String(t.modelo ?? ""),
+        anexos: (t.anexos as { id: string; nome?: string; bytes?: number }[] | null) ?? [] },
       (e) => {
         if (e.tipo === "delta") {
           parcial += String(e.texto ?? "");

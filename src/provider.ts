@@ -16,7 +16,7 @@ import { REGRAS_CASA } from "./regras";
 import { erro409, erro422 } from "./errors";
 import { q } from "./db";
 import { apertarRodada, custoDoPayload, type MsgChat, montarPayload } from "./compactar";
-import type { AnexoMeta } from "./anexos";
+import { abrirAnexo, type AnexoMeta } from "./anexos";
 import { MAX_TELAS_TURNO, htmlParcial, type Tela } from "./telas";
 import {
   type ChamadaFerramenta,
@@ -874,6 +874,8 @@ export async function responderChat(
     pergunta: string; memoria?: string; tenant?: string | null; provedor?: string; modelo?: string;
     /** v3.41: imagens coladas/coladas no chat (base64 puro, sem o prefixo data:) */
     imagens?: { mime: string; base64: string }[];
+    /** v3.46: arquivos JÁ no servidor (upado pelo navegador em blocos) — só id/nome */
+    anexos?: { id: string; nome?: string; bytes?: number }[];
   },
   emitir?: (e: EventoChat) => void,
   /** v3.18 (T001): sinal de cancelamento da tarefa (botão "parar")
@@ -883,6 +885,19 @@ export async function responderChat(
   const pergunta = body.pergunta.trim();
   /* v3.41 — imagem colada no chat: vai como parte do turno, não como documento. */
   const imagens = validarImagens(body.imagens);
+  /* v3.46: o arquivo grande não entra no prompt — fica no servidor e o modelo recebe
+     o id. É esse id que a ferramenta enviar_para_maquina usa. `abrirAnexo` valida dono. */
+  const anexosDoUsuario: AnexoMeta[] = [];
+  for (const a of (body.anexos ?? []).slice(0, 10)) {
+    const id = String(a?.id ?? "").slice(0, 64);
+    if (!id) continue;
+    try {
+      const f = await abrirAnexo(id, user);
+      anexosDoUsuario.push({ id, nome: f.nome, mime: f.mime, bytes: f.bytes });
+    } catch {
+      /* id inexistente ou de outro usuário: fica de fora, sem derrubar o turno */
+    }
+  }
   const tenant = tenantFor(user, body.tenant ?? null);
   const memoria = (body.memoria ?? "").trim();
   /* v3.19: o usuário pode escolher o provedor (e o modelo) na hora da conversa */
@@ -916,6 +931,18 @@ export async function responderChat(
     verbatim: cfg.verbatim_turnos,
   });
   const mensagens: Mensagem[] = plano.mensagens as Mensagem[];
+  /* v3.46: a nota vai só para o que o MODELO lê; `pergunta` continua limpa para a
+     busca e para o histórico (prefixo em pergunta envenenaria o embedding) */
+  if (anexosDoUsuario.length > 0) {
+    const nota =
+      "\n\n[Arquivos que a pessoa anexou nesta mensagem — já estão no servidor]\n" +
+      anexosDoUsuario
+        .map((a) => `- ${a.nome} — id: ${a.id} (${(a.bytes / 1048576).toFixed(1)} MB)`)
+        .join("\n") +
+      "\n[Para levar um deles a uma máquina, chame enviar_para_maquina com esse id.]";
+    const ultima = [...mensagens].reverse().find((m) => m.role === "user");
+    if (ultima) ultima.content = String(ultima.content ?? "") + nota;
+  }
   const compactacao = {
     memoria_turnos: cfg.memoria_turnos,
     historico_lido: historico.length,
@@ -1228,7 +1255,7 @@ export async function responderChat(
     const parcial = emitido.trim();
     await gravarMensagens(
       tenant, memoria, pergunta, parcial, chamadas, falas, pensamento.trim(), rastro, [...fontes],
-      cfg.provedor, cfg.modelo, telas, anexos, Date.now() - inicio,
+      cfg.provedor, cfg.modelo, telas, anexos, Date.now() - inicio, anexosDoUsuario,
     );
     return empacotar(parcial, "parada pelo usuário — o que chegou ficou gravado", true);
   }
@@ -1245,7 +1272,7 @@ export async function responderChat(
         : "nenhuma ferramenta está ligada em Configurações → Ferramentas (MCP)");
   }
 
-  await gravarMensagens(tenant, memoria, pergunta, texto, chamadas, falas, pensamento.trim(), rastro, [...fontes], cfg.provedor, cfg.modelo, telas, anexos, Date.now() - inicio);
+  await gravarMensagens(tenant, memoria, pergunta, texto, chamadas, falas, pensamento.trim(), rastro, [...fontes], cfg.provedor, cfg.modelo, telas, anexos, Date.now() - inicio, anexosDoUsuario);
   return empacotar(texto, aviso, false);
 }
 
@@ -1264,10 +1291,12 @@ async function gravarMensagens(
   telas: Tela[] = [],
   anexos: AnexoMeta[] = [],
   msTurno = 0,
+  /** v3.46: arquivos que a PESSOA anexou (a linha 'user' mostra eles no histórico) */
+  anexosDoUsuario: AnexoMeta[] = [],
 ): Promise<void> {
   await q(
-    `INSERT INTO chat_mensagens (tenant, memoria, papel, texto, ferramentas) VALUES ($1, $2, 'user', $3, NULL)`,
-    [tenant, memoria, pergunta],
+    `INSERT INTO chat_mensagens (tenant, memoria, papel, texto, ferramentas, anexos) VALUES ($1, $2, 'user', $3, NULL, $4::jsonb)`,
+    [tenant, memoria, pergunta, JSON.stringify(anexosDoUsuario)],
   );
   await q(
     `INSERT INTO chat_mensagens (tenant, memoria, papel, texto, ferramentas, falas, raciocinio, rastro, fontes, custo, provedor, modelo, telas, anexos) VALUES ($1, $2, 'assistant', $3, $4::jsonb, $5::jsonb, $6, $7::jsonb, $8::jsonb, $9::jsonb, $10, $11, $12::jsonb, $13::jsonb)`,

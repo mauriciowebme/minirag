@@ -166,6 +166,9 @@ export async function initDb(dim: number): Promise<void> {
       criado_em TIMESTAMPTZ NOT NULL DEFAULT now(),
       atualizado_em TIMESTAMPTZ NOT NULL DEFAULT now())`,
   );
+  /* v3.46: arquivos que a pessoa anexou no turno (id/nome/bytes) — a tarefa roda
+     depois do request, então isso precisa morar na linha, não na memória */
+  await q(`ALTER TABLE chat_tarefas ADD COLUMN IF NOT EXISTS anexos JSONB`);
 
   /* v3.23: telas geradas sobrevivem ao reanexar (o card volta no `fim` da tarefa) */
   await q(`ALTER TABLE chat_tarefas ADD COLUMN IF NOT EXISTS telas JSONB`);

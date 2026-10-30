@@ -17,8 +17,8 @@ import {
   mudarMaquina,
   rodar,
 } from "./maquinas";
-import { consumirUpload } from "./maquinas_tools";
-import { gravarAnexo, lerAnexo } from "./anexos";
+import { consumirUpload, consumirUploadDeArquivo } from "./maquinas_tools";
+import { abrirAnexo, abrirEnvio, conferirChave, estadoDoEnvio, gravarBloco } from "./anexos";
 import { HttpError, iso } from "./errors";
 import { authenticate, ipCliente } from "./auth";
 import { embedderDim, embedderDisponivel } from "./embed";
@@ -156,13 +156,10 @@ export function criarApp(): FastifyInstance {
     trustProxy: true,
   });
 
-  /* v3.44: corpo BINÁRIO de verdade (a máquina manda o arquivo/print por POST).
-     Sem este parser o Fastify recusa o content-type com 415. */
-  app.addContentTypeParser(
-    "application/octet-stream",
-    { parseAs: "buffer", bodyLimit: 40 * 1024 * 1024 },
-    (_req, body, done) => done(null, body),
-  );
+  /* v3.45: o corpo binário chega como STREAM (nunca vira Buffer gigante na RAM).
+     É o que permite mandar 10 GB em blocos: o bloco é escrito no disco enquanto
+     chega, com pressão de retorno (pipeline), e a memória fica em poucos MB. */
+  app.addContentTypeParser("application/octet-stream", (_req, payload, done) => done(null, payload));
 
   app.setErrorHandler((err, req, reply) => {
     if (err instanceof HttpError) {
@@ -670,6 +667,35 @@ export function criarApp(): FastifyInstance {
      a maquina-alvo baixa por curl com chave de 5 min casada com o host dela. */
   app.get("/maquina/u", async (req, reply) => {
     const s = req.query as Record<string, string>;
+    /* v3.45: upload de ARQUIVO GRANDE — chave aponta para o arquivo no disco e a
+       resposta sai por stream (antes era Buffer do Map: só cabia o que a RAM aguentava) */
+    const grande = consumirUploadDeArquivo(String(s.k ?? ""), String(s.host ?? ""));
+    if (grande) {
+      /* v3.46: `Range` para o destino RETOMAR (`curl -C -`) depois de uma queda.
+         Sem isso o curl com -C - escreveria o arquivo inteiro em cima do parcial. */
+      const faixa = /^bytes=(\d*)-(\d*)$/.exec(String(req.headers.range ?? "").trim());
+      if (faixa && grande.bytes > 0) {
+        let ini = faixa[1] ? Number(faixa[1]) : 0;
+        let fim = faixa[2] ? Number(faixa[2]) : grande.bytes - 1;
+        if (!Number.isFinite(ini) || ini < 0) ini = 0;
+        if (!Number.isFinite(fim) || fim >= grande.bytes) fim = grande.bytes - 1;
+        if (ini > fim) return reply.code(416).header("content-range", `bytes */${grande.bytes}`).send();
+        return reply
+          .code(206)
+          .header("content-type", "application/octet-stream")
+          .header("content-length", String(fim - ini + 1))
+          .header("content-range", `bytes ${ini}-${fim}/${grande.bytes}`)
+          .header("accept-ranges", "bytes")
+          .header("content-disposition", `attachment; filename*=UTF-8''${encodeURIComponent(grande.nome)}`)
+          .send(fs.createReadStream(grande.caminho, { start: ini, end: fim }));
+      }
+      return reply
+        .header("content-type", "application/octet-stream")
+        .header("content-length", String(grande.bytes))
+        .header("accept-ranges", "bytes")
+        .header("content-disposition", `attachment; filename*=UTF-8''${encodeURIComponent(grande.nome)}`)
+        .send(fs.createReadStream(grande.caminho));
+    }
     const dados = consumirUpload(String(s.k ?? ""), String(s.host ?? ""));
     if (!dados) throw new HttpError(404, "chave expirada, ja usada, ou maquina errada");
     return reply
@@ -678,28 +704,111 @@ export function criarApp(): FastifyInstance {
       .send(dados);
   });
 
-  /* canal de VOLTA: a máquina manda o arquivo (print, imagem, log) por POST.
-     A chave é one-time e presa ao host; o anexo nasce com o tenant da máquina. */
+  /* canal de VOLTA: a máquina manda o arquivo/print em BLOCOS.
+     `id` + `k` vêm assinados pelo SERVIDOR (a ferramenta que dispara o comando
+     conhece tenant/host/caminho/tamanho); `offset` diz onde este bloco encaixa.
+     Se a conexão cair, o próximo POST com o mesmo id continua do byte atual —
+     nada recomeça do zero. Nenhum bloco é bufferizado: `pipeline` escreve no
+     disco conforme chega. */
   app.post("/maquina/r", async (req, reply) => {
     const s = req.query as Record<string, string>;
-    const ticket = consumirRecebimento(String(s.k ?? ""), String(s.host ?? ""));
-    if (!ticket) throw new HttpError(404, "chave expirada, ja usada, ou maquina errada");
-    const dados = req.body as unknown;
-    if (!Buffer.isBuffer(dados) || dados.length === 0) throw new HttpError(422, "corpo vazio — nada foi guardado");
-    const meta = await gravarAnexo(dados, { tenant: ticket.tenant, host: ticket.host, nome: ticket.nome, mime: ticket.mime });
-    return reply.status(201).send(meta);
+    const id = String(s.id ?? "").slice(0, 64);
+    const host = String(s.host ?? "");
+    const tenant = String(s.tenant ?? host);
+    const offset = Math.max(0, Number(s.offset ?? 0) || 0);
+    const total = Math.max(0, Number(s.total ?? 0) || 0);
+    if (!id) throw new HttpError(422, "id do envio obrigatorio");
+    if (!host) throw new HttpError(422, "host obrigatorio");
+    await conferirChave(tenant, host, id, String(s.k ?? ""));
+
+    const corpo = req.body as unknown as NodeJS.ReadableStream | undefined;
+    if (!corpo || typeof (corpo as { pipe?: unknown }).pipe !== "function")
+      throw new HttpError(422, "corpo binario ausente (content-type application/octet-stream)");
+
+    await abrirEnvio({
+      id, tenant, host,
+      nome: String(s.nome ?? "arquivo"), mime: s.mime, bytesEsperados: total,
+    });
+    const r = await gravarBloco(id, offset, corpo as never, total);
+    return reply.status(201).send({ id, host, tenant, bytes: r.bytes, completo: r.completo, total });
   });
 
-  /* o chat busca o anexo com a chave no header (o <img> puro não manda header) */
+  /* "de onde eu continuo?" — a máquina pergunta antes de reenviar depois de uma queda */
+  app.get("/maquina/r/status", async (req, reply) => {
+    const s = req.query as Record<string, string>;
+    const id = String(s.id ?? "").slice(0, 64);
+    const host = String(s.host ?? "");
+    const tenant = String(s.tenant ?? host);
+    if (!id || !host) throw new HttpError(422, "id e host obrigatorios");
+    await conferirChave(tenant, host, id, String(s.k ?? ""));
+    const e = await estadoDoEnvio(id);
+    return reply.send({ id, host, tenant, bytes: e.bytes, completo: e.completo, nome: e.nome });
+  });
+
+  /* v3.46: o NAVEGADOR manda arquivo grande (botão de anexar do compositor).
+     É o MESMO canal de blocos da máquina, mas autenticado pela chave do usuário:
+     o tenant vem da sessão, nunca da query. `offset` diz onde o bloco encaixa;
+     reenviar o mesmo `id` continua do byte que o servidor já tem (retomada). */
+  app.post("/anexos/enviar", async (req, reply) => {
+    const u = usuario(req);
+    const s = req.query as Record<string, string>;
+    const id = String(s.id ?? "").trim().slice(0, 64);
+    const offset = Math.max(0, Number(s.offset ?? 0) || 0);
+    const total = Math.max(0, Number(s.total ?? 0) || 0);
+    if (!/^[A-Za-z0-9_-]{16,64}$/.test(id)) throw new HttpError(422, "id do envio invalido");
+    const corpo = req.body as unknown as NodeJS.ReadableStream | undefined;
+    if (!corpo || typeof (corpo as { pipe?: unknown }).pipe !== "function")
+      throw new HttpError(422, "corpo binario ausente (content-type application/octet-stream)");
+    await abrirEnvio({
+      id, tenant: u.tenant, host: "web",
+      nome: String(s.nome ?? "arquivo"), mime: s.mime, bytesEsperados: total,
+    });
+    const r = await gravarBloco(id, offset, corpo as never, total);
+    return reply.status(201).send({ id, bytes: r.bytes, completo: r.completo, total });
+  });
+
+  /* "de onde eu continuo?" — o navegador pergunta antes de recomeçar um envio */
+  app.get("/anexos/enviar/status", async (req, reply) => {
+    const u = usuario(req);
+    const s = req.query as Record<string, string>;
+    const id = String(s.id ?? "").trim().slice(0, 64);
+    if (!id) throw new HttpError(422, "id obrigatorio");
+    const e = await estadoDoEnvio(id);
+    if (!e.tenant || (e.tenant !== u.tenant && !u.operador))
+      return reply.send({ id, bytes: 0, completo: false, nome: "" });
+    return reply.send({ id, bytes: e.bytes, completo: e.completo, nome: e.nome });
+  });
+
+  /* o chat busca o anexo com a chave no header (o <img> puro não manda header).
+     v3.45: sai por STREAM e aceita `Range` — vídeo de 10 GB toca sem carregar
+     nada na memória e o download retoma de onde parou (206). */
   app.get("/anexos/:id", async (req, reply) => {
     const u = usuario(req);
     const p = req.params as Record<string, string>;
-    const a = await lerAnexo(p.id, u);
+    const a = await abrirAnexo(p.id, u);
+    const disposicao = `inline; filename*=UTF-8''${encodeURIComponent(a.nome)}`;
+    const faixa = /^bytes=(\d*)-(\d*)$/.exec(String(req.headers.range ?? "").trim());
+    if (!faixa) {
+      return reply
+        .header("content-type", a.mime)
+        .header("content-length", String(a.bytes))
+        .header("accept-ranges", "bytes")
+        .header("content-disposition", disposicao)
+        .send(fs.createReadStream(a.caminho));
+    }
+    let ini = faixa[1] ? Number(faixa[1]) : 0;
+    let fim = faixa[2] ? Number(faixa[2]) : a.bytes - 1;
+    if (!Number.isFinite(ini) || ini < 0) ini = 0;
+    if (!Number.isFinite(fim) || fim >= a.bytes) fim = a.bytes - 1;
+    if (ini > fim) return reply.code(416).header("content-range", `bytes */${a.bytes}`).send();
     return reply
+      .code(206)
       .header("content-type", a.mime)
-      .header("content-length", String(a.dados.length))
-      .header("content-disposition", `inline; filename*=UTF-8''${encodeURIComponent(a.nome)}`)
-      .send(a.dados);
+      .header("content-length", String(fim - ini + 1))
+      .header("content-range", `bytes ${ini}-${fim}/${a.bytes}`)
+      .header("accept-ranges", "bytes")
+      .header("content-disposition", disposicao)
+      .send(fs.createReadStream(a.caminho, { start: ini, end: fim }));
   });
 
   /* ------------------------------------------------------------- painel */
@@ -949,6 +1058,8 @@ export function criarApp(): FastifyInstance {
       modelo: vString(b.modelo, "modelo", { max: 100, def: "" }),
       /* v3.41: imagem colada no chat (validação e teto ficam em responderChat) */
       imagens: (b.imagens as { mime: string; base64: string }[] | undefined) ?? [],
+      /* v3.46: arquivos grandes que o navegador subiu em blocos (só o id viaja) */
+      anexos: (b.anexos as { id: string; nome?: string; bytes?: number }[] | undefined) ?? [],
     });
     void contarUso("chats");
     return r;
@@ -971,6 +1082,8 @@ export function criarApp(): FastifyInstance {
         /* v3.19 */
         provedor: vString(b.provedor, "provedor", { max: 40, def: "" }),
         modelo: vString(b.modelo, "modelo", { max: 100, def: "" }),
+        /* v3.46: arquivos grandes do navegador — só o id viaja; o conteúdo fica no disco */
+        anexos: (b.anexos as { id: string; nome?: string; bytes?: number }[] | undefined) ?? [],
       },
       rodarTarefa,
     );
@@ -1133,7 +1246,8 @@ export function criarApp(): FastifyInstance {
     try {
       const dados = await responderChat(
         u,
-        { pergunta, memoria, tenant, provedor, modelo, imagens: b.imagens as { mime: string; base64: string }[] | undefined },
+        { pergunta, memoria, tenant, provedor, modelo, imagens: b.imagens as { mime: string; base64: string }[] | undefined,
+          anexos: (b.anexos as { id: string; nome?: string; bytes?: number }[] | undefined) ?? [] },
         enviar,
       );
       enviar({ tipo: "fim", dados });

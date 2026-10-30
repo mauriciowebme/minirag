@@ -13,7 +13,7 @@ import { randomBytes } from "node:crypto";
 import { HttpError } from "./errors";
 import type { Usuario } from "./config";
 import { rodar, alvoMaquina, soConectado, httpBaseDaMaquina, criarRecebimento, consumirRecebimento } from "./maquinas";
-import { criarAnexo, lerAnexo, mimePorNome, MAX_ANEXO, type AnexoMeta } from "./anexos";
+import { abrirAnexo, chaveDoEnvio, criarAnexo, idDoEnvio, mimePorNome, MAX_ANEXO, type AnexoMeta } from "./anexos";
 import { q } from "./db";
 
 /* ------------------------------------------------------------------ chassis */
@@ -140,6 +140,29 @@ interface Upload {
   expira: number;
 }
 const uploads = new Map<string, Upload>();
+/** v3.45: upload de arquivo GRANDE — a chave aponta para o arquivo no disco */
+type UploadDisco = { caminho: string; nome: string; bytes: number; host: string; expira: number };
+const uploadsDisco = new Map<string, UploadDisco>();
+
+export function criarUploadDeArquivo(caminho: string, nome: string, bytes: number, host: string): string {
+  const chave = randomBytes(16).toString("hex");
+  uploadsDisco.set(chave, { caminho, nome, bytes, host, expira: Date.now() + 30 * 60_000 });
+  if (uploadsDisco.size > 32) {
+    const agora = Date.now();
+    for (const [k, u] of uploadsDisco) if (u.expira < agora || uploadsDisco.size > 32) uploadsDisco.delete(k);
+  }
+  return chave;
+}
+
+/** v3.46: NÃO consome no primeiro GET — o destino pode ter caído no meio e pedir
+ *  `Range` de novo. Cada chave vale até 5 acessos e expira em 30 min. */
+export function consumirUploadDeArquivo(chave: string, host: string): UploadDisco | null {
+  const u = uploadsDisco.get(chave) as (UploadDisco & { usos?: number }) | undefined;
+  if (!u || u.expira < Date.now() || u.host !== host) return null;
+  u.usos = (u.usos ?? 0) + 1;
+  if (u.usos >= 5) uploadsDisco.delete(chave);
+  return u;
+}
 
 /** o servidor guarda os bytes; a máquina-alvo BAIXA por curl com chave one-time (TTL 5min) */
 export function criarUpload(dados: Buffer, host: string): string {
@@ -995,46 +1018,135 @@ async function gitRemoto(ctx: Ctx, args: Record<string, unknown>): Promise<unkno
    servidor guarda como ANEXO (print, imagem, log) — sem base64 no WebSocket e
    sem o teto de resposta do túnel. */
 
-async function tamanhoRemoto(ctx: Ctx, caminho: string): Promise<number> {
+/** tamanho + mtime do arquivo na máquina (o mtime entra no id determinístico) */
+async function infoRemota(ctx: Ctx, caminho: string): Promise<{ tamanho: number; mtime: number }> {
   const cmd = ctx.so === "windows"
-    ? psEncoded(`$f = Get-Item -LiteralPath '${pq(caminho)}' -ErrorAction Stop\nif ($f.PSIsContainer) { exit 9 }\nWrite-Output $f.Length\n`)
-    : shCmd(`[ -f ${sq(caminho)} ] || exit 9; wc -c < ${sq(caminho)} | tr -dc 0-9`);
-  const res = await exec(ctx, cmd, 30, 200);
-  const n = Number(saida(ctx.so, res).trim());
-  if (res.exit !== 0 || !Number.isFinite(n)) throw new HttpError(422, `nao consegui ler '${caminho}' (existe? e arquivo?)`);
-  return n;
+    ? psEncoded(
+        `$f = Get-Item -LiteralPath '${pq(caminho)}' -ErrorAction Stop\n` +
+          "if ($f.PSIsContainer) { exit 9 }\n" +
+          'Write-Output ($f.Length.ToString() + " " + $f.LastWriteTimeUtc.Ticks.ToString())\n',
+      )
+    : shCmd(`[ -f ${sq(caminho)} ] || exit 9; printf '%s %s' "$(wc -c < ${sq(caminho)} | tr -dc 0-9)" "$(stat -c %Y ${sq(caminho)})"`);
+  const res = await exec(ctx, cmd, 30, 300);
+  const [tam, mt] = saida(ctx.so, res).trim().split(/\s+/);
+  const tamanho = Number(tam);
+  const mtime = Number(mt);
+  if (res.exit !== 0 || !Number.isFinite(tamanho))
+    throw new HttpError(422, `nao consegui ler '${caminho}' (existe? e arquivo?)`);
+  return { tamanho, mtime: Number.isFinite(mtime) ? mtime : 0 };
 }
 
-/** POST binário para /maquina/r; devolve a meta do anexo criado no servidor */
+async function tamanhoRemoto(ctx: Ctx, caminho: string): Promise<number> {
+  return (await infoRemota(ctx, caminho)).tamanho;
+}
+
+/** pergunta ao servidor de onde continuar (0 = do começo) */
+async function statusDoEnvio(ctx: Ctx, base: string, id: string, chave: string): Promise<number> {
+  const url = `${base}/maquina/r/status?id=${id}&k=${encodeURIComponent(chave)}` +
+    `&host=${encodeURIComponent(ctx.host)}&tenant=${encodeURIComponent(ctx.alvo)}`;
+  const cmd = ctx.so === "windows"
+    ? psEncoded(`$r = curl.exe -sS --fail --max-time 60 ${pq(url)}\nif ($LASTEXITCODE -ne 0) { exit 7 }\nWrite-Output $r\n`)
+    : shCmd(`curl -sS --fail --max-time 60 ${sq(url)}`);
+  const res = await exec(ctx, cmd, 90, 2000);
+  if (res.exit !== 0) return 0; // servidor sem ficha: começa do zero
+  try {
+    const j = JSON.parse(saida(ctx.so, res)) as { bytes?: number };
+    return Math.max(0, Number(j.bytes ?? 0) || 0);
+  } catch {
+    return 0;
+  }
+}
+
+/** comando que envia UM bloco (32 MB) do arquivo, a partir de `off` */
+function comandoDoBloco(ctx: Ctx, url: string, caminho: string, off: number, n: number): string {
+  if (ctx.so === "windows") {
+    return psEncoded(
+      "$ErrorActionPreference='Stop'\n" +
+        `$fs=[System.IO.File]::OpenRead('${pq(caminho)}')\n` +
+        "$fs.Position=" + off + "\n" +
+        `$n=${n}\n` +
+        "$buf=New-Object byte[] $n\n" +
+        "$lido=0\n" +
+        "while($lido -lt $n){ $r=$fs.Read($buf,$lido,$n-$lido); if($r -le 0){break}; $lido+=$r }\n" +
+        "$fs.Close()\n" +
+        "if($lido -le 0){ exit 8 }\n" +
+        "if($lido -lt $n){ $envio=New-Object byte[] $lido; [Array]::Copy($buf,$envio,$lido) } else { $envio=$buf }\n" +
+        "$hc=New-Object System.Net.Http.HttpClient\n" +
+        "$hc.Timeout=[TimeSpan]::FromMinutes(30)\n" +
+        "$cont=New-Object System.Net.Http.ByteArrayContent(,$envio)\n" +
+        "$cont.Headers.ContentType=[System.Net.Http.Headers.MediaTypeHeaderValue]::Parse('application/octet-stream')\n" +
+        `$res=$hc.PostAsync('${pq(url)}',$cont).Result\n` +
+        "$txt=$res.Content.ReadAsStringAsync().Result\n" +
+        "if(-not $res.IsSuccessStatusCode){ Write-Output $txt; exit 7 }\n" +
+        "Write-Output $txt\n",
+    );
+  }
+  /* GNU dd com skip_bytes/count_bytes: recorta exatamente o bloco, sem carregar o arquivo */
+  return shCmd(
+    `dd if=${sq(caminho)} bs=1M iflag=skip_bytes,count_bytes skip=${off} count=${n} 2>/dev/null | ` +
+      `curl -sS --fail --max-time 1800 -X POST -H 'content-type: application/octet-stream' --data-binary @- ${sq(url)}`,
+  );
+}
+
+/** envia o arquivo em BLOCOS; se cair, continua do byte onde parou */
 async function enviarParaServidor(ctx: Ctx, caminho: string, nome: string, mime?: string): Promise<AnexoMeta> {
   const base = ctx.httpBase();
   if (!base) throw new HttpError(500, "maquina conectou sem Host de retorno — sem canal de envio");
-  const chave = criarRecebimento(ctx.alvo, ctx.host, nome, mime || mimePorNome(nome));
-  const url = `${base}/maquina/r?k=${chave}&host=${encodeURIComponent(ctx.host)}`;
-  let cmd: string;
-  if (ctx.so === "windows") {
-    cmd = psEncoded(
-      "$ErrorActionPreference='Stop'\n" +
-        `$r = curl.exe -sS --fail --retry 1 -X POST -H 'content-type: application/octet-stream' --data-binary '@${pq(caminho)}' '${pq(url)}'\n` +
-        "if ($LASTEXITCODE -ne 0) { exit 7 }\n" +
-        "Write-Output $r\n",
-    );
-  } else {
-    cmd = shCmd(
-      `curl -sS --fail --retry 1 -X POST -H 'content-type: application/octet-stream' --data-binary @${sq(caminho)} ${sq(url)}`,
-    );
+  const { tamanho, mtime } = await infoRemota(ctx, caminho);
+  if (tamanho === 0) throw new HttpError(422, "arquivo vazio — nada foi guardado");
+  if (tamanho > MAX_ANEXO)
+    throw new HttpError(422, `arquivo de ${tamanho} bytes passa do teto de ${Math.round(MAX_ANEXO / 1048576)} MB`);
+
+  const id = idDoEnvio(ctx.alvo, ctx.host, caminho, tamanho, mtime);
+  const chave = await chaveDoEnvio(ctx.alvo, ctx.host, id);
+  const nomeFinal = nomeLimpoEnvio(nome);
+  const tipo = String(mime ?? mimePorNome(nomeFinal)).slice(0, 120);
+
+  let off = await statusDoEnvio(ctx, base, id, chave);
+  const BLOCO = 32 * 1024 * 1024;
+  let falhas = 0;
+  while (off < tamanho) {
+    const n = Math.min(BLOCO, tamanho - off);
+    const url = `${base}/maquina/r?id=${id}&k=${encodeURIComponent(chave)}` +
+      `&host=${encodeURIComponent(ctx.host)}&tenant=${encodeURIComponent(ctx.alvo)}` +
+      `&offset=${off}&total=${tamanho}&nome=${encodeURIComponent(nomeFinal)}&mime=${encodeURIComponent(tipo)}`;
+    const res = await exec(ctx, comandoDoBloco(ctx, url, caminho, off, n), 900, 4000);
+    const txt = saida(ctx.so, res).trim();
+    let novo = off;
+    try {
+      novo = Number((JSON.parse(txt) as { bytes?: number })?.bytes ?? 0) || off;
+    } catch {
+      novo = off;
+    }
+    if (res.exit === 0 && novo > off) {
+      off = novo;
+      falhas = 0;
+      continue;
+    }
+    /* o bloco pode ter chegado PARCIAL (queda no meio): o servidor diz quanto tem */
+    const parcial = await statusDoEnvio(ctx, base, id, chave);
+    if (parcial > off) {
+      off = parcial;
+      falhas = 0;
+      continue;
+    }
+    if (++falhas >= 3)
+      throw new HttpError(
+        502,
+        `envio parou em ${off} de ${tamanho} bytes (${Math.round((off / tamanho) * 100)}%) — ` +
+          `chame de novo que ele RETOMA daqui: ${stderrLimpo(res, 180) || txt.slice(0, 160)}`,
+      );
   }
-  const res = await exec(ctx, cmd, 180, 4000);
-  if (res.exit !== 0) {
-    /* a chave foi gerada para esta tentativa; se o curl falhou, o lixo some sozinho (TTL) */
-    throw new HttpError(502, `envio do arquivo falhou (exit=${res.exit}): ${stderrLimpo(res, 200)}`);
-  }
-  const txt = saida(ctx.so, res);
-  try {
-    return JSON.parse(txt) as AnexoMeta;
-  } catch {
-    throw new HttpError(502, `resposta inesperada do servidor ao receber o arquivo: ${txt.slice(0, 160)}`);
-  }
+
+  return {
+    id, nome: nomeFinal, mime: tipo, bytes: tamanho, host: ctx.host, completo: true,
+  };
+}
+
+/** nome de exibição (só o nome, nunca caminho) */
+function nomeLimpoEnvio(n: string): string {
+  const base = String(n ?? "").replace(/\\/g, "/").split("/").pop() ?? "arquivo";
+  return (base.replace(/[\u0000-\u001f\u007f]/g, "").replace(/[<>:"|?*]/g, "_").trim() || "arquivo").slice(0, 180);
 }
 
 async function capturarTela(ctx: Ctx, args: Record<string, unknown>): Promise<unknown> {
@@ -1095,16 +1207,81 @@ async function baixarArquivo(ctx: Ctx, args: Record<string, unknown>): Promise<u
   };
 }
 
+/** v3.46: manda para UMA máquina um arquivo que já está no servidor (anexo da
+ *  conversa, enviado pelo navegador ou pela própria máquina). O destino baixa por
+ *  stream, com retomada (`curl -C -`) e confere o sha256 no fim. */
+async function enviarParaMaquina(ctx: Ctx, args: Record<string, unknown>): Promise<unknown> {
+  const anexoId = S(args.anexo_id);
+  const hostDestino = S(args.host);
+  if (!anexoId || !hostDestino) throw new HttpError(422, "anexo_id e host sao obrigatorios");
+  const ficha = await abrirAnexo(anexoId, ctx.u);
+  const conferir = args.conferir === undefined ? true : Boolean(args.conferir);
+  const destino = S(args.destino) || "";
+  const soDestino = await soDaMaquina(ctx.alvo, hostDestino);
+  const nomeSeguro = ficha.nome.replace(/['"`$\\]/g, "_");
+  const alvoDestino =
+    destino ||
+    (soDestino === "windows" ? `%USERPROFILE%\\Downloads\\${nomeSeguro}` : `~/Downloads/${nomeSeguro}`);
+  /* O pedaço que vai para o shell tem QUOTE próprio: caminho com espaço não quebra,
+     e o caminho padrão usa a pasta do usuário da máquina (ExpandEnvironment / $HOME). */
+  const caminhoWin = destino ? pq(destino) : `(Join-Path (Join-Path $env:USERPROFILE 'Downloads') ${pq(nomeSeguro)})`;
+  const caminhoUnix = destino ? sq(destino) : `"$HOME/Downloads/${nomeSeguro}"`;
+
+  const chave = criarUploadDeArquivo(ficha.caminho, ficha.nome, ficha.bytes, hostDestino);
+  const base = ctx.httpBase();
+  if (!base) throw new HttpError(500, "maquina conectou sem Host de retorno — sem canal de envio");
+  const url = `${base}/maquina/u?k=${chave}&host=${encodeURIComponent(hostDestino)}`;
+
+  const hashServidor = conferir ? await sha256DeArquivo(ficha.caminho) : "";
+  let cmd: string;
+  if (soDestino === "windows") {
+    cmd = psEncoded(
+      "$ErrorActionPreference='Stop'\n" +
+        `$destino = ${caminhoWin}\n` +
+        "$pai = Split-Path -Parent $destino\n" +
+        "if ($pai -and -not (Test-Path -LiteralPath $pai)) { New-Item -ItemType Directory -Force -Path $pai | Out-Null }\n" +
+        `curl.exe -sS --fail --retry 3 -C - -o $destino '${pq(url)}'\n` +
+        "if ($LASTEXITCODE -ne 0) { exit 7 }\n" +
+        "Write-Output ((Get-Item -LiteralPath $destino).Length)\n" +
+        (conferir ? "Write-Output ((Get-FileHash -LiteralPath $destino -Algorithm SHA256).Hash.ToLower())\n" : ""),
+    );
+  } else {
+    cmd = shCmd(
+      `mkdir -p "$(dirname ${caminhoUnix})" && curl -sS --fail --retry 3 -C - -o ${caminhoUnix} ${sq(url)}` +
+        ` && wc -c < ${caminhoUnix} | tr -dc 0-9` +
+        (conferir ? ` && echo && sha256sum ${caminhoUnix} | cut -d' ' -f1` : ""),
+    );
+  }
+
+  const res = await rodar(ctx.u, ctx.alvo, hostDestino, cmd, 1800, `${ctx.origem}:enviar_para_maquina`, 4000, false);
+  if (res.exit !== 0) throw new HttpError(502, `envio falhou no destino (exit=${res.exit}): ${stderrLimpo(res, 200)}`);
+  const linhas = String(res.stdout ?? "").trim().split(/\r?\n/).map((l) => l.trim()).filter(Boolean);
+  const bytesDestino = Number(linhas[0] ?? 0);
+  const hashDestino = (linhas[1] ?? "").toLowerCase();
+  if (bytesDestino !== ficha.bytes)
+    throw new HttpError(502, `tamanho no destino (${bytesDestino}) difere do anexo (${ficha.bytes})`);
+  if (conferir && hashDestino && hashDestino !== hashServidor)
+    throw new HttpError(502, `sha256 no destino nao confere (${hashDestino.slice(0, 12)}… != ${hashServidor.slice(0, 12)}…)`);
+  return {
+    ok: true, anexo_id: anexoId, host: hostDestino, destino: alvoDestino, bytes: ficha.bytes,
+    sha256: hashServidor || undefined, conferido: Boolean(conferir),
+    resumo: `ENVIADO: ${ficha.nome} (${Math.round(ficha.bytes / 1024)} KB) -> ${hostDestino}:${alvoDestino}`,
+  };
+}
+
 async function copiarArquivo(ctx: Ctx, args: Record<string, unknown>): Promise<unknown> {
   const origem = S(args.origem);
   const hostDestino = S(args.host_destino);
   const destino = S(args.destino) || origem;
   if (!origem || !hostDestino || !destino) throw new HttpError(422, "origem, host_destino e destino sao obrigatorios");
   const bytes = await tamanhoRemoto(ctx, origem);
-  if (bytes > 16 * 1024 * 1024) throw new HttpError(422, `arquivo de ${bytes} bytes passa do teto de 16 MB do canal — use a LAN`);
+  /* v3.45: o canal agora entrega em blocos, então o teto é o mesmo do anexo */
+  if (bytes > MAX_ANEXO) throw new HttpError(422, `arquivo de ${bytes} bytes passa do teto de ${Math.round(MAX_ANEXO / 1048576)} MB`);
   const meta = await enviarParaServidor(ctx, origem, origem.replace(/\\/g, "/").split("/").pop() || "arquivo");
-  const dados = (await lerAnexo(meta.id, ctx.u)).dados;
-  const chave = criarUpload(dados, hostDestino);
+  /* v3.45: manda o ARQUIVO NO DISCO (o destino baixa por stream) — antes a cópia
+     exigia o conteúdo inteiro em memória, o que matava arquivo de GB */
+  const ficha = await abrirAnexo(meta.id, ctx.u);
+  const chave = criarUploadDeArquivo(ficha.caminho, ficha.nome, ficha.bytes, hostDestino);
   const base = ctx.httpBase();
   if (!base) throw new HttpError(500, "maquina conectou sem Host de retorno — sem canal de envio");
   const url = `${base}/maquina/u?k=${chave}&host=${encodeURIComponent(hostDestino)}`;
@@ -1130,6 +1307,17 @@ async function copiarArquivo(ctx: Ctx, args: Record<string, unknown>): Promise<u
   };
 }
 
+/** sha256 lido do disco em streaming (não carrega o arquivo na memória) */
+async function sha256DeArquivo(caminho: string): Promise<string> {
+  const { createHash } = await import("node:crypto");
+  const { createReadStream } = await import("node:fs");
+  const h = createHash("sha256");
+  await new Promise<void>((ok, falha) => {
+    createReadStream(caminho).on("data", (c) => h.update(c)).on("end", () => ok()).on("error", falha);
+  });
+  return h.digest("hex");
+}
+
 /* ------------------------------------------------------------------ dispatch */
 
 export const NOMES_MAQUINA_TOOLS = [
@@ -1137,7 +1325,7 @@ export const NOMES_MAQUINA_TOOLS = [
   "editar_no_local", "estado_maquina", "processos", "janelas", "area_transferencia",
   "falar", "abrir", "servicos", "eventos", "rede", "esperar_arquivo", "power",
   "rodar_lote", "sessao", "git_remoto", "metricas",
-  "capturar_tela", "baixar_arquivo", "copiar_arquivo",
+  "capturar_tela", "baixar_arquivo", "copiar_arquivo", "enviar_para_maquina",
 ] as const;
 
 type Fn = (ctx: Ctx, args: Record<string, unknown>) => Promise<unknown>;
@@ -1149,6 +1337,7 @@ const TABELA: Record<string, Fn> = {
   esperar_arquivo: esperarArquivo, power, rodar_lote: rodarLote, sessao, git_remoto: gitRemoto,
   metricas: (ctx) => metricas(ctx),
   capturar_tela: capturarTela, baixar_arquivo: baixarArquivo, copiar_arquivo: copiarArquivo,
+  enviar_para_maquina: enviarParaMaquina,
 };
 
 /** plataforma: ao vivo (hub) > gravada (DB) > windows (nunca chutar sh num PC) */

@@ -80,6 +80,10 @@ services:
       MINIRAG_ADMIN: ${MINIRAG_ADMIN:-}
       MINIRAG_OPERADOR: ${MINIRAG_OPERADOR:-}
       MINIRAG_CORS_ORIGINS: ${MINIRAG_CORS_ORIGINS:-}
+      # v3.45: pasta dos arquivos que as máquinas mandam (volume por usuário)
+      MINIRAG_ARQUIVOS_DIR: ${MINIRAG_ARQUIVOS_DIR:-/app/dados/anexos}
+      MINIRAG_MAX_ARQUIVO_MB: ${MINIRAG_MAX_ARQUIVO_MB:-10240}
+      MINIRAG_ARQUIVOS_DIAS: ${MINIRAG_ARQUIVOS_DIAS:-7}
     depends_on:
       minirag-db:
         condition: service_healthy
@@ -90,6 +94,12 @@ services:
       timeout: 5s
       retries: 12
       start_period: 120s
+    volumes:
+      # v3.45: arquivos que as máquinas mandam (print, vídeo, backup) moram AQUI,
+      # em subpasta por usuário. Volume nomeado: sobrevive a redeploy/restart.
+      # v3.45: volume NOMEADO (o Docker cuida; não aponta para pasta do host).
+      # A API roda como root na imagem, então cria /app/dados/anexos na 1a subida.
+      - minirag_arquivos:/app/dados
     expose:
       - "8000"
     ports:
@@ -101,3 +111,4 @@ services:
 
 volumes:
   minirag_data:
+  minirag_arquivos:

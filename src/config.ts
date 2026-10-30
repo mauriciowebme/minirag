@@ -22,7 +22,7 @@ function bool(name: string, def: boolean): boolean {
 }
 
 export const CONFIG = {
-  versao: "3.44.0",
+  versao: "3.46.0",
   model: process.env.MINIRAG_MODEL ?? "nomic-ai/nomic-embed-text-v1.5",
   modelDir: process.env.MINIRAG_MODEL_DIR ?? "/app/models",
 
@@ -38,6 +38,12 @@ export const CONFIG = {
   chunkOverlap: int("MINIRAG_CHUNK_OVERLAP", 80),
   topK: int("MINIRAG_TOP_K", 5),
   minScore: flt("MINIRAG_MIN_SCORE", 0.55),
+
+  /* v3.45: arquivos da máquina vivem em DISCO (pasta por usuário), não no banco.
+     O teto é o espaço do volume; 10 GB é o padrão pedido pelo dono. */
+  arquivosDir: process.env.MINIRAG_ARQUIVOS_DIR ?? "/app/dados/anexos",
+  maxArquivoBytes: int("MINIRAG_MAX_ARQUIVO_MB", 10_240) * 1024 * 1024,
+  arquivosDias: int("MINIRAG_ARQUIVOS_DIAS", 7),
 
   maxContentChars: int("MINIRAG_MAX_CONTENT_CHARS", 500_000),
   maxQueryChars: int("MINIRAG_MAX_QUERY_CHARS", 2_000),

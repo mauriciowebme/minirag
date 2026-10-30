@@ -509,7 +509,7 @@ export const TOOLS: Tool[] = [
   },
   {
     name: "baixar_arquivo",
-    description: "Traz um arquivo da maquina para a conversa (qualquer tipo, ate 32MB): o dono ve/baixa no chat. Usa canal binario, nao base64 no prompt.",
+    description: "Traz um arquivo da maquina para a conversa (qualquer tipo, ate 10GB — v3.45 envia em blocos de 32MB com retomada): o dono ve/baixa no chat, video toca e download retoma. Usa canal binario, nao base64 no prompt.",
     inputSchema: { type: "object", properties: {
       host: { type: "string" },
       caminho: { type: "string" },
@@ -519,13 +519,23 @@ export const TOOLS: Tool[] = [
   },
   {
     name: "copiar_arquivo",
-    description: "Copia um arquivo de UMA maquina para OUTRA (ate 16MB): a origem envia ao servidor e o destino baixa. Para GB use a LAN.",
+    description: "Copia um arquivo de UMA maquina para OUTRA (ate 10GB — v3.45: origem envia em blocos e destino baixa por stream): a origem envia ao servidor e o destino baixa. Reenvio do mesmo arquivo retoma de onde parou.",
     inputSchema: { type: "object", properties: {
       host: { type: "string", description: "maquina de ORIGEM" },
       origem: { type: "string", description: "caminho na origem" },
       host_destino: { type: "string", description: "maquina de DESTINO" },
       destino: { type: "string", description: "caminho no destino (padrao = mesmo da origem)" },
       tenant: { type: "string", description: "so operador" } }, required: ["host", "origem", "host_destino"] },
+  },
+  {
+    name: "enviar_para_maquina",
+    description: "Manda um arquivo que já está no servidor (anexo da conversa, enviado pelo navegador ou por outra máquina) para uma MAQUINA, até 10GB: o destino baixa por stream, retoma de onde parou e confere o sha256. Sem `destino`, cai em Downloads da máquina.",
+    inputSchema: { type: "object", properties: {
+      host: { type: "string", description: "maquina de DESTINO" },
+      anexo_id: { type: "string", description: "id do anexo (veio de baixar_arquivo ou do upload do navegador)" },
+      destino: { type: "string", description: "caminho completo no destino (padrao: Downloads/<nome>)" },
+      conferir: { type: "boolean", description: "confere sha256 no destino (padrao true)" },
+      tenant: { type: "string", description: "so operador" } }, required: ["host", "anexo_id"] },
   },
   {
     name: "buscar_arquivos",
