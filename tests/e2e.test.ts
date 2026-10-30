@@ -361,7 +361,7 @@ test("minirag v2 — suíte completa", async (t) => {
     f.fechar("v1.8");
   });
 
-  await bloco(t, "MCP: JSON-RPC stateless com as 50 tools", async () => {
+  await bloco(t, "MCP: JSON-RPC stateless com as 51 tools", async () => {
     const f = fiscal();
     const H = { key: TESTKEY };
     const rpc = (id: unknown, method: string, params?: unknown, key: string | null = TESTKEY) =>
@@ -426,11 +426,13 @@ test("minirag v2 — suíte completa", async (t) => {
       "rede", "rodar_lote", "servicos", "sessao", "escrever_arquivo", "metricas",
       /* v3.44: print e arquivo da máquina na conversa + cópia máquina -> máquina */
       "capturar_tela", "baixar_arquivo", "copiar_arquivo",
+      /* v3.46: arquivo do servidor (navegador) -> máquina */
+      "enviar_para_maquina",
     ].sort();
     /* v3.36 — a lista passou a dizer a verdade da CONTA: as 5 de operador saem para o comum */
     const SO_OPERADOR_336 = ["listar_usuarios", "criar_usuario", "apagar_usuario", "esquecimento", "gerir_mcp"];
     const ESPERADAS_COMUM = ESPERADAS.filter((n) => !SO_OPERADOR_336.includes(n)).sort();
-    f.check("tools/list da conta comum traz as 49 (as 5 de operador ficam fora)", JSON.stringify(nomes) === JSON.stringify(ESPERADAS_COMUM), `${nomes.length}: ${nomes.filter((n: string) => !ESPERADAS_COMUM.includes(n)).join(", ")}`);
+    f.check("tools/list da conta comum traz as 50 (as 5 de operador ficam fora)", JSON.stringify(nomes) === JSON.stringify(ESPERADAS_COMUM), `${nomes.length}: ${nomes.filter((n: string) => !ESPERADAS_COMUM.includes(n)).join(", ")}`);
 
     r = await rpc(5, "tools/call", { name: "health" }, null);
     f.check("tools/call sem Bearer -> 401", r.status === 401 && "error" in (r.json ?? {}), r.texto.slice(0, 150));
@@ -626,12 +628,12 @@ test("minirag v2 — suíte completa", async (t) => {
     r = await call("PATCH", "/config/mcp/usuarios", { key: OPKEY, corpo: { ativo: false } });
     f.check("operador desliga o MCP das contas", r.status === 200 && r.json?.usuarios_habilitado === false, r.texto.slice(0, 160));
     f.check("com o MCP desligado a conta comum não vê ferramenta nenhuma", (await lista(TESTKEY)).length === 0, (await lista(TESTKEY)).length);
-    f.check("o operador continua entrando (para poder reverter)", (await lista(OPKEY)).length === 54, (await lista(OPKEY)).length);
+    f.check("o operador continua entrando (para poder reverter)", (await lista(OPKEY)).length === 55, (await lista(OPKEY)).length);
     r = await call("POST", "/mcp", { key: TESTKEY, corpo: { jsonrpc: "2.0", id: 8, method: "tools/call", params: { name: "health", arguments: {} } } });
     f.check("chamada da conta comum com MCP desligado: 403 com o motivo", r.status === 403 && /desligado/.test(r.texto), r.texto.slice(0, 160));
 
     r = await call("PATCH", "/config/mcp/usuarios", { key: OPKEY, corpo: { ativo: true } });
-    f.check("religado, a conta comum volta a ver as 49", r.status === 200 && (await lista(TESTKEY)).length === 49, (await lista(TESTKEY)).length);
+    f.check("religado, a conta comum volta a ver as 50", r.status === 200 && (await lista(TESTKEY)).length === 50, (await lista(TESTKEY)).length);
     r = await call("GET", "/config/mcp", { key: OPKEY });
     f.check("a config do admin mostra o interruptor", r.json?.usuarios_habilitado === true, JSON.stringify(r.json).slice(0, 120));
 
@@ -2525,7 +2527,7 @@ await bloco(t, "v3.6: máquinas por usuário — hub WS, pareamento, run, escopo
     f.check("desligado: MCP rodar_comando recusa com a mesma frase", txtBloq.includes("409") && txtBloq.includes("DESLIGADO"), txtBloq.slice(0, 140));
     r = await call("POST", "/mcp", { key: OPKEY, corpo: { jsonrpc: "2.0", id: 90, method: "tools/list" } });
     const nomesOff = ((r.json?.result?.tools ?? []) as any[]).map((t) => t.name);
-    f.check("desligado: as 25 ferramentas de máquina somem do tools/list MCP", !nomesOff.includes("rodar_comando") && !nomesOff.includes("listar_arquivos") && !nomesOff.includes("capturar_tela") && nomesOn.includes("listar_arquivos") && nomesOff.length === nomesOn.length - 25, { on: nomesOn.length, off: nomesOff.length });
+    f.check("desligado: as 26 ferramentas de máquina somem do tools/list MCP", !nomesOff.includes("rodar_comando") && !nomesOff.includes("listar_arquivos") && !nomesOff.includes("capturar_tela") && nomesOn.includes("listar_arquivos") && nomesOff.length === nomesOn.length - 26, { on: nomesOn.length, off: nomesOff.length });
     r = await call("PATCH", "/config/mcp/maquinas", { key: OPKEY, corpo: { ativo: true } });
     r = await call("POST", "/maquinas/maq-mcp/run", { key: TESTKEY, corpo: { cmd: "echo liberado" } });
     f.check("religado: executa normal de novo", r.json?.stdout === "liberado", r.texto.slice(0, 140));
@@ -3675,7 +3677,7 @@ await bloco(t, "v3.6: máquinas por usuário — hub WS, pareamento, run, escopo
   /* v3.44 — o caminho de VOLTA: a máquina manda arquivo e o dono vê no chat.
      Usa o CLIENTE REAL (Linux) do container: curl de verdade, POST de verdade,
      registro em `anexos` e GET /anexos/:id com a chave do usuário. */
-  await bloco(t, "v3.44: arquivo/print da máquina chega na conversa", async () => {
+  await bloco(t, "v3.45: arquivo grande em blocos, com retomada e Range", async () => {
     const f = fiscal();
     const CONTAINER = process.env.CONTAINER ?? "";
     const leJson = (r: any): any => {
@@ -3684,23 +3686,25 @@ await bloco(t, "v3.6: máquinas por usuário — hub WS, pareamento, run, escopo
     };
     const erroDe = (r: any): string =>
       String(r?.json?.error?.message ?? r?.json?.result?.content?.[0]?.text ?? r?.texto ?? "");
-    const HOST = "cli-anexo";
+    const HOST = "cli-arq";
     const MATAR = "const fs=require('fs');for(const d of fs.readdirSync('/proc')){if(!/^[0-9]+$/.test(d))continue;"
       + "try{const c=fs.readFileSync('/proc/'+d+'/cmdline','utf8').split(String.fromCharCode(0)).join(' ');"
       + "if(c.indexOf('minirag-cliente-linux')>=0&&c.indexOf('" + HOST + "')>=0)process.kill(Number(d),'SIGKILL')}catch(e){}}";
     const matar = () => { try { execFileSync("docker", ["exec", CONTAINER, "node", "-e", MATAR]); } catch { /* ok */ } };
+    const sh = (cmd: string) => execFileSync("docker", ["exec", CONTAINER, "sh", "-c", cmd], { encoding: "utf8" });
+    const sha = (p: string) => sh(`sha256sum ${p} | cut -d' ' -f1`).trim();
 
     matar();
     await call("DELETE", `/maquinas/${HOST}`, { key: TESTKEY });
     const r0 = await call("POST", "/maquinas", { key: TESTKEY, corpo: { nome: HOST } });
     const par = String(r0.json?.token ?? "");
-    f.check("v3.44 pareamento criado", Boolean(par), r0.texto.slice(0, 120));
+    f.check("v3.45 pareamento criado", Boolean(par), r0.texto.slice(0, 120));
 
-    /* 300 KB de bytes que NÃO são texto: se algum caminho tratar como utf-8, o sha muda */
-    execFileSync("docker", ["exec", CONTAINER, "sh", "-c",
-      "head -c 307200 /dev/urandom > /tmp/e2e-anexo.bin && rm -f /tmp/e2e-anexo-copia.bin"]);
+    /* 70 MB passa de dois blocos de 32 MB — prova o fatiamento de verdade */
+    sh("head -c 73400320 /dev/urandom > /tmp/e2e-arq.bin && rm -f /tmp/e2e-arq-copia.bin");
+    const shaOrigem = sha("/tmp/e2e-arq.bin");
     execFileSync("docker", ["exec", "-d", CONTAINER, "/app/agente/bin/minirag-cliente-linux",
-      "--url", "http://127.0.0.1:8000", "--token", par, "--host", HOST, "--conf", "/tmp/e2e-cli-anexo.json"]);
+      "--url", "http://127.0.0.1:8000", "--token", par, "--host", HOST, "--conf", "/tmp/e2e-cli-arq.json"]);
 
     let online = false;
     for (let i = 0; i < 60; i++) {
@@ -3709,65 +3713,169 @@ await bloco(t, "v3.6: máquinas por usuário — hub WS, pareamento, run, escopo
       if (online) break;
       await dormir(300);
     }
-    f.check("v3.44 cliente real conectou", online, online);
+    f.check("v3.45 cliente real conectou", online, online);
 
-    const shaRemoto = (caminho: string, id: number) =>
-      call("POST", "/mcp", { key: TESTKEY, corpo: { jsonrpc: "2.0", id, method: "tools/call",
-        params: { name: "rodar_comando", arguments: { host: HOST, comando: `sha256sum ${caminho}` } } } });
-    const shaLocal = execFileSync("docker", ["exec", CONTAINER, "sha256sum", "/tmp/e2e-anexo.bin"], { encoding: "utf8" })
-      .trim().split(/\s+/)[0];
-
-    /* 1) baixar_arquivo: máquina -> servidor -> conversa */
-    let r = await call("POST", "/mcp", { key: TESTKEY, corpo: { jsonrpc: "2.0", id: 960, method: "tools/call",
-      params: { name: "baixar_arquivo", arguments: { host: HOST, caminho: "/tmp/e2e-anexo.bin" } } } });
+    /* 1) baixar_arquivo de 70 MB: três blocos, grava no disco por usuário */
+    let r = await call("POST", "/mcp", { key: TESTKEY, corpo: { jsonrpc: "2.0", id: 970, method: "tools/call",
+      params: { name: "baixar_arquivo", arguments: { host: HOST, caminho: "/tmp/e2e-arq.bin" } } } });
     const env = leJson(r);
     const anexo = env?.anexo ?? {};
-    f.check("v3.44 baixar_arquivo devolve a META do anexo (id, nome, bytes)",
-      r.status === 200 && typeof anexo.id === "string" && anexo.id.length >= 16 && anexo.bytes === 307200,
-      JSON.stringify({ st: r.status, anexo }).slice(0, 220));
+    f.check("v3.45 baixar_arquivo de 70 MB termina com o tamanho certo",
+      r.status === 200 && anexo.bytes === 73400320, JSON.stringify({ st: r.status, bytes: anexo.bytes, erro: erroDe(r) }).slice(0, 240));
 
-    /* 2) o dono busca o arquivo pela chave dele — e os BYTES têm que ser os mesmos */
+    /* 2) o arquivo está no VOLUME, em pasta por usuário — não dentro do banco */
+    const noDisco = sh(`find /app/dados -path "*${String(anexo.id ?? "")}*" -type f -printf '%p %s\\n' | head -1`).trim();
+    f.check("v3.45 o arquivo mora em /app/dados/anexos/<usuario>/<id>/<nome>",
+      noDisco.includes(`/app/dados/anexos/teste/`) && noDisco.endsWith("73400320"), noDisco.slice(0, 200));
+
+    /* 3) o bytea do banco ficou vazio (prova de que não está no Postgres) */
+    const DBC = process.env.DBCONTAINER ?? CONTAINER.replace("-api-", "-db-");
+    const linhaBanco = execFileSync("docker", ["exec", DBC, "sh", "-c",
+      `psql -U "$POSTGRES_USER" -d "$POSTGRES_DB" -tAc "select bytes||'/'||completo from anexos_maquina where id='${String(anexo.id ?? "")}'"`],
+      { encoding: "utf8" }).trim();
+    f.check("v3.45 a ficha no banco tem o tamanho e o 'completo' (sem o conteúdo)", linhaBanco === "73400320/true", linhaBanco);
+
+    /* 4) download inteiro: mesma impressão digital do arquivo na máquina */
     const baixado = await call("GET", `/anexos/${String(anexo.id ?? "")}`, { key: TESTKEY });
     const shaBaixado = (await import("node:crypto")).createHash("sha256").update(baixado.buf).digest("hex");
-    f.check("v3.44 GET /anexos/:id entrega os MESMOS bytes (sha256 igual ao da máquina)",
-      baixado.status === 200 && shaBaixado === shaLocal,
-      JSON.stringify({ st: baixado.status, bytes: baixado.buf.length, shaBaixado, shaLocal }).slice(0, 260));
-    f.check("v3.44 o anexo vem com content-type de download e nome no header",
-      String(baixado.headers.get("content-disposition") ?? "").includes("e2e-anexo.bin"),
-      String(baixado.headers.get("content-disposition") ?? "").slice(0, 120));
+    f.check("v3.45 GET /anexos/:id devolve 70 MB com o MESMO sha256", baixado.status === 200 && shaBaixado === shaOrigem,
+      JSON.stringify({ st: baixado.status, bytes: baixado.buf.length }).slice(0, 200));
 
-    /* 3) sem chave / chave alheia não abre o anexo de outro tenant */
-    const semChave = await call("GET", `/anexos/${String(anexo.id ?? "")}`, { key: null });
-    f.check("v3.44 anexo sem chave é 401 (não vaza arquivo da máquina)", semChave.status === 401, semChave.status);
+    /* 5) Range: pedaço do meio volta com 206 e o tamanho pedido (é o que faz o vídeo tocar e o download retomar) */
+    const rng = await fetch(`${BASE}/anexos/${String(anexo.id ?? "")}`, {
+      headers: { Authorization: "B" + "earer " + TESTKEY, Range: "bytes=1000000-1999999" },
+      signal: AbortSignal.timeout(60000),
+    });
+    const bufRng = Buffer.from(await rng.arrayBuffer());
+    f.check("v3.45 Range responde 206 com exatamente o pedaço e o content-range certo",
+      rng.status === 206 && bufRng.length === 1000000 && String(rng.headers.get("content-range")) === "bytes 1000000-1999999/73400320",
+      JSON.stringify({ st: rng.status, n: bufRng.length, cr: rng.headers.get("content-range") }).slice(0, 220));
+    f.check("v3.45 o pedaço é byte-a-byte o mesmo do arquivo",
+      (await import("node:crypto")).createHash("sha256").update(bufRng).digest("hex") ===
+        sh("tail -c +1000001 /tmp/e2e-arq.bin | head -c 1000000 | sha256sum | cut -d' ' -f1").trim(), "");
 
-    /* 4) copiar_arquivo: máquina -> servidor -> OUTRA máquina (mesmo cliente, outro caminho) */
-    r = await call("POST", "/mcp", { key: TESTKEY, corpo: { jsonrpc: "2.0", id: 961, method: "tools/call",
-      params: { name: "copiar_arquivo", arguments: { host: HOST, origem: "/tmp/e2e-anexo.bin",
-        host_destino: HOST, destino: "/tmp/e2e-anexo-copia.bin" } } } });
+    /* 6) RETOMADA: o mesmo arquivo reenviado continua de onde já está (não recomeça) */
+    const antes = Date.now();
+    r = await call("POST", "/mcp", { key: TESTKEY, corpo: { jsonrpc: "2.0", id: 971, method: "tools/call",
+      params: { name: "baixar_arquivo", arguments: { host: HOST, caminho: "/tmp/e2e-arq.bin" } } } });
+    const env2 = leJson(r);
+    f.check("v3.45 reenviar o MESMO arquivo é instantâneo (retomou, não reenviou 70 MB)",
+      r.status === 200 && env2?.anexo?.id === anexo.id && Date.now() - antes < 8000,
+      JSON.stringify({ ms: Date.now() - antes, id: env2?.anexo?.id }).slice(0, 200));
+
+    /* 7) a chave do canal é conferida: sem chave, o servidor recusa o bloco */
+    const semChave = await fetch(`${BASE}/maquina/r?id=abc&host=${HOST}&offset=0&total=10`, {
+      method: "POST", headers: { "content-type": "application/octet-stream" },
+      body: Buffer.from("0123456789"), signal: AbortSignal.timeout(30000),
+    });
+    f.check("v3.45 bloco sem chave assinada é 401", semChave.status === 401, semChave.status);
+
+    /* 8) copiar_arquivo de 70 MB entre máquinas continua funcionando pelo canal novo */
+    r = await call("POST", "/mcp", { key: TESTKEY, corpo: { jsonrpc: "2.0", id: 972, method: "tools/call",
+      params: { name: "copiar_arquivo", arguments: { host: HOST, origem: "/tmp/e2e-arq.bin",
+        host_destino: HOST, destino: "/tmp/e2e-arq-copia.bin" } } } });
     const cp = leJson(r);
-    f.check("v3.44 copiar_arquivo responde ok e o tamanho copiado", r.status === 200 && cp?.bytes === 307200,
-      JSON.stringify({ st: r.status, cp, erro: erroDe(r) }).slice(0, 240));
-    const shaCopia = execFileSync("docker", ["exec", CONTAINER, "sha256sum", "/tmp/e2e-anexo-copia.bin"], { encoding: "utf8" })
-      .trim().split(/\s+/)[0];
-    f.check("v3.44 a cópia no destino é IDÊNTICA (sha256)", shaCopia === shaLocal, JSON.stringify({ shaCopia, shaLocal }));
-
-    /* 5) capturar_tela num Linux SEM sessão gráfica: erro claro, não silêncio */
-    r = await call("POST", "/mcp", { key: TESTKEY, corpo: { jsonrpc: "2.0", id: 962, method: "tools/call",
-      params: { name: "capturar_tela", arguments: { host: HOST } } } });
-    const txtTela = erroDe(r);
-    f.check("v3.44 capturar_tela sem X diz o que falta (sessão gráfica), não trava",
-      /sessao grafica|grafica/i.test(txtTela), `${r.status} ${txtTela}`.slice(0, 200));
-
-    /* 6) a meta do anexo não vaza o CONTEÚDO para o modelo (contrato: id/nome/mime/bytes) */
-    const metaNoTexto = String(r?.json?.result?.content?.[0]?.text ?? "");
-    f.check("v3.44 o resultado para o modelo não carrega base64 do arquivo",
-      !/base64/i.test(metaNoTexto) || metaNoTexto.length < 4000, metaNoTexto.length);
+    f.check("v3.45 copiar_arquivo de 70 MB e a cópia bate (sha256)",
+      r.status === 200 && sha("/tmp/e2e-arq-copia.bin") === shaOrigem,
+      JSON.stringify({ st: r.status, bytes: cp?.bytes, erro: erroDe(r) }).slice(0, 220));
 
     matar();
-    execFileSync("docker", ["exec", CONTAINER, "sh", "-c",
-      "rm -f /tmp/e2e-anexo.bin /tmp/e2e-anexo-copia.bin /tmp/e2e-cli-anexo.json"]);
+    sh("rm -f /tmp/e2e-arq.bin /tmp/e2e-arq-copia.bin /tmp/e2e-cli-arq.json");
     await call("DELETE", `/maquinas/${HOST}`, { key: TESTKEY });
-    f.fechar("v3.44 anexos da máquina");
+    f.fechar("v3.45 arquivo grande");
+  });
+
+  await bloco(t, "v3.46: arquivo do navegador em blocos e envio para a máquina", async () => {
+    const f = fiscal();
+    const CONTAINER = process.env.CONTAINER ?? "";
+    const leJson = (r: any): any => {
+      const t = String(r?.json?.result?.content?.[0]?.text ?? "");
+      try { return JSON.parse(t); } catch { return {}; }
+    };
+    const erroDe = (r: any): string =>
+      String(r?.json?.error?.message ?? r?.json?.result?.content?.[0]?.text ?? r?.texto ?? "");
+    const HOST = "cli-nav";
+    const MATAR = "const fs=require('fs');for(const d of fs.readdirSync('/proc')){if(!/^[0-9]+$/.test(d))continue;"
+      + "try{const c=fs.readFileSync('/proc/'+d+'/cmdline','utf8').split(String.fromCharCode(0)).join(' ');"
+      + "if(c.indexOf('minirag-cliente-linux')>=0&&c.indexOf('" + HOST + "')>=0)process.kill(Number(d),'SIGKILL')}catch(e){}}";
+    const matar = () => { try { execFileSync("docker", ["exec", CONTAINER, "node", "-e", MATAR]); } catch { /* ok */ } };
+    const sh = (cmd: string) => execFileSync("docker", ["exec", CONTAINER, "sh", "-c", cmd], { encoding: "utf8" });
+    const sha = (p: string) => sh(`sha256sum ${p} | cut -d' ' -f1`).trim();
+
+    matar();
+    await call("DELETE", `/maquinas/${HOST}`, { key: TESTKEY });
+    const r0 = await call("POST", "/maquinas", { key: TESTKEY, corpo: { nome: HOST } });
+    const par = String(r0.json?.token ?? "");
+    f.check("v3.46 pareamento criado", Boolean(par), r0.texto.slice(0, 120));
+
+    /* arquivo de 20 MB: três blocos de 8 MB (o navegador usa exatamente esse tamanho) */
+    const TOTAL = 20971520;
+    const BLOCO = 8 * 1024 * 1024;
+    sh(`head -c ${TOTAL} /dev/urandom > /tmp/e2e-nav.bin`);
+    const shaNav = sha("/tmp/e2e-nav.bin");
+    const bytes = execFileSync("docker", ["exec", CONTAINER, "sh", "-c", "cat /tmp/e2e-nav.bin"],
+      { maxBuffer: 64 * 1024 * 1024 });
+    const id = `nav${Date.now().toString(16)}${"0".repeat(16)}`.slice(0, 32);
+    const enviarBloco = async (off: number, fim: number) =>
+      fetch(`${BASE}/anexos/enviar?id=${id}&offset=${off}&total=${TOTAL}&nome=e2e-nav.bin&mime=application/octet-stream`, {
+        method: "POST",
+        headers: { Authorization: "B" + "earer " + TESTKEY, "content-type": "application/octet-stream" },
+        body: bytes.subarray(off, fim),
+        signal: AbortSignal.timeout(120000),
+      });
+
+    /* 1) bloco fora de ordem é recusado com 409 (o servidor diz quantos bytes tem) */
+    const fora = await enviarBloco(BLOCO, BLOCO * 2);
+    f.check("v3.46 bloco fora de ordem é 409", fora.status === 409, fora.status);
+
+    /* 2) os três blocos na ordem, como o navegador manda */
+    let ultimo: any = {};
+    for (let off = 0; off < TOTAL; off += BLOCO) {
+      const r = await enviarBloco(off, Math.min(off + BLOCO, TOTAL));
+      ultimo = await r.json().catch(() => ({}));
+      f.check(`v3.46 bloco em ${off} aceito (201)`, r.status === 201, JSON.stringify({ st: r.status, ...ultimo }).slice(0, 200));
+    }
+    f.check("v3.46 o envio fecha completo com o tamanho certo", ultimo?.completo === true && ultimo?.bytes === TOTAL,
+      JSON.stringify(ultimo).slice(0, 200));
+
+    /* 3) status do envio: é o que o navegador pergunta para retomar */
+    const st = await fetch(`${BASE}/anexos/enviar/status?id=${id}`, {
+      headers: { Authorization: "B" + "earer " + TESTKEY }, signal: AbortSignal.timeout(30000),
+    });
+    const stj: any = await st.json().catch(() => ({}));
+    f.check("v3.46 status diz 20 MB e completo (retomada do navegador)", stj.bytes === TOTAL && stj.completo === true,
+      JSON.stringify(stj).slice(0, 200));
+
+    /* 4) o arquivo no disco do servidor é o mesmo que o navegador mandou */
+    const noDisco = sh(`find /app/dados -path "*${id}*" -type f -printf '%p %s\\n' | head -1`).trim();
+    f.check("v3.46 arquivo do navegador mora no volume, com o tamanho certo",
+      noDisco.includes("/app/dados/anexos/teste/") && noDisco.endsWith(String(TOTAL)), noDisco.slice(0, 200));
+
+    /* 5) ENVIAR PARA A MÁQUINA: o cliente real conectado baixa e confere o sha256 */
+    execFileSync("docker", ["exec", "-d", CONTAINER, "/app/agente/bin/minirag-cliente-linux",
+      "--url", "http://127.0.0.1:8000", "--token", par, "--host", HOST, "--conf", "/tmp/e2e-cli-nav.json"]);
+    let online = false;
+    for (let i = 0; i < 60; i++) {
+      const g = await call("GET", "/maquinas", { key: TESTKEY });
+      online = (g.json?.maquinas ?? []).some((m: any) => m.host === HOST && m.online === true);
+      if (online) break;
+      await dormir(300);
+    }
+    f.check("v3.46 cliente real conectou", online, online);
+
+    const r = await call("POST", "/mcp", { key: TESTKEY, corpo: { jsonrpc: "2.0", id: 980, method: "tools/call",
+      params: { name: "enviar_para_maquina", arguments: { host: HOST, anexo_id: id,
+        destino: "/tmp/e2e-nav-destino.bin" } } } });
+    const env = leJson(r);
+    f.check("v3.46 enviar_para_maquina devolve ok com o tamanho", r.status === 200 && env?.bytes === TOTAL,
+      JSON.stringify({ st: r.status, bytes: env?.bytes, erro: erroDe(r) }).slice(0, 240));
+    f.check("v3.46 o arquivo no destino tem o MESMO sha256 do navegador",
+      sha("/tmp/e2e-nav-destino.bin") === shaNav, JSON.stringify({ st: r.status, erro: erroDe(r) }).slice(0, 200));
+
+    matar();
+    sh("rm -f /tmp/e2e-nav.bin /tmp/e2e-nav-destino.bin /tmp/e2e-cli-nav.json");
+    await call("DELETE", `/maquinas/${HOST}`, { key: TESTKEY });
+    f.fechar("v3.46 navegador -> máquina");
   });
 
   await bloco(t, "freio de força bruta (último: bloqueia o IP)", async () => {
