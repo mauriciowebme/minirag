@@ -55,6 +55,8 @@
 | T042 | Ferramentas de máquina erram o SO do Windows (`win32 …` × `windows`) | maquinas-tools + cliente | 🔴 Crítica | ✅ v3.37.0 | [#t042](#t042) |
 | T043 | Ferramentas de máquina: varredura das 20 (o que quebrou e o que ficou torto) | maquinas-tools | 🟠 Alta | ✅ v3.38.1 | [#t043](#t043) |
 | T044 | `rodar_lote` recusa 3 comandos curtos: limite de 4000 medido no comando JÁ codificado | maquinas-tools | 🟠 Alta | ✅ v3.38.1 | [#t044](#t044) |
+| T049 | Um único botão de anexo (imagem ou arquivo) | chat-ui | 🟢 Baixa | ✅ v3.48.0 | [#t049](#t049) |
+| T050 | Fusão de Buscar + Fila em **Arquivos** (abas RAG e Meus arquivos) | chat-ui + http + anexos | 🟡 Média | ✅ v3.48.0 | [#t050](#t050) |
 
 ---
 
@@ -686,6 +688,34 @@
 | **Como ficou** | Volume `minirag_arquivos:/app/dados` no compose; pasta `/app/dados/anexos/<usuario>/<id>/<nome>`; ficha em `anexos_maquina` (a tabela `arquivos` JÁ EXISTIA desde a v1 com o original dos documentos — foi o erro que derrubou o boot no primeiro teste). Envio em blocos de 32 MB com `offset` e chave HMAC assinada; `GET /maquina/r/status` diz de onde continuar; id determinístico faz o reenvio retomar; download por stream com `Range` (206); `/maquina/u` também virou stream |
 | **Prova** | Bloco `v3.45`: 70 MB, sha256 igual, arquivo no volume, `completo=true` no banco, 206 com pedaço idêntico, reenvio instantâneo, bloco sem chave 401 |
 | **Limite honesto** | 10 GB por arquivo e 7 dias de retenção (ambos por env). Espaço: 127 GB livres no disco da VPS |
+
+### T049 — Um único botão de anexo (imagem ou arquivo)
+
+| Campo | Conteúdo |
+|---|---|
+| **Módulo** | chat-ui (`frontend/src/components/Chat.tsx`) |
+| **Prioridade** | 🟢 Baixa — cosmético, mas com uma decisão funcional embutida |
+| **Status** | ✅ Entregue na v3.48.0 (30/10) — clique real no ambiente de teste |
+| **Pedido** | "aqui não precisa de vários botões pra anexo, um só basta pra anexar imagens ou arquivos, simples assim" (com print da barra do compositor) |
+| **Antes (medido)** | Dois botões e dois `<input type="file">`: `#chatAnexarArquivo` (ícone documento + seta) → `arquivoGrandeRef`, sem `accept`, `multiple`, até 5 arquivos, upload em blocos com retomada até 10 GB; e `#chatAnexar` (clipe) → `arquivoRef`, `accept="image/png,image/jpeg,image/webp"`, `multiple`, máx 3 imagens de até 4 MB, que viram base64 inline e o MODELO enxerga. Colar (`Ctrl+V`) e arrastar já caem no caminho de imagem. |
+| **Como deve ficar** | Um botão (clipe, o mais universal) e um `<input type="file" multiple>` sem `accept`. No `onChange`, rotear por tipo: `image/png|jpeg|webp` **e** `size <= 4 MB` → `lerImagens()`; todo o resto → `subirArquivos()`. Remover o botão e o input que sobrarem, sem tocar no CSS nem no caminho de colar/arrastar. |
+| **Decisão pendente** | Imagem acima de 4 MB: (a) ✅ recomendado — mandar pelo upload como arquivo (funciona, mas o modelo não vê a imagem inline); ou (b) recomprimir no navegador via canvas para caber em 4 MB e manter a visão. Hoje o botão de imagem simplesmente recusa com "imagem maior que 4MB". |
+| **Impacto medido** | Só `Chat.tsx` (refs nas linhas 451-452, inputs e botões em 1604-1656). `grep` nos testes: nenhum teste usa `#chatAnexar`/`#chatAnexarArquivo`, e a suíte cobre a API de anexos (`v3.45`/`v3.46`), não o botão — logo o front muda sem mexer na suíte. |
+| **Prova exigida na execução** | Clique real no botão único: png pequeno vira chip de imagem (base64 na pergunta) e pdf/zip vira chip de arquivo com progresso; conferir `GET /anexos/:id` e a bolha com o botão de baixar; conferir que colar e arrastar imagem continuam funcionando. |
+
+### T050 — Fusão de Buscar + Fila em **Arquivos** (abas RAG e Meus arquivos)
+
+| Campo | Conteúdo |
+|---|---|
+| **Módulo** | chat-ui (menu/rotas) + http (endpoints) + anexos (listagem/exclusão) |
+| **Prioridade** | 🟡 Média — encolhe o menu e é a única porta para a pasta física que o usuário já tem |
+| **Status** | ✅ Entregue na v3.48.0 (30/10) — clique real nas duas abas + suíte 32/0 |
+| **Pedido** | "nessa parte acho que podemos unificar algumas coisas: buscar, fila — acho que podem se tornar um só chamado de arquivos, esse pode ser a visão da pasta física do usuário e também conseguiria organizar os arquivos de RAG" |
+| **Antes (medido)** | Menu: Chat, Painel, Máquinas, MCP, Buscar, Fila (+ Gavetas/Config do admin). `Buscar.tsx` (135 linhas) = busca semântica (`/search`, `k`, `min_score`, incluir arquivados) devolvendo TRECHOS; `Jobs.tsx` (178 linhas) = `ingest_jobs` (na_fila/processando/concluído/erro/cancelado, cancelar e tentar de novo); `Arquivos.tsx` (504 linhas) JÁ EXISTE e é a lista de documentos do RAG por gaveta (upload, nova versão, nova nota, arquivar, abrir editor, baixar) — mas vive como passo interno (usuário → gaveta → arquivos → nota), fora do menu. Anexos ficam em `dados/<usuário>/<id>/<nome>` com ficha em `anexos_maquina` (id, tenant, host, nome, mime, bytes, completo, criado_em) e índice `(tenant, criado_em DESC)`; **não existe listagem nem exclusão**: só `POST /anexos/enviar`, `GET /anexos/enviar/status` e `GET /anexos/:id`. |
+| **Desenho aprovado** | Um item de menu **Arquivos** com duas abas. (1) **RAG**: a `Arquivos.tsx` de hoje, com caixa de busca no topo (filtro por nome + busca semântica; `k` e `min_score` atrás de "modo avançado" só para operador, porque é diagnóstico) e **status do job na própria linha** (na fila / processando / concluído / erro com "tentar de novo") — a tela Fila deixa de existir como item de menu. (2) **Meus arquivos**: a pasta física do usuário — nome, tamanho, data, máquina de origem, baixar e apagar. |
+| **Trabalho medido** | Endpoints novos: `GET /anexos` (listar por usuário, do `anexos_maquina`, filtro e paginação) e `DELETE /anexos/:id` (apagar ficha + arquivo no disco, respeitando a retenção de 7 dias). Front: `Arquivos.tsx` ganha abas e busca; `Buscar.tsx` e `Jobs.tsx` saem do menu (Jobs vira componente embutido ou vai para o Painel do operador). Rota `#/buscar` e `#/fila` viram redirecionamento para `#/arquivos` para não quebrar link salvo. |
+| **Riscos** | Exclusão de arquivo no disco precisa de cuidado com `id`/nome (o `nomeLimpo` já existe) e nunca sair de `dados/<usuário>/`; a fila do operador (todos os tenants) não pode se perder na fusão — vai para a aba RAG filtrada por tenant ou para o Painel; e o menu do usuário comum precisa continuar com o que ele já enxerga hoje (Chat, Arquivos). |
+| **Prova exigida na execução** | Clicar de verdade: subir um pdf pela aba RAG e ver o status mudar na linha até concluído; forçar erro e ver o "tentar de novo"; buscar por nome e por sentido; abrir a aba Meus arquivos com anexo real do chat, baixar (sha256 igual) e apagar (some da lista e do disco); conferir que `#/buscar` cai em `#/arquivos`. |
 
 ## Lotes recomendados (executados — saíram na v3.18)
 

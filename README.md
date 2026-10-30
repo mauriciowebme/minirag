@@ -22,6 +22,28 @@ parecidos com a pergunta, com uma nota de 0 a 1.
 
 ---
 ---
+## v3.48.0 (30/10) — Arquivos: uma tela para o RAG e para a pasta do usuário
+
+**O que você vê:** o menu ficou menor — Buscar e Fila sumiram e entrou **Arquivos**, com duas abas.
+Na aba **RAG** estão os documentos de sempre (subir, nova versão, nota, arquivar, apagar) agora com o
+andamento do processamento na própria linha e um "tentar de novo" quando falha. Na aba **Meus arquivos**
+está a pasta física do usuário: o que chegou pelo chat e pelas máquinas, com tamanho, data, origem,
+baixar e apagar. No chat, os dois botões de anexo viraram **um só**.
+
+**Por que:** eram dois botões para a mesma intenção ("quero mandar um arquivo") e três telas de menu para
+assuntos que o usuário vive no mesmo lugar — o arquivo. A pasta física existia no servidor e não tinha
+nenhuma porta na tela.
+
+**Como funciona:** um único seletor de arquivo decide o caminho pelo tipo e pelo tamanho — imagem
+pequena vai junto da pergunta (o modelo enxerga), o resto sobe em blocos com retomada. A aba Meus
+arquivos lê a ficha dos anexos (`GET /anexos`) e apaga um por vez (`DELETE /anexos/:id`), sempre presa
+ao dono. Os links antigos `#/buscar` e `#/fila` abrem Arquivos e a URL se corrige sozinha.
+
+**Como é provado:** no ambiente de teste, clique real nas duas abas; um txt subiu pelo seletor único e
+virou chip de arquivo, um png virou miniatura; o anexo apareceu em Meus arquivos, foi baixado e apagado
+(sumiu da lista e do disco); um job forçado a erro mostrou "erro" e o "tentar de novo" devolveu a linha
+para a fila; suíte completa **32 pass / 0 fail**.
+
 ## v3.47.2 (30/10) — o nome novo agora vale também na infraestrutura
 
 A 3.47.1 trocou o que se vê. Esta troca o que fica por baixo:
