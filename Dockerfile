@@ -79,9 +79,9 @@ FROM python:3.11-slim AS runtime
 
 ENV PYTHONUNBUFFERED=1 \
     NODE_ENV=production \
-    MINIRAG_MODEL_DIR=/app/models \
-    MINIRAG_APP_DIR=/app \
-    MINIRAG_EMBEDDER_MODO=filho
+    NEXOS_MODEL_DIR=/app/models \
+    NEXOS_APP_DIR=/app \
+    NEXOS_EMBEDDER_MODO=filho
 
 WORKDIR /app
 
@@ -89,7 +89,7 @@ WORKDIR /app
 # curl é o cliente HTTP da busca web: o Brave recusa o handshake TLS do Node (429),
 # mas aceita o do curl — ver src/web.ts.
 # chromium (+381 MB) é o navegador do web_open para site que só existe com JavaScript;
-# fonts-liberation evita texto invisível. MINIRAG_NAVEGADOR=0 desliga sem rebuild.
+# fonts-liberation evita texto invisível. NEXOS_NAVEGADOR=0 desliga sem rebuild.
 RUN apt-get update \
     && apt-get install -y --no-install-recommends \
         poppler-utils curl ca-certificates chromium fonts-liberation \
