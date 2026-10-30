@@ -87,18 +87,18 @@ function textoCompacto(c?: Compactacao | null): string | undefined {
 
 /* ------------------------------------------------------------------ rastro do turno (v3.15) */
 
-const RASTRO_CHAVE = "minirag:rastro-expandido";
+const RASTRO_CHAVE = "nexos:rastro-expandido";
 
 /* v3.22 (preview aprovado): exemplos do estado vazio — textos literais da maquete aprovada.
    O clique preenche o campo com o `t`; o `sub` é só a legenda do chip. */
 const EXEMPLOS_VAZIO = [
-  { t: "o que anotei sobre o minirag essa semana?", sub: "busca na memória" },
+  { t: "o que anotei sobre o Nexos essa semana?", sub: "busca na memória" },
   { t: "as decisões que tomamos sobre provider", sub: "resumo de decisões" },
   { t: "resuma a conversa de ontem com o cliente", sub: "resumo de conversa" },
   { t: "quais pendências ficaram abertas?", sub: "check de pendências" },
 ] as const;
 
-/* As ferramentas internas do minirag têm nome em inglês no MCP; a linha do rastro fala como a
+/* As ferramentas internas do nexos têm nome em inglês no MCP; a linha do rastro fala como a
    tela (o jeito do IA_GO, que tem mapa de rótulos). Ferramenta de servidor externo mantém o
    nome que o servidor deu — inventar rótulo alheio seria mentira. */
 const ROTULOS_FERRAMENTA: Record<string, string> = {
@@ -175,7 +175,7 @@ function verboFerramenta(nome: string): string {
 }
 
 function rotuloFerramenta(s: { servidor: string; nome: string }): string {
-  const interno = s.servidor === "minirag" || s.servidor === "?";
+  const interno = s.servidor === "nexos" || s.servidor === "minirag" || s.servidor === "?";
   if (interno && ROTULOS_FERRAMENTA[s.nome]) return ROTULOS_FERRAMENTA[s.nome];
   return interno ? s.nome : `${s.servidor} · ${s.nome}`;
 }
@@ -1014,13 +1014,13 @@ export function Chat({
   function exportarConversa() {
     const corpo = msgs
       .filter((m) => m.texto.trim())
-      .map((m) => `${m.papel === "user" ? "**você**" : "**minirag**"}${m.when ? ` · ${fmtHora(m.when)}` : ""}\n\n${m.texto}\n`)
+      .map((m) => `${m.papel === "user" ? "**você**" : "**Nexos**"}${m.when ? ` · ${fmtHora(m.when)}` : ""}\n\n${m.texto}\n`)
       .join("\n---\n\n");
     if (!corpo) {
       toast("nada para exportar ainda", "erro");
       return;
     }
-    const blob = new Blob([`# conversa${memoria ? ` — ${memoria}` : ""} (minirag)\n\n${corpo}`], { type: "text/markdown;charset=utf-8" });
+    const blob = new Blob([`# conversa${memoria ? ` — ${memoria}` : ""} (Nexos)\n\n${corpo}`], { type: "text/markdown;charset=utf-8" });
     const a = document.createElement("a");
     a.href = URL.createObjectURL(blob);
     a.download = `conversa-${(memoria || "padrao").replace(/[^\w-]+/g, "_").slice(0, 40)}.md`;
@@ -1315,12 +1315,12 @@ export function Chat({
                 <details className="fontes" open={false}>
                   <summary className="fonte">
                     ferramentas chamadas · {m.ferramentas.length} (
-                    {m.ferramentas.map((f) => (f.servidor === "minirag" ? "" : f.servidor + "·") + f.nome).join(", ")})
+                    {m.ferramentas.map((f) => (f.servidor === "nexos" || f.servidor === "minirag" ? "" : f.servidor + "·") + f.nome).join(", ")})
                   </summary>
                   {m.ferramentas.map((f, j) => (
                     <div className="fonte" key={j}>
                       <b>
-                        {f.servidor === "minirag" ? "minirag" : f.servidor} · {f.nome}
+                        {f.servidor === "nexos" || f.servidor === "minirag" ? "Nexos" : f.servidor} · {f.nome}
                       </b>{" "}
                       {f.ok ? "✓" : "✕"} · {f.ms} ms
                       <div className="mono break-all">{JSON.stringify(f.args)}</div>

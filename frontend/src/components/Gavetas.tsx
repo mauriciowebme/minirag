@@ -657,7 +657,7 @@ export function Gavetas({ operador, tenant, usuario, onAbrirUsuario, onVoltar, o
                   >
                     <div className="flex gap-2 text-[11px] text-txt3">
                       <span className="font-semibold text-txt2">{r.memoria || "padrão"}</span>
-                      <span>{r.papel === "user" ? "você" : "minirag"}</span>
+                      <span>{r.papel === "user" ? "você" : "Nexos"}</span>
                       <span>{fmtData(r.quando)}</span>
                     </div>
                     <p className="truncate text-[12px]">{r.trecho}</p>

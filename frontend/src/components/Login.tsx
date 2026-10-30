@@ -21,7 +21,7 @@ export function Login({ sessao }: { sessao: SessaoApi }) {
 
   return (
     <form id="formLogin" className="cartao mx-auto mt-[8vh] w-full max-w-[420px]" autoComplete="on" onSubmit={enviar}>
-      <div className="mb-2 text-[13px] font-semibold text-verde">◆ minirag</div>
+      <div className="mb-2 text-[13px] font-semibold text-verde">◆ Nexos</div>
       <h1 className="mb-2">Entrar</h1>
       <p className="dica">
         Chave de tenant vê só as gavetas dela. Chave <b>operador</b> vê todas.

@@ -227,7 +227,7 @@ export default function App() {
   const lateral = (
     <aside className="flex h-full min-h-0 w-[224px] flex-none flex-col gap-0.5 overflow-y-auto overscroll-contain border-r border-borda bg-sup px-2.5 py-4">
       <div className="flex items-center gap-2 px-2 pb-4 text-[15px] font-semibold tracking-[0.2px]">
-        <span className="text-verde">◆</span> minirag
+        <span className="text-verde">◆</span> nexos
       </div>
 
       {/* Um menu só, na ordem definida pelo dono (sem títulos de grupo: "visão geral"
@@ -325,7 +325,7 @@ export default function App() {
               provider {provider.origem === "global" ? "global" : "seu"}
               {provider.chave_mascarada ? ` · chave ${provider.chave_mascarada}` : ""} ·{" "}
               {provider.tem_system_prompt ? "com instruções do modelo" : "sem instruções (conversa pura)"} ·{" "}
-              {provider.mcp_interno ? "MCP do minirag ligado" : "MCP do minirag desligado"} · até {provider.max_rodadas} rodada(s) · memória{" "}
+              {provider.mcp_interno ? "MCP do nexos ligado" : "MCP do nexos desligado"} · até {provider.max_rodadas} rodada(s) · memória{" "}
               {provider.memoria_turnos} · janela {provider.janela_efetiva.toLocaleString("pt-BR")} tokens ({provider.origem_janela})
             </p>
           </details>
@@ -500,7 +500,7 @@ export default function App() {
             <kbd className="rounded border border-borda px-1">Esc</kbd> fecha o editor
           </span>
           <span className="flex-1" />
-          <span>minirag · memória de documentos com busca semântica</span>
+          <span>nexos · memória de documentos com busca semântica</span>
         </footer>
       </div>
     </div>

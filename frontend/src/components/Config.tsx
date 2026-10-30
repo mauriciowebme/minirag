@@ -747,7 +747,7 @@ function Ferramentas({ operador, tenant, onControleMaquinas }: { operador: boole
         mcp_interno: valor,
       });
       setP(r);
-      toast(valor ? "ferramentas do minirag ligadas no chat" : "ferramentas do minirag desligadas", "sucesso");
+      toast(valor ? "ferramentas do nexos ligadas no chat" : "ferramentas do nexos desligadas", "sucesso");
     } catch (e) {
       toast("mcp interno: " + (e as Error).message, "erro");
     } finally {
@@ -814,7 +814,7 @@ function Ferramentas({ operador, tenant, onControleMaquinas }: { operador: boole
   return (
     <div className="flex flex-col gap-3">
       <div className="cartao">
-        <h2 className="mb-1 text-[13px] font-semibold text-txt2">MCP do próprio minirag</h2>
+        <h2 className="mb-1 text-[13px] font-semibold text-txt2">MCP do próprio nexos</h2>
         <p className="dica mt-0 mb-3">
           ligado, o chat pode chamar as ferramentas deste servidor (buscar, listar, criar gaveta, ver documentos…).
           As ferramentas <b>executam direto</b>, sem pedir confirmação — o que foi chamado fica registrado embaixo da resposta.
@@ -827,7 +827,7 @@ function Ferramentas({ operador, tenant, onControleMaquinas }: { operador: boole
             disabled={!p || rodando === "interno"}
             onChange={(e) => void ligarInterno(e.target.checked)}
           />
-          dar as ferramentas do minirag ao chat
+          dar as ferramentas do nexos ao chat
         </label>
         {p?.mcp_interno && <p className="dica mt-2 mb-0" id="mcpInternoAviso">Sem nenhuma ferramenta ligada, o modelo só conversa com o que sabe.</p>}
       </div>
@@ -857,12 +857,12 @@ function Ferramentas({ operador, tenant, onControleMaquinas }: { operador: boole
         )}
       </div>
 
-      {/* v3.36 — o dono decide se as contas comuns podem usar o minirag como SERVIDOR MCP
+      {/* v3.36 — o dono decide se as contas comuns podem usar o nexos como SERVIDOR MCP
           (aba MCP do menu). Ligado por padrão para não calar os agentes que já conversam. */}
       <div className="cartao">
-        <h2 className="mb-1 text-[13px] font-semibold text-txt2">Usar o minirag como servidor MCP</h2>
+        <h2 className="mb-1 text-[13px] font-semibold text-txt2">Usar o nexos como servidor MCP</h2>
         <p className="dica mt-0 mb-3">
-          ligado, cada conta pode apontar o agente dela para o endereço MCP do minirag (aba <b>MCP</b> do menu) e
+          ligado, cada conta pode apontar o agente dela para o endereço MCP do nexos (aba <b>MCP</b> do menu) e
           escolher, na tela, quais ferramentas quer liberar. As ferramentas de operador continuam só do operador, e
           ferramenta nova nasce liberada. Desligado, <b>só o operador</b> usa o MCP. {operador ? "" : "Só o operador liga e desliga."}
         </p>
@@ -874,7 +874,7 @@ function Ferramentas({ operador, tenant, onControleMaquinas }: { operador: boole
             disabled={!operador || rodandoMcpUsuarios}
             onChange={(e) => void ligarMcpUsuarios(e.target.checked)}
           />
-          deixar as contas usarem o minirag como servidor MCP
+          deixar as contas usarem o nexos como servidor MCP
         </label>
         {!mcpUsuarios && (
           <p className="dica mt-2 mb-0" id="mcpUsuariosAviso">

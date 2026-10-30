@@ -1,4 +1,4 @@
-/* Tipos do contrato REST do minirag (v2). Um lugar só para todo o front. */
+/* Tipos do contrato REST do nexos (v2). Um lugar só para todo o front. */
 
 export type Gaveta = {
   tenant: string;

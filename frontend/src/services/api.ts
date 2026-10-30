@@ -73,7 +73,7 @@ export type AnexoEnviado = { id: string; nome: string; bytes: number };
 const BLOCO_UPLOAD = 8 * 1024 * 1024;
 
 function idDoArquivo(f: File): { id: string; chaveLocal: string } {
-  const chaveLocal = `minirag.anexo.${f.name}.${f.size}.${f.lastModified}`;
+  const chaveLocal = `nexos.anexo.${f.name}.${f.size}.${f.lastModified}`;
   const salvo = localStorage.getItem(chaveLocal);
   if (salvo && /^[A-Za-z0-9_-]{16,64}$/.test(salvo)) return { id: salvo, chaveLocal };
   const id = Array.from(crypto.getRandomValues(new Uint8Array(16)))

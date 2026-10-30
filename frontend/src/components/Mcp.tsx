@@ -7,7 +7,7 @@ import type { McpCatalogoResp, McpFerramenta } from "../types";
  * v3.36 — tela MCP (menu lateral, visível para todo mundo).
  *
  * Duas perguntas que o usuário faz e que aqui têm resposta direta:
- *   1. "dá pra usar o minirag como servidor MCP?"  → o cartão de cima, com o endereço e o exemplo.
+ *   1. "dá pra usar o nexos como servidor MCP?"  → o cartão de cima, com o endereço e o exemplo.
  *   2. "o que a MINHA conta alcança?"              → a lista, com o que ele mesmo desligou.
  *
  * A lista vem do servidor já filtrada (papel, controle de máquinas e a escolha dele) — a tela
@@ -47,7 +47,7 @@ export function Mcp({ versao }: { versao?: string }) {
       JSON.stringify(
         {
           mcpServers: {
-            minirag: {
+            nexos: {
               url: endereco,
               headers: { Authorization: "Bearer <chave da sua conta>" },
             },
@@ -103,9 +103,9 @@ export function Mcp({ versao }: { versao?: string }) {
   return (
     <div className="space-y-4">
       <div className="cartao">
-        <h2 className="mb-1 text-[13px] font-semibold text-txt2">Usar o minirag como servidor MCP</h2>
+        <h2 className="mb-1 text-[13px] font-semibold text-txt2">Usar o nexos como servidor MCP</h2>
         <p className="dica mt-0 mb-3">
-          Seu agente (Hermes, Claude, Cursor, um script) pode conversar com o minirag por MCP: buscar, guardar,
+          Seu agente (Hermes, Claude, Cursor, um script) pode conversar com o nexos por MCP: buscar, guardar,
           editar documentos e usar as ferramentas liberadas abaixo. A credencial é a <b>chave da sua conta</b> — a
           mesma que abre esta tela; não existe cadastro separado.
         </p>
