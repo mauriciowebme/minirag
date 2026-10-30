@@ -252,7 +252,11 @@ export async function rodar(
   if (typeof cmd !== "string" || !cmd.trim()) throw new HttpError(422, "cmd é obrigatório");
   /* T044: comandos montados pelo servidor (lote/sessão/env) chegam codificados em base64
      UTF-16LE e inflam ~11x — o teto tem de ser o do envelope, não o do texto do usuário. */
-  const envelope = origem.startsWith("tool ") || /:(rodar_lote|rodar_comando|editar_no_local)$/.test(origem);
+  /* v3.49.3 — o teto de 4000 é para o TEXTO do usuário; todo comando montado por uma tool
+     (origem no formato `<origem>:<tool>`) já vem em base64 UTF-16 e infla ~11x. Antes só
+     três tools eram reconhecidas: capturar_tela (script grande) batia em "cmd longo demais:
+     4022 chars" e a ferramenta parava de funcionar. */
+  const envelope = origem.startsWith("tool ") || origem.includes(":");
   const teto = envelope ? 60000 : 4000;
   if (cmd.length > teto) throw new HttpError(422, `cmd longo demais: ${cmd.length} chars (teto ${teto})`);
   if (!controleCache) throw new HttpError(409, "controle das maquinas DESLIGADO (Configuracoes > Ferramentas (MCP)) — nenhuma execucao aceita: chat, MCP ou REST");
