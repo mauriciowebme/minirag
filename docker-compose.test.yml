@@ -1,25 +1,25 @@
-# TESTE LOCAL ISOLADO — sobe o minirag (build do repo atual) num projeto
+# TESTE LOCAL ISOLADO — sobe o nexos (build do repo atual) num projeto
 # separado (volume/rede proprios) e porta LOCAL 8001, sem encostar no
 # servico de producao do Dokploy (que ocupa 8000).
 #
 # Uso (chave do tenant de teste vem do ambiente):
 #   MINIRAG_USERS="teste:<chave>" \
-#   /opt/data/.local/bin/docker-compose -p miniragtest \
+#   /opt/data/.local/bin/docker-compose -p nexostest \
 #     -f docker-compose.test.yml up -d --build
 #   ... testar ...
-#   /opt/data/.local/bin/docker-compose -p miniragtest -f docker-compose.test.yml down -v
+#   /opt/data/.local/bin/docker-compose -p nexostest -f docker-compose.test.yml down -v
 
 services:
   minirag-db:
     image: pgvector/pgvector:pg17
     environment:
-      POSTGRES_USER: ${MINIRAG_DB_USER:-miniragtest}
-      POSTGRES_PASSWORD: ${MINIAG_DB_PWD:-miniragtest}
-      POSTGRES_DB: ${MINIRAG_DB_NAME:-miniragtest}
+      POSTGRES_USER: ${MINIRAG_DB_USER:-nexostest}
+      POSTGRES_PASSWORD: ${MINIAG_DB_PWD:-nexostest}
+      POSTGRES_DB: ${MINIRAG_DB_NAME:-nexostest}
     volumes:
-      - miniragtest_data:/var/lib/postgresql/data
+      - nexostest_data:/var/lib/postgresql/data
     healthcheck:
-      test: ["CMD-SHELL", "pg_isready -U ${MINIRAG_DB_USER:-miniragtest} -d ${MINIRAG_DB_NAME:-miniragtest}"]
+      test: ["CMD-SHELL", "pg_isready -U ${MINIRAG_DB_USER:-nexostest} -d ${MINIRAG_DB_NAME:-nexostest}"]
       interval: 10s
       timeout: 5s
       retries: 10
@@ -32,9 +32,9 @@ services:
       MINIRAG_MODEL_DIR: /app/models
       MINIRAG_DB_HOST: minirag-db
       MINIRAG_DB_PORT: "5432"
-      MINIRAG_DB_USER: ${MINIRAG_DB_USER:-miniragtest}
-      MINIRAG_DB_PASSWORD: ${MINIAG_DB_PWD:-miniragtest}
-      MINIRAG_DB_NAME: ${MINIRAG_DB_NAME:-miniragtest}
+      MINIRAG_DB_USER: ${MINIRAG_DB_USER:-nexostest}
+      MINIRAG_DB_PASSWORD: ${MINIAG_DB_PWD:-nexostest}
+      MINIRAG_DB_NAME: ${MINIRAG_DB_NAME:-nexostest}
       MINIRAG_DB_WAIT_TRIES: ${MINIRAG_DB_WAIT_TRIES:-30}
       MINIRAG_DB_WAIT_SECONDS: ${MINIRAG_DB_WAIT_SECONDS:-2}
       MINIRAG_USERS: ${MINIRAG_USERS:-}
@@ -45,12 +45,12 @@ services:
         condition: service_healthy
     volumes:
       # v3.45: mesma forma da produção — arquivos por usuário num volume nomeado
-      - miniragtest_arquivos:/app/dados
+      - nexostest_arquivos:/app/dados
     ports:
       # bind configurável: no host 127.0.0.1 basta; de dentro de outro
       # container (CI/Hermes) use 0.0.0.0 e acesse pelo IP da ponte
       - "${MINIRAG_TEST_BIND:-127.0.0.1}:${MINIRAG_TEST_PORT:-8001}:8000"
 
 volumes:
-  miniragtest_data:
-  miniragtest_arquivos:
+  nexostest_data:
+  nexostest_arquivos:

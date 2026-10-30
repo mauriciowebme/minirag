@@ -11,16 +11,16 @@ set -euo pipefail
 cd "$(dirname "$0")/.."
 
 COMPOSE="${COMPOSE:-/opt/data/.local/bin/docker-compose}"
-PROJ="${PROJ:-miniragtest}"                       # prefixo do compose => nome dos containers
+PROJ="${PROJ:-nexostest}"                       # prefixo do compose => nome dos containers
 PORTA="${PORTA:-8002}"
 BIND="${BIND:-0.0.0.0}"                           # 0.0.0.0: suíte roda de dentro de outro container
-ENV_FILE="${ENV_FILE:-/opt/data/cache/scratch/minirag_test_keys.env}"
+ENV_FILE="${ENV_FILE:-/opt/data/cache/scratch/nexos_test_keys.env}"
 
 # a versão esperada vem do código (src/config.ts), não de chute
 VERSAO="${PROVA_VS:-$(grep -oE 'versao: "[^"]+"' src/config.ts | sed 's/.*"\(.*\)"/\1/')}"
 [ -n "$VERSAO" ] || { echo "FALHOU: não achei a versão em src/config.ts"; exit 1; }
 
-gerar_key() { python3 -c 'import secrets; print("mr_" + secrets.token_urlsafe(24).rstrip("="))'; }
+gerar_key() { python3 -c 'import secrets; print("nx_" + secrets.token_urlsafe(24).rstrip("="))'; }
 
 echo "== abaixo o ambiente anterior ($PROJ) =="
 $COMPOSE -p "$PROJ" -f docker-compose.test.yml down -v --remove-orphans >/dev/null 2>&1 || true

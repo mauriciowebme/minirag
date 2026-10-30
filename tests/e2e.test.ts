@@ -1,5 +1,5 @@
 /**
- * Suíte E2E do minirag v2 — porta das checagens da v1.8/v1.10 e do MCP.
+ * Suíte E2E do nexos v2 — porta das checagens da v1.8/v1.10 e do MCP.
  *
  * Roda por HTTP contra um serviço já no ar (não importa a linguagem do
  * servidor): é juiz de CONTRATO, não de implementação.
@@ -175,7 +175,7 @@ function lerZip(buf: Buffer): Map<string, Buffer> {
 
 /* ---------------------------------------------------------------- blocos */
 
-test("minirag v2 — suíte completa", async (t) => {
+test("nexos v2 — suíte completa", async (t) => {
   await bloco(t, "v1.8: documents, escopos e decay por documento", async () => {
     const f = fiscal();
 
@@ -375,7 +375,7 @@ test("minirag v2 — suíte completa", async (t) => {
       capabilities: {},
       clientInfo: { name: "probe", version: "0" },
     });
-    f.check("initialize", r.status === 200 && r.json?.result?.serverInfo?.name === "minirag", r.texto.slice(0, 200));
+    f.check("initialize", r.status === 200 && r.json?.result?.serverInfo?.name === "nexos", r.texto.slice(0, 200));
     f.check("initialize ecoa versao pedida", r.json?.result?.protocolVersion === "2025-03-10", r.json?.result?.protocolVersion);
 
     r = await rpc(2, "notifications/initialized");
@@ -596,7 +596,7 @@ test("minirag v2 — suíte completa", async (t) => {
   });
 
 
-  /* v3.36 — o minirag como servidor MCP ganha dono: o admin libera o uso por conta e cada
+  /* v3.36 — o nexos como servidor MCP ganha dono: o admin libera o uso por conta e cada
      usuário escolhe o que quer expor; ferramenta nova nasce liberada. */
   await bloco(t, "v3.36: MCP por conta — interruptor do admin e lista do próprio usuário", async () => {
     const f = fiscal();
@@ -1460,21 +1460,21 @@ test("minirag v2 — suíte completa", async (t) => {
         return {};
       }
     })();
-    f.check("ferramentas do minirag vão no pedido (sem o próprio chat)", eco.ntools === totalMcp - 1, { enviado: eco.ntools, no_mcp: totalMcp });
+    f.check("ferramentas do nexos vão no pedido (sem o próprio chat)", eco.ntools === totalMcp - 1, { enviado: eco.ntools, no_mcp: totalMcp });
 
     /* ---- 4. agente: o modelo pede ferramenta, ela executa direto, e volta na resposta ---- */
     r = await provedor({ modelo: "agente", mcp_interno: true });
     f.check("mcp interno ligado antes do teste de agente", r.json?.mcp_interno === true, r.texto.slice(0, 120));
     r = await call("POST", "/chat", { key: TESTKEY, corpo: { pergunta: "quanto é a nota da beta?", memoria: GAV } });
     const chamada1 = (r.json?.ferramentas ?? [])[0] ?? {};
-    f.check("chat executou search do minirag sem pedir confirmação", r.status === 200 && chamada1.servidor === "minirag" && chamada1.nome === "search" && chamada1.ok === true, chamada1);
+    f.check("chat executou search do nexos sem pedir confirmação", r.status === 200 && chamada1.servidor === "nexos" && chamada1.nome === "search" && chamada1.ok === true, chamada1);
     f.check("a gaveta da tela entra na busca feita pelo modelo", chamada1.args?.memoria === GAV, chamada1.args);
     f.check("a busca achou o documento da gaveta", /9\.876,54|suite-v28-nota/.test(String(chamada1.resumo)), String(chamada1.resumo).slice(0, 120));
     f.check("resposta usa o resultado da ferramenta", /^USEI:/.test(r.json?.resposta ?? "") && r.json?.rodadas === 2, { resposta: r.json?.resposta?.slice(0, 90), rodadas: r.json?.rodadas });
 
     r = await call("GET", `/chat?memoria=${GAV}`, { key: TESTKEY });
     const guardada = (r.json?.mensagens ?? []).slice().reverse().find((m: any) => m.ferramentas?.length) ?? {};
-    f.check("histórico registra a ferramenta chamada", guardada.ferramentas?.[0]?.nome === "search" && guardada.ferramentas[0].servidor === "minirag", guardada.ferramentas);
+    f.check("histórico registra a ferramenta chamada", guardada.ferramentas?.[0]?.nome === "search" && guardada.ferramentas[0].servidor === "nexos", guardada.ferramentas);
 
     /* ---- 5. trava de rodadas ---- */
     r = await provedor({ modelo: "parcial", max_rodadas: 1, mcp_interno: true });
@@ -1505,7 +1505,7 @@ test("minirag v2 — suíte completa", async (t) => {
     r = await call("GET", `/chat?memoria=${GAV}`, { key: OPKEY });
     const achada = await call("POST", "/chat", { key: OPKEY, corpo: { pergunta: "mostre a chave criada", memoria: GAV } });
     const registrada = JSON.stringify(achada.json?.ferramentas ?? []);
-    f.check("o registro da ferramenta não devolve chave em claro", !/mr_[A-Za-z0-9_-]{8,}/.test(registrada), registrada.slice(0, 160));
+    f.check("o registro da ferramenta não devolve chave em claro", !/nx_[A-Za-z0-9_-]{8,}/.test(registrada), registrada.slice(0, 160));
     await call("DELETE", "/usuarios/suite-segredo", { key: OPKEY });
 
     /* ---- 7. servidor MCP externo cadastrado por endereço ---- */
@@ -1743,7 +1743,7 @@ test("minirag v2 — suíte completa", async (t) => {
     f.check("a ferramenta registrada mostra o documento achado na gaveta", /suite-v29-nota/.test(String(busca.resumo ?? "")), String(busca.resumo ?? "").slice(0, 200));
     f.check("os argumentos da busca chegaram inteiros (e na gaveta certa)", busca.args?.query === "nota fiscal" && busca.args?.k === 3 && busca.args?.memoria === GAV, busca.args);
     const evFe = fluxoRes.eventos.find((e) => e.tipo === "ferramenta") ?? {};
-    f.check("o evento de ferramenta ao vivo traz servidor, nome e tempo", evFe.servidor === "minirag" && evFe.nome === "search" && evFe.ok === true && Number(evFe.ms) > 0, evFe);
+    f.check("o evento de ferramenta ao vivo traz servidor, nome e tempo", evFe.servidor === "nexos" && evFe.nome === "search" && evFe.ok === true && Number(evFe.ms) > 0, evFe);
     f.check("2 rodadas: pensar + responder", dados.rodadas === 2 && dados.mcp_interno === true, { rodadas: dados.rodadas, mcp: dados.mcp_interno });
 
     /* o modelo que nunca termina: pensa, pede ferramenta, pensa de novo... até o freio */
@@ -2591,7 +2591,7 @@ await bloco(t, "v3.6: máquinas por usuário — hub WS, pareamento, run, escopo
     f.check("bilhete é de uso único (segundo pedido recusado)", rReuso.status === 403, rReuso.status);
 
     const dispo = rGen.headers.get("content-disposition") ?? "";
-    f.check("nome do arquivo carrega o usuário", dispo.includes("minirag-cliente-teste"), dispo.slice(0, 90));
+    f.check("nome do arquivo carrega o usuário", dispo.includes("nexos-cliente-teste"), dispo.slice(0, 90));
     execFileSync("docker", ["exec", "-i", CONTAINER, "sh", "-c", "cat > /tmp/cli37 && chmod 755 /tmp/cli37"], { input: bufGen });
 
     /* 1ª máquina: o MESMO arquivo ativa a primeira e adota token próprio */
@@ -2720,7 +2720,7 @@ await bloco(t, "v3.6: máquinas por usuário — hub WS, pareamento, run, escopo
     }, 25000);
     f.check("v3.9 painel fala do próprio cliente: online e máquina no estado", online39, JSON.stringify(estado()).slice(0, 150));
 
-    const html39 = execD(`node -e "fetch('http://127.0.0.1:${porta}/').then(r=>r.text()).then(t=>console.log(t.includes('minirag')&&t.includes('Conex')&&t.includes('Log')?'tem':'falta'))"`).trim();
+    const html39 = execD(`node -e "fetch('http://127.0.0.1:${porta}/').then(r=>r.text()).then(t=>console.log(t.includes('nexos')&&t.includes('Conex')&&t.includes('Log')?'tem':'falta'))"`).trim();
     f.check("v3.9 página do painel sai com as seções (conexão, log)", html39 === "tem", html39);
 
     const sse39 = execD(`node -e "const c=new AbortController();setTimeout(()=>c.abort(),3000);fetch('http://127.0.0.1:${porta}/evento',{signal:c.signal}).then(async r=>{const rd=r.body.getReader();const a=await rd.read();console.log(a.value?Buffer.from(a.value).toString().slice(0,40):'vazio')}).catch(()=>{})"`);
@@ -2785,7 +2785,7 @@ await bloco(t, "v3.6: máquinas por usuário — hub WS, pareamento, run, escopo
     const matarCli = () => execD("node /tmp/procura3131.js /tmp/maq3131.js mata").trim();
 
     /* O hub que engole: abre o TCP e nunca conclui o handshake — o retrato exato do
-       proxy na frente do minirag enquanto o container reinicia (foi o que matou o
+       proxy na frente do nexos enquanto o container reinicia (foi o que matou o
        cliente do dono em 23/10). Modo lido de arquivo: "engole" ou "liga" (encaminha
        para o hub de verdade). Motor: o Node 22 do container, o mesmo assado no .exe. */
     instalar("/tmp/hubmodo3131.js",
@@ -2927,7 +2927,7 @@ await bloco(t, "v3.6: máquinas por usuário — hub WS, pareamento, run, escopo
     const pens = trilha.filter((s) => s.tipo === "pensamento");
     f.check("cada bloco de pensamento saiu com o tempo MEDIDO dele (>0)", pens.length === 2 && pens.every((s) => Number(s.ms) > 0), JSON.stringify(pens.map((s) => s.ms)));
     const tool = trilha.find((s) => s.tipo === "ferramenta") ?? {};
-    f.check("a linha da ferramenta diz qual foi, se deu certo e quanto demorou", tool.nome === "list_gavetas" && tool.servidor === "minirag" && tool.ok === true && Number(tool.ms) >= 0, JSON.stringify(tool).slice(0, 140));
+    f.check("a linha da ferramenta diz qual foi, se deu certo e quanto demorou", tool.nome === "list_gavetas" && tool.servidor === "nexos" && tool.ok === true && Number(tool.ms) >= 0, JSON.stringify(tool).slice(0, 140));
     f.check("a fala de caminho está na trilha (não foi engolida pela resposta)", trilha.some((s) => s.tipo === "narracao" && /vou ver as gavetas/.test(String(s.texto))), String(trilha.find((s) => s.tipo === "narracao")?.texto ?? "").slice(0, 60));
     /* v3.35 — a narração NASCE no rastro: nenhum pedaço dela pode ter passado como delta */
     const deltasV315 = rod.eventos.filter((e: any) => e.tipo === "delta").map((e: any) => String(e.texto ?? "")).join("");
