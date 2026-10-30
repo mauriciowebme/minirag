@@ -4,8 +4,6 @@ import { Login } from "./components/Login";
 import { Gavetas } from "./components/Gavetas";
 import { Arquivos } from "./components/Arquivos";
 import { Editor } from "./components/Editor";
-import { Buscar } from "./components/Buscar";
-import { Jobs } from "./components/Jobs";
 import { Painel } from "./components/Painel";
 import { Chat } from "./components/Chat";
 import { Config, SECOES_CFG, type Aba } from "./components/Config";
@@ -23,8 +21,8 @@ const MENU: { id: Vista; rotulo: string; icone: string }[] = [
   { id: "maquinas", rotulo: "Máquinas", icone: "🖥" },
   /* v3.36 — onde o usuário vê que a conta dele pode ser servidor MCP e escolhe o que liberar */
   { id: "mcp", rotulo: "MCP", icone: "🔌" },
-  { id: "buscar", rotulo: "Buscar", icone: "⌕" },
-  { id: "jobs", rotulo: "Fila", icone: "≡" },
+  /* v3.48 (T050): Buscar e Fila viraram DENTRO da tela Arquivos (aba RAG) */
+  { id: "arquivos", rotulo: "Arquivos", icone: "📁" },
   { id: "gavetas", rotulo: "Gavetas", icone: "👤" },
   { id: "config", rotulo: "Configurações", icone: "⚙" },
 ];
@@ -40,6 +38,8 @@ const VISTAS_TODAS: Vista[] = [
 
 function vistaDoHash(): Vista | null {
   const bruto = window.location.hash.replace(/^#\/?/, "").trim();
+  /* v3.48 (T050) — Buscar e Fila viraram abas de Arquivos: link salvo cai na tela nova */
+  if (bruto === "buscar" || bruto === "fila" || bruto === "jobs") return "arquivos";
   return (VISTAS_TODAS as string[]).includes(bruto) ? (bruto as Vista) : null;
 }
 
@@ -47,7 +47,7 @@ function vistaDoHash(): Vista | null {
    Chat, Buscar e Fila. Painel, Usuários/Gavetas e Configurações são do admin.
    A parede de verdade está na API (dashboard/config gravam exigem operador);
    o filtro aqui é a consequência visual, não a segurança. */
-const VISTAS_DO_COMUM: Vista[] = ["chat", "maquinas", "mcp", "buscar", "jobs"];
+const VISTAS_DO_COMUM: Vista[] = ["chat", "maquinas", "mcp", "arquivos"];
 
 const TITULOS: Record<Vista, string> = {
   painel: "Painel",
@@ -159,7 +159,11 @@ export default function App() {
   useEffect(() => {
     const aplicar = () => {
       const v = vistaDoHash();
-      if (v) setVista(v);
+      if (!v) return;
+      setVista(v);
+      /* v3.48 — link antigo (#/buscar, #/fila) abre a tela nova e a URL se corrige */
+      const destino = "#/" + v;
+      if (window.location.hash !== destino) window.history.replaceState(null, "", destino);
     };
     window.addEventListener("hashchange", aplicar);
     return () => window.removeEventListener("hashchange", aplicar);
@@ -233,7 +237,11 @@ export default function App() {
       {/* Um menu só, na ordem definida pelo dono (sem títulos de grupo: "visão geral"
           e "memória" saíram — a divisão não ajudava a achar nada). */}
       {MENU.filter((m) => (operador || VISTAS_DO_COMUM.includes(m.id)) && (m.id !== "maquinas" || controleMaq)).map((m) => {
-        const ativo = m.id === "gavetas" ? DENTRO_DO_CAMINHO.has(vista) : vista === m.id;
+        /* v3.48: Arquivos é item de menu; o destaque de Usuários fica só no drill-down */
+        const ativo =
+          m.id === "gavetas"
+            ? vista === "gavetas" || (DENTRO_DO_CAMINHO.has(vista) && Boolean(usuarioAberto))
+            : vista === m.id;
         const rotulo = m.id === "gavetas" ? (operador ? "Usuários" : "Gavetas") : m.rotulo;
         const botao = (
           <button
@@ -431,7 +439,7 @@ export default function App() {
               escopo={{ tenant, memoria }}
               operador={operador}
               onAbrirEditor={(docId, nomeNovo) => abrirEditor(docId, nomeNovo ?? null)}
-              onVoltar={() => setVista("gavetas")}
+              onVoltar={usuarioAberto ? () => setVista("gavetas") : undefined}
               onEscopoVazio={() => {
                 if (operador && usuarioAberto) {
                   setVista("gavetas");
@@ -470,10 +478,6 @@ export default function App() {
 
           {vista === "maquinas" && <Maquinas operador={operador} />}
           {vista === "mcp" && <Mcp versao={versao} />}
-          {vista === "buscar" && <Buscar escopo={{ tenant, memoria }} operador={operador} onAbrirEditor={(id) => abrirEditor(id)} />}
-
-          {vista === "jobs" && <Jobs tenant={tenant} nome={nome} operador={operador} />}
-
           {vista === "config" && (
             <Config
               nome={nome}

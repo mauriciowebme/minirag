@@ -1,8 +1,12 @@
 import { useCallback, useEffect, useRef, useState } from "react";
-import { baixar, del, enviar, get, patch, qs } from "../services/api";
+import { baixar, del, enviar, get, patch, post, qs } from "../services/api";
 import { fmtData, slug } from "../lib/fmt";
 import { useToast } from "./Toast";
-import type { DocItem, DocsResp, Escopo } from "../types";
+import { Buscar } from "./Buscar";
+import { Jobs } from "./Jobs";
+import type { AnexoFicha, AnexosResp, DocItem, DocsResp, Escopo, Job, JobsResp } from "../types";
+
+type Aba = "rag" | "meus";
 
 export function Arquivos({
   escopo,
@@ -15,8 +19,8 @@ export function Arquivos({
   operador: boolean;
   onAbrirEditor: (docId: string | null, novoNome?: string) => void;
   onEscopoVazio: () => void;
-  /** volta um nível: para as gavetas deste usuário */
-  onVoltar: () => void;
+  /** volta um nível: para as gavetas deste usuário (ausente quando a tela abre pelo menu) */
+  onVoltar?: () => void;
 }) {
   const { toast } = useToast();
   const [docs, setDocs] = useState<DocItem[]>([]);
@@ -33,6 +37,14 @@ export function Arquivos({
   const inputVersao = useRef<HTMLInputElement>(null);
   const timer = useRef<number | undefined>(undefined);
   const filtroRef = useRef("");
+
+  /* v3.48 (T050) — a tela virou "Arquivos" com duas abas: o RAG de sempre e a
+     pasta física do usuário (os anexos que passaram pelo chat/máquinas). */
+  const [aba, setAba] = useState<Aba>("rag");
+  const [jobsPorDoc, setJobsPorDoc] = useState<Record<string, Job>>({});
+  const [anexos, setAnexos] = useState<AnexoFicha[]>([]);
+  const [filtroAnexos, setFiltroAnexos] = useState("");
+  const [carregandoAnexos, setCarregandoAnexos] = useState(false);
 
   const carregar = useCallback(
     async (q: string, arquivados: boolean) => {
@@ -69,6 +81,46 @@ export function Arquivos({
     void carregar("", false);
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [escopo.tenant, escopo.memoria]);
+
+  /* v3.48 (T050) — status do job na própria linha do arquivo: a tela Fila deixou
+     de ser item de menu; o que interessa aqui é o job MAIS RECENTE de cada doc. */
+  const carregarJobs = useCallback(async () => {
+    try {
+      const j = await get<JobsResp>("/jobs?" + qs({ limit: 80, tenant: operador ? escopo.tenant : undefined }));
+      const mapa: Record<string, Job> = {};
+      for (const x of j.jobs) {
+        const atual = mapa[x.doc_id];
+        if (!atual || x.job_id > atual.job_id) mapa[x.doc_id] = x;
+      }
+      setJobsPorDoc(mapa);
+    } catch {
+      /* a lista de arquivos não depende da fila: falha da fila não vira erro na tela */
+    }
+  }, [escopo.tenant, operador]);
+
+  const carregarAnexos = useCallback(
+    async (q: string) => {
+      setCarregandoAnexos(true);
+      try {
+        const r = await get<AnexosResp>(
+          "/anexos?" + qs({ q, limit: 200, tenant: operador ? escopo.tenant : undefined }),
+        );
+        setAnexos(r.anexos);
+      } catch (e) {
+        setAnexos([]);
+        toast("meus arquivos: " + (e as Error).message, "erro");
+      } finally {
+        setCarregandoAnexos(false);
+      }
+    },
+    [escopo.tenant, operador, toast],
+  );
+
+  useEffect(() => {
+    if (aba === "rag") void carregarJobs();
+    else void carregarAnexos("");
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [aba, escopo.tenant, escopo.memoria]);
 
   function aoFiltrar(v: string) {
     setFiltro(v);
@@ -222,17 +274,50 @@ export function Arquivos({
     onAbrirEditor(null, nome);
   }
 
+  /* ---------------- v3.48 (T050): fila na linha e a pasta física ---------------- */
+
+  async function tentarDeNovo(doc: DocItem) {
+    const job = jobsPorDoc[doc.doc_id];
+    if (!job) return;
+    try {
+      await post(`/jobs/${job.job_id}/retry`, {});
+      toast("de volta à fila ✓", "sucesso");
+      void carregarJobs();
+      void carregar(filtroRef.current, mostrarArq);
+    } catch (e) {
+      toast("tentar de novo: " + (e as Error).message, "erro", 6000);
+    }
+  }
+
+  async function baixarAnexo(a: AnexoFicha) {
+    try {
+      await baixar(`/anexos/${encodeURIComponent(a.id)}`, a.nome || "arquivo");
+    } catch (e) {
+      toast((e as Error).message, "erro", 6000);
+    }
+  }
+
+  async function apagarAnexo(a: AnexoFicha) {
+    if (!confirm(`APAGAR "${a.nome}" da pasta (${tamanhoLegivel(a.bytes)})? Isso não tem como desfazer.`)) return;
+    try {
+      await del(`/anexos/${encodeURIComponent(a.id)}`);
+      toast("arquivo apagado ✓", "sucesso");
+      void carregarAnexos(filtroAnexos);
+    } catch (e) {
+      toast((e as Error).message, "erro");
+    }
+  }
+
+  function aoFiltrarAnexos(v: string) {
+    setFiltroAnexos(v);
+    window.clearTimeout(timer.current);
+    timer.current = window.setTimeout(() => void carregarAnexos(v.trim()), 350);
+  }
+
   return (
     <section>
-      <div className="barra">
-        <button
-          id="btnVoltarGavetas"
-          className="btn btn-sutil btn-mini"
-          title="voltar para as gavetas deste usuário"
-          onClick={onVoltar}
-        >
-          ← gavetas
-        </button>
+      {/* v3.48 (T050) — uma tela, duas abas: o RAG (documentos + fila) e a pasta física */}
+      <div className="barra" id="arqAbas">
         <h2>
           Arquivos{" "}
           <span id="arqOnde" className="sub2">
@@ -240,6 +325,39 @@ export function Arquivos({
           </span>
         </h2>
         <span className="flex-1" />
+        <button
+          id="abaRag"
+          role="tab"
+          aria-selected={aba === "rag"}
+          className={"btn btn-mini " + (aba === "rag" ? "btn-primario" : "btn-sutil")}
+          onClick={() => setAba("rag")}
+        >
+          RAG
+        </button>
+        <button
+          id="abaMeus"
+          role="tab"
+          aria-selected={aba === "meus"}
+          className={"btn btn-mini " + (aba === "meus" ? "btn-primario" : "btn-sutil")}
+          onClick={() => setAba("meus")}
+        >
+          📁 meus arquivos
+        </button>
+      </div>
+
+      {aba === "rag" && (
+        <>
+      <div className="barra">
+        {onVoltar && (
+          <button
+            id="btnVoltarGavetas"
+            className="btn btn-sutil btn-mini"
+            title="voltar para as gavetas deste usuário"
+            onClick={onVoltar}
+          >
+            ← gavetas
+          </button>
+        )}
         <button
           id="btnNovaNota"
           className="btn btn-primario"
@@ -427,7 +545,33 @@ export function Arquivos({
                     <span className="tcode">{doc.doc_id}</span>
                   </td>
                   <td data-rot="estado">
-                    <span className={`tag ${arquivado ? "tag-arquivado" : "tag-ativo"}`}>{arquivado ? "arquivado" : "ativo"}</span>
+                    {(() => {
+                      const job = jobsPorDoc[doc.doc_id];
+                      const andando = job && (job.status === "na_fila" || job.status === "processando");
+                      if (andando) {
+                        const pct = job.chunks_total ? Math.round((job.chunks_feitos / job.chunks_total) * 100) : 0;
+                        return (
+                          <span
+                            className={`tag ${job.status === "na_fila" ? "tag-fila" : "tag-processando"}`}
+                            title={`job ${job.job_id}: ${job.chunks_feitos}/${job.chunks_total} chunks`}
+                          >
+                            {job.status === "na_fila" ? "na fila" : `processando ${pct}%`}
+                          </span>
+                        );
+                      }
+                      if (job && job.status === "erro") {
+                        return (
+                          <span className="tag tag-erro" title={job.erro || "erro no processamento"}>
+                            erro
+                          </span>
+                        );
+                      }
+                      return (
+                        <span className={`tag ${arquivado ? "tag-arquivado" : "tag-ativo"}`}>
+                          {arquivado ? "arquivado" : "ativo"}
+                        </span>
+                      );
+                    })()}
                   </td>
                   <td className="num" data-rot="chunks">
                     {doc.chunks}
@@ -490,6 +634,16 @@ export function Arquivos({
                       >
                         {arquivado ? "reviver" : "arquivar"}
                       </button>
+                      {jobsPorDoc[doc.doc_id]?.status === "erro" && (
+                        <button
+                          className="btn btn-sutil btn-mini"
+                          title={jobsPorDoc[doc.doc_id]?.erro || "tentar de novo"}
+                          aria-label="tentar de novo"
+                          onClick={() => void tentarDeNovo(doc)}
+                        >
+                          ↻ tentar de novo
+                        </button>
+                      )}
                       <button className="btn btn-perigo btn-mini" title="apagar para sempre (chunks + fonte)" aria-label="apagar documento" onClick={() => void apagarDoc(doc)}>
                         apagar
                       </button>
@@ -500,6 +654,110 @@ export function Arquivos({
             })}
         </tbody>
       </table>
+
+      {operador && (
+        <details className="cartao mt-4" id="arqAvancado">
+          <summary>modo avançado (admin) — busca semântica e fila completa</summary>
+          <div className="mt-4">
+            <Buscar escopo={escopo} operador={operador} onAbrirEditor={onAbrirEditor} />
+          </div>
+          <div className="mt-6">
+            <Jobs tenant={escopo.tenant} nome={escopo.tenant} operador={operador} />
+          </div>
+        </details>
+      )}
+        </>
+      )}
+
+      {aba === "meus" && (
+        <>
+          <div className="faixa">
+            <input
+              id="meusFiltro"
+              className="campo min-w-[200px] flex-1"
+              placeholder="filtrar por nome do arquivo…"
+              aria-label="filtrar meus arquivos"
+              value={filtroAnexos}
+              onChange={(e) => aoFiltrarAnexos(e.target.value)}
+            />
+            <span id="meusTotal" className="sub2">
+              {carregandoAnexos ? "" : `${anexos.length} arquivo(s)`}
+            </span>
+          </div>
+
+          <p className="mb-3 text-[12px] text-txt3">
+            A pasta física deste usuário: o que chegou pelo chat e pelas máquinas. Fica guardada pelo prazo da
+            faxina (7 dias por padrão) e não entra no RAG.
+          </p>
+
+          <table className="tabela" id="meusTabela">
+            <thead>
+              <tr>
+                <th>arquivo</th>
+                <th>origem</th>
+                <th className="num">tamanho</th>
+                <th>enviado</th>
+                <th aria-label="ações"></th>
+              </tr>
+            </thead>
+            <tbody>
+              {carregandoAnexos && (
+                <tr>
+                  <td colSpan={5} className="text-txt3">
+                    carregando…
+                  </td>
+                </tr>
+              )}
+              {!carregandoAnexos && anexos.length === 0 && (
+                <tr>
+                  <td colSpan={5} className="text-txt3">
+                    {filtroAnexos.trim()
+                      ? "nenhum arquivo com esse filtro"
+                      : "nenhum arquivo ainda — o que você anexar no chat aparece aqui"}
+                  </td>
+                </tr>
+              )}
+              {!carregandoAnexos &&
+                anexos.map((a) => (
+                  <tr key={a.id}>
+                    <td>
+                      <div>{a.nome}</div>
+                      <div className="mt-0.5 text-[12px] text-txt3">
+                        <span className="chip mr-1">{(a.mime.split("/").pop() || "bin").toUpperCase()}</span>
+                        {a.completo ? "completo" : "incompleto"}
+                      </div>
+                    </td>
+                    <td>
+                      <span className="tcode">{a.host || "—"}</span>
+                    </td>
+                    <td className="num">{tamanhoLegivel(a.bytes)}</td>
+                    <td>{fmtData(a.criado_em)}</td>
+                    <td className="acoes">
+                      <span className="acoes-linha">
+                        <button
+                          className="btn btn-sutil btn-mini"
+                          title="baixar o arquivo"
+                          aria-label="baixar arquivo"
+                          onClick={() => void baixarAnexo(a)}
+                        >
+                          ⬇ baixar
+                        </button>
+                        <button
+                          className="btn btn-perigo btn-mini"
+                          title="apagar da pasta (não tem como desfazer)"
+                          aria-label="apagar arquivo"
+                          onClick={() => void apagarAnexo(a)}
+                        >
+                          apagar
+                        </button>
+                      </span>
+                    </td>
+                  </tr>
+                ))}
+            </tbody>
+          </table>
+        </>
+      )}
     </section>
   );
 }

@@ -448,8 +448,8 @@ export function Chat({
   /* v3.46 — arquivos grandes: sobem em blocos para o servidor e só o id viaja na mensagem */
   const [arquivos, setArquivos] = useState<AnexoEnviado[]>([]);
   const [subindo, setSubindo] = useState<{ nome: string; pct: number } | null>(null);
+  /** v3.48 (T049) — UM seletor só: imagem pequena vai inline (o modelo vê), o resto vai por upload */
   const arquivoRef = useRef<HTMLInputElement>(null);
-  const arquivoGrandeRef = useRef<HTMLInputElement>(null);
   const colado = useRef(true);
   /* v3.39.4: marca que o PRÓXIMO evento de scroll foi disparado por nós (irParaOFim).
      Sem isso, o próprio scroll programático era lido como "o usuário saiu do fim" e
@@ -1601,50 +1601,31 @@ export function Chat({
                 }
               }}
             />
-            {/* v3.41 — anexar imagem: mesma porta do Ctrl+V e do arrastar */}
+            {/* v3.48 (T049) — UM seletor para tudo: png/jpeg/webp até 4 MB vira imagem inline
+                (o modelo enxerga); qualquer outro arquivo, ou imagem maior, sobe por blocos. */}
             <input
               ref={arquivoRef}
               type="file"
-              accept="image/png,image/jpeg,image/webp"
               multiple
               className="hidden"
               onChange={(e) => {
                 const fs = Array.from(e.target.files ?? []);
                 e.target.value = "";
-                if (fs.length) void lerImagens(fs);
+                if (!fs.length) return;
+                const ehImagem = (f: File) =>
+                  /^image\/(png|jpeg|webp)$/.test(f.type) && f.size <= 4 * 1024 * 1024;
+                const imagens = fs.filter(ehImagem);
+                const resto = fs.filter((f) => !ehImagem(f));
+                if (imagens.length) void lerImagens(imagens);
+                if (resto.length) void subirArquivos(resto);
               }}
             />
-            <input
-              ref={arquivoGrandeRef}
-              type="file"
-              multiple
-              className="hidden"
-              onChange={(e) => {
-                const fs = Array.from(e.target.files ?? []);
-                e.target.value = "";
-                if (fs.length) void subirArquivos(fs);
-              }}
-            />
-            <button
-              id="chatAnexarArquivo"
-              className="chat-acao-icone"
-              title="anexar arquivo de qualquer tamanho (até 10 GB, retoma se cair)"
-              aria-label="anexar arquivo"
-              disabled={Boolean(subindo)}
-              onClick={() => arquivoGrandeRef.current?.click()}
-            >
-              <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true">
-                <path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z" />
-                <path d="M14 2v6h6" />
-                <path d="M12 18v-6" />
-                <path d="M9 15l3-3 3 3" />
-              </svg>
-            </button>
             <button
               id="chatAnexar"
               className="chat-acao-icone"
-              title="anexar imagem (ou cole com Ctrl+V, ou arraste)"
-              aria-label="anexar imagem"
+              title="anexar imagem ou arquivo (ou cole com Ctrl+V, ou arraste)"
+              aria-label="anexar imagem ou arquivo"
+              disabled={Boolean(subindo)}
               onClick={() => arquivoRef.current?.click()}
             >
               <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round" aria-hidden="true">

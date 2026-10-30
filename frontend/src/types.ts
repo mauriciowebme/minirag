@@ -65,6 +65,18 @@ export type Job = {
 };
 export type JobsResp = { resumo_por_status: Record<string, number>; jobs: Job[] };
 
+/** v3.48 (T050) — arquivo da pasta física do usuário (tabela anexos_maquina) */
+export type AnexoFicha = {
+  id: string;
+  nome: string;
+  mime: string;
+  bytes: number;
+  host: string;
+  completo: boolean;
+  criado_em: string;
+};
+export type AnexosResp = { total: number; anexos: AnexoFicha[] };
+
 export type DocCompleto = {
   tenant: string;
   memoria: string;
