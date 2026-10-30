@@ -72,12 +72,17 @@ export const TOOLS: Tool[] = [
   {
     name: "rodar_python",
     description:
-      "Roda um script Python no servidor e devolve o que ele imprimiu. Dentro do script, as ferramentas do nexos aparecem como funcoes do modulo nexos: `import nexos` e depois nexos.web_search(query=\"...\"), nexos.search(query=\"...\"), nexos.web_open(url=\"...\"), nexos.rodar_comando(...), etc (nexos.ferramentas() lista todas). Use quando o pedido exigir repetir, comparar, filtrar, juntar resultados ou salvar arquivo - em vez de chamar ferramenta por ferramenta. O script roda em pasta temporaria, com teto de 120s (parametro segundos) e sem acesso direto a internet (use as ferramentas). stdout e stderr voltam inteiros; cada chamada de ferramenta fica registrada na resposta.",
+      "Roda um script Python na pasta do usuario e devolve o que ele imprimiu. Dentro do script, as ferramentas do nexos aparecem como funcoes do modulo nexos: `import nexos` e depois nexos.web_search(query=\"...\"), nexos.search(query=\"...\"), nexos.web_open(url=\"...\"), nexos.rodar_comando(...), etc (nexos.ferramentas() lista todas). Use quando o pedido exigir repetir, comparar, filtrar, juntar resultados ou salvar arquivo - em vez de chamar ferramenta por ferramenta. Bibliotecas: declare em `dependencias` (ex: [\"openpyxl\", \"pandas==2.2.2\"]); o servidor instala so o que falta no ambiente do usuario e fica guardado para as proximas execucoes. O script roda em pasta propria do usuario, com teto de 120s (parametro segundos), sem acesso direto a internet (use as ferramentas); arquivos que ele criar ficam em scripts/saida. stdout e stderr voltam inteiros; cada chamada de ferramenta fica registrada na resposta.",
     inputSchema: {
       type: "object",
       properties: {
         codigo: { type: "string", description: "codigo Python a executar (obrigatorio)" },
         segundos: { type: "integer", description: "teto de tempo em segundos (5 a 600; padrao 120)" },
+        dependencias: {
+          type: "array",
+          items: { type: "string" },
+          description: "bibliotecas que o script precisa, ex: [\"openpyxl\", \"pandas==2.2.2\"]. Instaladas so quando faltam.",
+        },
       },
       required: ["codigo"],
     },
@@ -833,6 +838,7 @@ async function executarTool(
       const { rodarPython } = await import("./sandbox");
       return rodarPython(codigo, user, {
         segundos: args.segundos === undefined ? undefined : Number(args.segundos),
+        dependencias: args.dependencias,
       });
     }
     case "health":

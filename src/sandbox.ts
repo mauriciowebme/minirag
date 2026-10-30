@@ -1,7 +1,16 @@
 /**
- * T052 — Sandbox Python: o modelo escreve um script e o script enxerga as ferramentas do nexos.
+ * T052 — Sandbox Python por usuário.
  *
- * Como a ponte funciona (sem rede, sem token, sem HTTP):
+ * Cada usuário tem a SUA pasta, dentro do mesmo volume que guarda os arquivos dele:
+ *
+ *   /app/dados/usuarios/<tenant>/
+ *     venv/                  caixa de bibliotecas só dele (criada na primeira execução)
+ *     scripts/ferramentas/   scripts salvos (etapa 2 da tarefa)
+ *     scripts/saida/         arquivos que os scripts geram (fica entre execuções)
+ *     dependencias.txt       o que já foi instalado, com data — a lista de compras
+ *     pip-cache/             download guardado; não baixa duas vezes
+ *
+ * A ponte com as ferramentas do nexos (sem rede, sem token, sem HTTP):
  *
  *   pai (Node)                          filho (python)
  *   ----------                          --------------
@@ -14,17 +23,26 @@
  * `chamarToolInterna`, que é o MESMO caminho do POST /mcp e checa a permissão do usuário que
  * pediu — o script nunca ganha poder que o usuário não tem.
  *
- * Nada de rede direta: o script alcança a internet só pelas ferramentas (e portanto pelo
- * mesmo log e pelo mesmo controle). O isolamento de rede por namespace fica para a etapa 2.
+ * Bibliotecas: o script DECLARA o que precisa (`dependencias`) e o servidor instala só o que
+ * falta, no venv daquele usuário. `pip` é o único processo com rede liberada; o script roda
+ * com a rede fechada e alcança a internet só pelas ferramentas.
  */
-import { spawn } from "node:child_process";
-import { mkdtemp, rm, writeFile } from "node:fs/promises";
+import { execFile, spawn } from "node:child_process";
+import { constants as fsConstants } from "node:fs";
+import { access, appendFile, mkdir, mkdtemp, readFile, rm, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import path from "node:path";
 import readline from "node:readline";
+import { promisify } from "node:util";
 import type { Usuario } from "./config";
 import { log } from "./config";
 
+const rodar = promisify(execFile);
+
+/** Raiz das pastas por usuário (mesmo volume dos anexos). */
+const RAIZ = process.env.NEXOS_SCRIPTS_DIR ?? "/app/dados/usuarios";
+/** Teto de disco por usuário (bibliotecas + scripts + saídas). */
+const TETO_MB = Number(process.env.NEXOS_SANDBOX_TETO_MB ?? 2048);
 /** Teto de saída devolvida ao modelo (o resto é cortado e sinalizado). */
 const TETO_SAIDA = 120_000;
 /** Tempo máximo de uma execução. */
@@ -40,9 +58,18 @@ export type ResultadoPython = {
   truncado: boolean;
   ms: number;
   chamadas: ChamadaFerramenta[];
+  instalados: string[];
+  pasta: string;
+  uso_mb: number;
 };
 
 const escapar = (s: string): string => JSON.stringify(s);
+
+/** Nome de pasta seguro a partir do tenant. */
+function pastaDe(tenant: string): string {
+  const t = String(tenant ?? "").replace(/[^A-Za-z0-9_.-]/g, "_").slice(0, 64);
+  return t || "_";
+}
 
 /** Gera o `nexos.py` da execução: só as ferramentas que ESTE usuário pode chamar. */
 export function moduloPonte(nomes: string[], descricoes: Record<string, string>): string {
@@ -118,19 +145,125 @@ _sock.create_connection = _recusar
 _sock.getaddrinfo = _recusar
 `;
 
-/** Resolve o interpretador: python3, python ou py -3 (Windows). */
-function interpretador(): { cmd: string; args: string[] } {
-  const escolhido = process.env.NEXOS_PYTHON?.trim();
-  if (escolhido) return { cmd: escolhido, args: [] };
-  if (process.platform === "win32") return { cmd: "py", args: ["-3"] };
-  return { cmd: "python3", args: [] };
+/** Só nome de pacote com versão/extras opcional — nada de URL, `-r`, `--index-url`, `git+`. */
+const PACOTE_VALIDO =
+  /^[A-Za-z0-9][A-Za-z0-9._-]{0,80}(\s*\[[A-Za-z0-9_,.-]{1,80}\])?(\s*(==|>=|<=|~=|!=|>|<)\s*[A-Za-z0-9*+._-]{1,40})?$/;
+
+/** Valida a lista declarada pelo modelo; recusa qualquer coisa que não seja nome/versão. */
+export function pacotesValidos(lista: unknown): string[] {
+  if (lista === undefined || lista === null) return [];
+  const bruto = Array.isArray(lista) ? lista : [lista];
+  const limpos: string[] = [];
+  for (const item of bruto) {
+    const nome = String(item ?? "").trim();
+    if (!nome) continue;
+    if (!PACOTE_VALIDO.test(nome)) {
+      throw new Error(`dependencia invalida: "${nome}" (use nome ou nome==versao; sem URL, sem opcoes)`);
+    }
+    limpos.push(nome.replace(/\s+/g, ""));
+  }
+  return limpos;
+}
+
+async function existe(caminho: string): Promise<boolean> {
+  try {
+    await access(caminho, fsConstants.F_OK);
+    return true;
+  } catch {
+    return false;
+  }
+}
+
+function pythonDoVenv(venv: string): string {
+  return process.platform === "win32" ? path.join(venv, "Scripts", "python.exe") : path.join(venv, "bin", "python");
+}
+
+function pipDoVenv(venv: string): string {
+  return process.platform === "win32" ? path.join(venv, "Scripts", "pip.exe") : path.join(venv, "bin", "pip");
+}
+
+/** Tamanho da pasta do usuário em MB (0 quando ainda não existe). */
+async function usoMb(pasta: string): Promise<number> {
+  try {
+    const { stdout } = await rodar("du", ["-sm", pasta], { timeout: 20000 });
+    return Number(stdout.trim().split(/\s+/)[0] ?? 0) || 0;
+  } catch {
+    return 0;
+  }
+}
+
+/** Garante o venv do usuário (cria na primeira execução). */
+async function garantirVenv(base: string): Promise<string> {
+  const venv = path.join(base, "venv");
+  const py = pythonDoVenv(venv);
+  if (await existe(py)) return venv;
+  await mkdir(base, { recursive: true });
+  log(`sandbox: criando venv do usuário em ${venv}`);
+  await rodar(process.env.NEXOS_PYTHON_SISTEMA ?? "python3", ["-m", "venv", venv], {
+    timeout: 120000,
+    env: { PATH: process.env.PATH ?? "/usr/local/bin:/usr/bin:/bin", HOME: base },
+  });
+  if (!(await existe(py))) throw new Error("nao consegui criar o venv do usuario");
+  return venv;
+}
+
+/** Instala no venv o que ainda falta da lista declarada. Devolve o que foi instalado agora. */
+async function garantirDependencias(base: string, venv: string, pedidos: string[]): Promise<string[]> {
+  if (!pedidos.length) return [];
+  const lista = path.join(base, "dependencias.txt");
+  const registro = (await existe(lista)) ? await readFile(lista, "utf8").catch(() => "") : "";
+  const jaTem = new Set(
+    registro
+      .split("\n")
+      .map((l) => l.trim().split(/\s+/)[1] ?? "")
+      .filter(Boolean)
+      .map((p) => p.split(/[=<>!~]/)[0].toLowerCase()),
+  );
+  const faltam = pedidos.filter((p) => !jaTem.has(p.split(/[=<>!~ ]/)[0].toLowerCase()));
+  if (!faltam.length) return [];
+
+  const antes = await usoMb(base);
+  if (antes >= TETO_MB) {
+    throw new Error(`a pasta do usuario ja usa ${antes} MB (teto ${TETO_MB} MB); apague algo antes de instalar`);
+  }
+
+  log(`sandbox: instalando no venv de ${path.basename(base)}: ${faltam.join(", ")}`);
+  try {
+    await rodar(pipDoVenv(venv), ["install", "--no-input", "--no-warn-script-location", ...faltam], {
+      timeout: 300000,
+      maxBuffer: 4 * 1024 * 1024,
+      env: {
+        PATH: process.env.PATH ?? "/usr/local/bin:/usr/bin:/bin",
+        HOME: base,
+        PIP_CACHE_DIR: path.join(base, "pip-cache"),
+        PIP_DISABLE_PIP_VERSION_CHECK: "1",
+        PYTHONIOENCODING: "utf-8",
+      },
+    });
+  } catch (e) {
+    const detalhe = String((e as { stderr?: string; message?: string }).stderr ?? (e as Error).message ?? e);
+    throw new Error(`pip falhou: ${detalhe.slice(-1200)}`);
+  }
+
+  const quando = new Date().toISOString().slice(0, 10);
+  await appendFile(lista, faltam.map((p) => `${quando} ${p}\n`).join(""), "utf8");
+
+  const depois = await usoMb(base);
+  if (depois > TETO_MB) {
+    throw new Error(`instalacao passou do teto: ${depois} MB (limite ${TETO_MB} MB)`);
+  }
+  return faltam;
 }
 
 /**
- * Roda um script Python e devolve o que ele imprimiu.
+ * Roda um script Python na pasta do usuário, com as ferramentas do nexos como funções.
  * `user` é quem pediu: toda chamada de ferramenta passa por `chamarToolInterna` com ele.
  */
-export async function rodarPython(codigo: string, user: Usuario, opts: { segundos?: number } = {}): Promise<ResultadoPython> {
+export async function rodarPython(
+  codigo: string,
+  user: Usuario,
+  opts: { segundos?: number; dependencias?: unknown } = {},
+): Promise<ResultadoPython> {
   const teto = Math.min(Math.max(opts.segundos ?? TETO_SEG, 5), 600);
   const inicio = Date.now();
 
@@ -144,19 +277,25 @@ export async function rodarPython(codigo: string, user: Usuario, opts: { segundo
   const descricoes: Record<string, string> = {};
   for (const t of permitidas) descricoes[t.name] = t.description;
 
+  const base = path.join(RAIZ, pastaDe(user.tenant));
+  const pastaSaida = path.join(base, "scripts", "saida");
+  await mkdir(pastaSaida, { recursive: true });
+
+  const venv = await garantirVenv(base);
+  const instalados = await garantirDependencias(base, venv, pacotesValidos(opts.dependencias));
+
   const pasta = await mkdtemp(path.join(tmpdir(), "nexos-py-"));
   const script = path.join(pasta, "script.py");
   await writeFile(path.join(pasta, "nexos.py"), moduloPonte(permitidas.map((t) => t.name), descricoes), "utf8");
   await writeFile(path.join(pasta, "sitecustomize.py"), BLOQUEIO_REDE, "utf8");
   await writeFile(script, codigo, "utf8");
 
-  const { cmd, args } = interpretador();
-  const filho = spawn(cmd, [...args, script], {
-    cwd: pasta,
+  const filho = spawn(pythonDoVenv(venv), [script], {
+    cwd: pastaSaida,
     env: {
       PATH: process.env.PATH ?? "/usr/local/bin:/usr/bin:/bin",
       PYTHONPATH: pasta,
-      HOME: pasta,
+      HOME: base,
       TMPDIR: pasta,
       LANG: "C.UTF-8",
       PYTHONIOENCODING: "utf-8",
@@ -168,22 +307,21 @@ export async function rodarPython(codigo: string, user: Usuario, opts: { segundo
   });
 
   const chamadas: ChamadaFerramenta[] = [];
-  let saida = "";
+  let texto = "";
   let erro = "";
   let truncado = false;
 
   const juntar = (destino: "saida" | "erro", pedaco: string) => {
-    const atual = destino === "saida" ? saida : erro;
-    const total = saida.length + erro.length;
+    const total = texto.length + erro.length;
     if (total >= TETO_SAIDA) {
       truncado = true;
       return;
     }
     const sobra = TETO_SAIDA - total;
-    const texto = pedaco.length > sobra ? pedaco.slice(0, sobra) : pedaco;
-    if (texto.length < pedaco.length) truncado = true;
-    if (destino === "saida") saida = atual + texto;
-    else erro = atual + texto;
+    const parte = pedaco.length > sobra ? pedaco.slice(0, sobra) : pedaco;
+    if (parte.length < pedaco.length) truncado = true;
+    if (destino === "saida") texto += parte;
+    else erro += parte;
   };
 
   filho.stdout?.on("data", (d: Buffer) => juntar("saida", d.toString("utf8")));
@@ -232,10 +370,13 @@ export async function rodarPython(codigo: string, user: Usuario, opts: { segundo
   return {
     ok: codigoSaida === 0,
     codigo: codigoSaida,
-    saida: saida.trimEnd(),
+    saida: texto.trimEnd(),
     erro: erro.trimEnd(),
     truncado,
     ms: Date.now() - inicio,
     chamadas,
+    instalados,
+    pasta: `usuarios/${pastaDe(user.tenant)}/scripts/saida`,
+    uso_mb: await usoMb(base),
   };
 }
