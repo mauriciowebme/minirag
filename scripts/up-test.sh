@@ -26,7 +26,7 @@ echo "== abaixo o ambiente anterior ($PROJ) =="
 $COMPOSE -p "$PROJ" -f docker-compose.test.yml down -v --remove-orphans >/dev/null 2>&1 || true
 
 echo "== build da imagem com o código atual do repo =="
-$COMPOSE -p "$PROJ" -f docker-compose.test.yml build nexos-api
+$COMPOSE -p "$PROJ" -f docker-compose.test.yml build nexos
 
 echo "== subida (volume novo, banco zerado) =="
 USUARIO_KEY="$(gerar_key)"   # nome OBRIGATORIAMENTE "teste": a suíte.assert nos blocos v1.8/MCP/v2.7
@@ -37,7 +37,7 @@ NEXOS_ADMIN="op:$OPERADOR_KEY" \
 NEXOS_TEST_BIND="$BIND" NEXOS_TEST_PORT="$PORTA" \
 $COMPOSE -p "$PROJ" -f docker-compose.test.yml up -d
 
-API="${PROJ}-nexos-api-1"
+API="${PROJ}-nexos-1"
 DB="${PROJ}-nexos-db-1"
 
 # no Hermes a suíte roda DENTRO de um container: BASE = IP da ponte da rede do compose.
@@ -55,7 +55,7 @@ for _ in $(seq 1 40); do
   sleep 3
   if curl -sf --max-time 5 "$BASE/health" >/dev/null; then ok=1; break; fi
 done
-[ -n "$ok" ] || { echo "FALHOU: api não respondeu em $BASE/health"; $COMPOSE -p "$PROJ" -f docker-compose.test.yml logs --tail 40 nexos-api; exit 1; }
+[ -n "$ok" ] || { echo "FALHOU: api não respondeu em $BASE/health"; $COMPOSE -p "$PROJ" -f docker-compose.test.yml logs --tail 40 nexos; exit 1; }
 curl -s "$BASE/health" | head -c 200; echo
 
 mkdir -p "$(dirname "$ENV_FILE")"

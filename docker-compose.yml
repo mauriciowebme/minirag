@@ -1,5 +1,5 @@
 # RAG service v2 — Postgres(pgvector) + Node/TypeScript (embedder Python dentro)
-# 2 containers: nexos-db (banco) + nexos-api (serviço: Node + Python filho)
+# 2 containers: nexos-db (banco) + nexos (serviço: Node + Python filho)
 #
 # Acesso: domínio público via Traefik do Dokploy (nexos.techupsistemas.com,
 # HTTPS) + ports locais 127.0.0.1 e tailnet no api (ver seção ports:).
@@ -36,7 +36,7 @@ services:
       retries: 10
       start_period: 25s
 
-  nexos-api:
+  nexos:
     build: .
     # always (e nao unless-stopped): se o boot derrubar a API, o Docker tenta
     # de novo mesmo depois de restart do daemon — nunca fica "parado esperando

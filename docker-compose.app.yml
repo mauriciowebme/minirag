@@ -8,7 +8,7 @@
 # Traefik: o domínio é configurado na aba Domains do serviço (o container só
 # expõe 8000). Os ports locais mantêm o caminho do IA_GO (127.0.0.1 e tailnet).
 services:
-  nexos-api:
+  nexos:
     build: .
     restart: always
     environment:

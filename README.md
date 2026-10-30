@@ -26,7 +26,7 @@ parecidos com a pergunta, com uma nota de 0 a 1.
 
 A 3.47.1 trocou o que se vê. Esta troca o que fica por baixo:
 
-- **Containers**: `nexos-api` e `nexos-db` (antes `minirag-*`). Rede e volumes acompanham.
+- **Containers**: `nexos` e `nexos-db` (antes `minirag-*`). Rede e volumes acompanham.
 - **Volumes**: `nexos_data` (Postgres) e `nexos_arquivos` (anexos das máquinas), com os
   dados copiados do volume antigo — nada de banco vazio.
 - **Banco e papel**: database e usuário `nexos`, com todas as 23 tabelas e as mesmas linhas.

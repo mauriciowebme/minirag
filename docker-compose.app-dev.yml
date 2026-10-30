@@ -8,7 +8,7 @@
 # Uso: docker compose -f docker-compose.app-dev.yml up
 # (o banco é o de docker-compose.db.yml — não existe banco de dev)
 services:
-  nexos-api-dev:
+  nexos-dev:
     build: .
     restart: unless-stopped
     command:
