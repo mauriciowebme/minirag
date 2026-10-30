@@ -71,15 +71,25 @@ curl -X POST https://nexos.techupsistemas.com/mcp \
 
 ## 3. As ferramentas — e o que cada conta recebe
 
-Medido em 28/10/2026: **49 ferramentas** no `tools/list`.
+Medido em 30/10/2026 (v3.50.0), conta **operador** com o controle de máquinas ligado:
+**57 ferramentas** no `tools/list`. Conta comum vê **51** (as 6 de operador saem da lista).
 
-| Grupo | Quantas | Observação |
+| Grupo | Quantas | Ferramentas |
 |---|---|---|
-| Documentos e gavetas | 12 | `search`, `ingest`, `ingest_status`, `list_docs`, `delete_doc`, `upload_file`, `get_file`, `edit_doc`, `rename_doc`, `archive_doc`, `list_gavetas`, `create_gaveta`, `delete_gaveta` |
-| Operação e assistente | 7 | `health`, `list_jobs`, `chat`, `mostrar_tela`, `web_search`, `web_open`, `config_provider` |
+| Operação e assistente | 11 | `rodar_python`, `health`, `analisar_imagem`, `list_anexos`, `mostrar_tela`, `web_search`, `web_open`, `chat`, `config_provider`, `list_jobs`, `maquinas_online` |
+| Documentos | 10 | `search`, `ingest`, `ingest_status`, `list_docs`, `delete_doc`, `upload_file`, `get_file`, `edit_doc`, `rename_doc`, `archive_doc` |
+| Gavetas | 3 | `list_gavetas`, `create_gaveta`, `delete_gaveta` |
 | Usuários e MCP | 6 | `listar_usuarios`, `criar_usuario`, `apagar_usuario`, `esquecimento`, `listar_mcp`, `gerir_mcp` |
-| Máquinas (túnel) | 20 | só existem com o **controle de máquinas** ligado pelo operador |
 | Pareamento | 1 | `gerar_pareamento` |
+| Máquinas (túnel) | 26 | só existem com o **controle de máquinas** ligado pelo operador |
+
+**`rodar_python` (v3.50, T052)** — o modelo escreve um script e roda no servidor. Dentro dele,
+`import nexos` dá as ferramentas como funções (`nexos.web_search(query="...")`,
+`nexos.search(...)`, `nexos.rodar_comando(...)`); `nexos.ferramentas()` lista as disponíveis.
+Cada chamada passa pela mesma checagem de permissão de quem pediu, e volta na resposta com
+nome, ok e tempo. Teto de 120 s (parâmetro `segundos`), saída cortada em 120 KB,
+pasta temporária apagada no fim, sem rede direta (a internet só pelas ferramentas).
+Nesta versão é **só de operador**.
 
 **O que o operador controla (e vale para todo mundo):**
 

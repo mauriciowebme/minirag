@@ -9,7 +9,7 @@ Este arquivo tem **só o que está em aberto** — as tarefas entregues foram re
 
 | T### | Nome | Módulo | Prioridade | Status | Link |
 |---|---|---|---|---|---|
-| T052 | Sandbox Python com as ferramentas do nexos + biblioteca + agenda | sandbox + ferramentas | 🟠 Alta | 📋 Planejada | [#t052](#t052) |
+| T052 | Sandbox Python com as ferramentas do nexos + biblioteca + agenda | sandbox + ferramentas | 🟠 Alta | 🟢 Etapa 1 na v3.50.0 (falta biblioteca + agenda) | [#t052](#t052) |
 
 ---
 
@@ -19,7 +19,7 @@ Este arquivo tem **só o que está em aberto** — as tarefas entregues foram re
 |---|---|
 | **Módulo** | sandbox (novo) + ferramentas + agenda |
 | **Prioridade** | 🟠 Alta — é o que separa "assistente que conversa" de "assistente que constrói" |
-| **Status** | 📋 Planejada (pedido do dono em 30/10) |
+| **Status** | 🟢 **Etapa 1 entregue na v3.50.0** (30/10): `rodar_python` + ponte `import nexos`, só operador. Faltam a biblioteca (script vira ferramenta nomeada) e a agenda. |
 | **Pedido** | "a ideia seria ter tipo um sandbox pra poder o usuário pedir 'faz tal coisa' que você não consiga, aí você poderia usar o Python que conseguiria usar as ferramentas — por exemplo, faz uma busca programada na web, aí vai lá e cria um script e roda isso" |
 | **Problema que resolve** | Hoje o modelo só tem `rodar_comando` (shell cru) e uma ferramenta por vez. Quando o pedido exige repetir, comparar, testar condição ou juntar resultados, ele improvisa PowerShell/bash a cada resposta, gasta contexto e erra. Foi exatamente o que aconteceu em 30/10: para contornar o upload quebrado, o modelo tentou base64, HttpListener e certutil em vez de resolver. |
 | **Desenho** | Quatro peças. (1) **Executor**: processo separado por execução, pasta própria, teto de tempo, memória e saída; stdlib por padrão. (2) **Ponte**: dentro do sandbox existe `import nexos`, com as ferramentas do servidor e da máquina como funções (`web_search`, `web_open`, `search`, `rodar_comando`, `baixar_arquivo`, `ler_arquivo`...). Cada função checa a permissão **do usuário que pediu** — o script nunca herda mais poder que quem pediu. (3) **Biblioteca**: script aprovado vira ferramenta nomeada (descrição + parâmetros) e entra no `tools/list`; roda de novo sem gastar modelo. (4) **Agenda**: rodar sozinho (de hora em hora, todo dia) e entregar o resultado no chat. |
@@ -27,6 +27,18 @@ Este arquivo tem **só o que está em aberto** — as tarefas entregues foram re
 | **Por que Python** | Já existe dos dois lados: servidor 3.11.18 (roda embedder e OCR) e a máquina do trabalho com 3.12.10. Se a máquina não tiver, usar o *embeddable* (zip ~11 MB) dentro da pasta de trabalho, sem admin e sem instalar no sistema. |
 | **Ganho colateral** | As ferramentas de arquivo que quebraram em 30/10 (upload em PowerShell) podem passar a usar o caminho Python, que não depende do .NET da máquina. |
 | **Prova exigida na execução** | Um pedido real que hoje falha ("busca programada na web sobre X, junta e salva"): o modelo escreve o script, roda no sandbox, o arquivo aparece e o resumo volta no chat. Depois o mesmo script vira ferramenta e roda por agenda, sem modelo. Suíte completa verde e o sandbox recusando script de usuário sem permissão. |
+
+## Etapas da T052
+
+| Etapa | O que entrega | Estado |
+|---|---|---|
+| 1. Executor + ponte | `rodar_python` no `tools/list`; `import nexos` com as ferramentas permitidas; teto de 120 s; saída cortada em 120 KB; pasta temporária apagada; rede direta bloqueada no Python | ✅ v3.50.0 |
+| 2. Biblioteca | script aprovado vira ferramenta nomeada (descrição + parâmetros) e entra no `tools/list` | 📋 falta |
+| 3. Agenda | rodar sozinho (de hora em hora / todo dia) e entregar no chat | 📋 falta |
+
+**Limite conhecido da etapa 1:** o bloqueio de rede é no Python (`socket` substituído por
+`sitecustomize.py`); um script que chame `subprocess` com `curl` ainda alcança a rede. O limite
+de verdade continua sendo o container — o confinamento por processo fica na etapa 2.
 
 ## Ideias ainda não numeradas
 
