@@ -665,6 +665,28 @@
 | **Prova** | Bloco `v3.44` da suíte: 300 KB aleatórios por `baixar_arquivo`, sha256 do `GET /anexos/:id` igual ao da máquina, 401 sem chave, cópia máquina→máquina com sha256 idêntico, e `capturar_tela` sem X devolvendo erro claro. |
 | **Limite honesto** | GB continua na LAN entre as máquinas; túnel de WebSocket não é canal para isso. |
 
+### T048 — Arquivo grande nos DOIS sentidos: navegador → servidor → máquina
+| Campo | Conteúdo |
+|---|---|
+| **Módulo** | anexos / app / provider / tarefa / mcp / frontend (Chat + api) |
+| **Prioridade** | 🟠 Alta — pedido do dono: "falta então enviar e receber arquivos pelo chat" |
+| **Status** | ✅ Entregue na v3.46.0 (30/10) — 11 checks com o cliente real |
+| **Antes** | Receber já funcionava (v3.45); enviar não existia: o compositor só aceitava imagem em base64 e não havia caminho do navegador para a máquina |
+| **Como ficou** | Botão de anexar arquivo + upload em blocos de 8 MB com retomada (`POST /anexos/enviar`, `GET /anexos/enviar/status`); id preso ao arquivo no navegador; `enviar_para_maquina` leva o anexo à máquina por stream com `Range`, `curl -C -` e `sha256` conferido dos dois lados; a mensagem leva só o id (o conteúdo não entra no prompt); bolha do usuário mostra o arquivo com botão de baixar |
+| **Prova** | Bloco `v3.46`: 20 MB em três blocos, 409 fora de ordem, status completo, arquivo no volume, sha256 do destino igual ao do navegador |
+| **Limite honesto** | 10 GB por arquivo, 5 arquivos por mensagem; chave de saída vale 30 min e 5 acessos |
+
+### T047 — Arquivo grande (10 GB): volume por usuário, envio em blocos e retomada
+| Campo | Conteúdo |
+|---|---|
+| **Módulo** | anexos / maquinas / app / compose |
+| **Prioridade** | 🟠 Alta — pedido do dono: "isso é um agente remoto", arquivo de 10 GB com streaming |
+| **Status** | ✅ Entregue na v3.45.0 (29/10) — 11 checks com o cliente real (70 MB, três blocos) |
+| **Antes** | Arquivo em `bytea` no Postgres (teto 32 MB), envio de uma vez (`--data-binary @arquivo`), download inteiro em memória e cópia máquina→máquina lendo o Buffer todo — 10 GB era impossível por três motivos independentes |
+| **Como ficou** | Volume `minirag_arquivos:/app/dados` no compose; pasta `/app/dados/anexos/<usuario>/<id>/<nome>`; ficha em `anexos_maquina` (a tabela `arquivos` JÁ EXISTIA desde a v1 com o original dos documentos — foi o erro que derrubou o boot no primeiro teste). Envio em blocos de 32 MB com `offset` e chave HMAC assinada; `GET /maquina/r/status` diz de onde continuar; id determinístico faz o reenvio retomar; download por stream com `Range` (206); `/maquina/u` também virou stream |
+| **Prova** | Bloco `v3.45`: 70 MB, sha256 igual, arquivo no volume, `completo=true` no banco, 206 com pedaço idêntico, reenvio instantâneo, bloco sem chave 401 |
+| **Limite honesto** | 10 GB por arquivo e 7 dias de retenção (ambos por env). Espaço: 127 GB livres no disco da VPS |
+
 ## Lotes recomendados (executados — saíram na v3.18)
 
 - **Lote 1 — celular e erros bobos (quase tudo barato)**: T005, T001, T006, T007, T009, T011, T012, T013, T014, T020

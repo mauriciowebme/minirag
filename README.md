@@ -22,6 +22,67 @@ parecidos com a pergunta, com uma nota de 0 a 1.
 
 ---
 ---
+## v3.46.0 (30/10) — arquivo grande nos dois sentidos: do navegador para a máquina
+
+O que você vê: o compositor do chat ganhou o botão de **anexar arquivo** (ao lado do de
+imagem). Você escolhe um arquivo de até 10 GB, uma barra mostra o envio e, se a conexão
+cair, ele **continua de onde parou** em vez de recomeçar. O arquivo aparece na sua
+mensagem e o assistente pode levá-lo para qualquer máquina com `enviar_para_maquina`
+— que baixa por stream, retoma e confere o `sha256` no destino.
+
+Por que: até a 3.45 o ciclo era só de ida (máquina → conversa). O caminho do navegador
+para a máquina não existia: o compositor aceitava apenas imagem colada em base64, e o
+upload de documentos lia o corpo inteiro na memória — 10 GB derrubaria o servidor.
+
+Como funciona:
+
+- **Upload do navegador** (`POST /anexos/enviar`): blocos de 8 MB com `offset`, autenticado
+  pela chave do usuário (o tenant vem da sessão, nunca da query). O id do envio fica preso
+  ao arquivo (nome + tamanho + data) no navegador, então reenviar o mesmo arquivo retoma.
+  `GET /anexos/enviar/status` diz de onde continuar.
+- **Envio para a máquina** (`enviar_para_maquina`): o servidor abre o anexo no disco, entrega
+  por `GET /maquina/u` (agora com `Range`) e a máquina baixa com `curl -C -`. No fim, compara
+  tamanho e `sha256` dos dois lados; divergência é erro, não sucesso silencioso.
+- **A mensagem leva só o id**: o conteúdo não entra no prompt. O modelo recebe uma nota com
+  nome, tamanho e id do arquivo, e é esse id que a ferramenta usa.
+- **Histórico**: o arquivo anexado pela pessoa aparece na bolha dela, com nome, tamanho e
+  botão de baixar (o `GET /anexos/:id` continua autenticado por header).
+
+Como é provado: bloco `v3.46` da suíte, com o cliente real — 20 MB enviados em três blocos
+de 8 MB, bloco fora de ordem recusado com 409, status dizendo 20 MB/completo, arquivo no
+volume em pasta do usuário, `enviar_para_maquina` levando o anexo para a máquina e o
+`sha256` do destino igual ao do navegador (11 checks).
+
+Limites: 10 GB por arquivo; 5 arquivos por mensagem; a chave do canal de saída vale 30 min
+e até 5 acessos (é o que permite o `curl --retry` retomar).
+
+## v3.45.0 (29/10) — arquivo grande: 10 GB em blocos, com retomada
+
+O que você vê: a máquina manda arquivo de qualquer tamanho (até 10 GB) para a conversa,
+mesmo que a internet caia no meio — ele **continua de onde parou** em vez de recomeçar.
+Vídeo e áudio tocam direto no chat, sem baixar antes, e o download retoma de qualquer ponto.
+
+Por que: a 3.44 guardava o arquivo **dentro do Postgres** (coluna `bytea`, teto de 32 MB) e
+enviava de uma vez. Com 10 GB isso seria banco inchado, backup gigante e, numa queda,
+começar tudo de novo.
+
+Como funciona: o arquivo saiu do banco e foi para o **volume** do container, em pasta por
+usuário — `/app/dados/anexos/<usuario>/<id>/<nome>`. O banco guarda só a ficha (`anexos_maquina`:
+nome, tipo, tamanho, completo). A máquina envia em **blocos de 32 MB** com `offset`; se cair,
+ela pergunta `GET /maquina/r/status` e continua do byte atual. O envio do mesmo arquivo usa um
+id determinístico (usuário + máquina + caminho + tamanho + data), então repetir o comando
+**retoma** em vez de reenviar. O download sai por stream com `Range` (206), e a cópia
+máquina→máquina também passou a mandar o arquivo do disco, nunca da memória. O volume está
+declarado no `docker-compose.yml` do projeto (`minirag_arquivos:/app/dados`).
+
+Como é provado: bloco `v3.45` da suíte, com o **cliente real** — 70 MB (três blocos) enviados,
+sha256 igual ao da máquina, arquivo confirmado no volume em pasta do usuário, ficha no banco
+com `completo=true`, `Range` devolvendo 206 com o pedaço byte-a-byte igual, reenvio do mesmo
+arquivo instantâneo (retomada) e bloco sem chave assinada recusado com 401 (11 checks).
+
+Limites: 10 GB por arquivo (`MINIRAG_MAX_ARQUIVO_MB`), faxina em 7 dias (`MINIRAG_ARQUIVOS_DIAS`),
+e o tempo depende do upload da sua internet (10 GB a 100 Mbps ≈ 14 min).
+
 ## v3.44.0 (29/10) — a máquina manda arquivo para a conversa (print, imagem, log)
 
 O que você vê: o agente tira **print da tela do PC** e a imagem aparece na conversa, com
