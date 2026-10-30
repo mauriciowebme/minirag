@@ -40,7 +40,7 @@ export type EventoTransporte =
 
 /** quem sabe falar com o servidor (o Chat injeta; o teste injeta um falso) */
 export type Transportar = (
-  pedido: { pergunta: string; memoria: string; tenant?: string; provedor?: string; modelo?: string; imagens?: AnexoImagem[] },
+  pedido: { pergunta: string; memoria: string; tenant?: string; provedor?: string; modelo?: string; imagens?: AnexoImagem[]; anexos?: AnexoEnviado[] },
   onEvent: (e: EventoTransporte) => void,
 ) => Promise<Record<string, unknown>>;
 
@@ -90,6 +90,8 @@ export type Linha = {
   compacto?: string;
   /** v3.41: imagens que a pessoa colou neste turno (só na tela: o servidor grava texto) */
   imagens?: AnexoImagem[];
+  /** v3.46: arquivos grandes anexados nesta mensagem (mostrados na bolha) */
+  arquivos?: AnexoEnviado[];
   /** v3.18: hora ISO da mensagem (T012 — o servidor já mandava `quando`, a tela ignorava) */
   when?: string;
   /** v3.18 (T004): de quais documentos a resposta veio */
@@ -114,9 +116,12 @@ export type Linha = {
 /** v3.41: imagem colada no campo (Ctrl+V) — vai no turno como parte de visão do modelo */
 export type AnexoImagem = { mime: string; base64: string; nome?: string };
 
+/** v3.46: arquivo grande que o navegador subiu em blocos — fica no servidor, só o id viaja */
+export type AnexoEnviado = { id: string; nome: string; bytes: number };
+
 export type Estado = {
   msgs: Linha[];
-  fila: { id: string; texto: string; imagens?: AnexoImagem[] }[];
+  fila: { id: string; texto: string; imagens?: AnexoImagem[]; arquivos?: AnexoEnviado[] }[];
   rodando: boolean;
   /** v3.18 (T001): id da tarefa no servidor do turno em curso ("" = nada para parar) */
   tarefaId: string;
@@ -256,14 +261,17 @@ export function enviar(
   chave: string, texto: string, memoria: string, tenant: string | undefined, transportar: Transportar,
   /** v3.41: imagens coladas — só neste turno; não entram no histórico gravado */
   imagens?: AnexoImagem[],
+  /** v3.46: arquivos grandes já no servidor (id) — a bolha mostra nome e tamanho */
+  arquivos?: AnexoEnviado[],
 ): string {
   const c = pega(chave);
   const id = proximoId();
   c.msgs.push({
     id, papel: "user", texto, ferramentas: [], naFila: true, when: new Date().toISOString(),
     ...(imagens?.length ? { imagens } : {}),
+    ...(arquivos?.length ? { arquivos } : {}),
   });
-  c.fila.push({ id, texto, ...(imagens?.length ? { imagens } : {}) });
+  c.fila.push({ id, texto, ...(imagens?.length ? { imagens } : {}), ...(arquivos?.length ? { arquivos } : {}) });
   notifica(chave);
   void bombeia(chave, memoria, tenant, transportar);
   return id;
@@ -535,7 +543,8 @@ async function bombeia(chave: string, memoria: string, tenant: string | undefine
   let erro = "";
   try {
     const saida = await transportar(
-      { pergunta: item.texto, memoria, ...(tenant ? { tenant } : {}), ...(item.imagens?.length ? { imagens: item.imagens } : {}), ...getSelecao(chave) },
+      { pergunta: item.texto, memoria, ...(tenant ? { tenant } : {}), ...(item.imagens?.length ? { imagens: item.imagens } : {}),
+        ...(item.arquivos?.length ? { anexos: item.arquivos } : {}), ...getSelecao(chave) },
       (e) => {
       const bolha = c.msgs.find((m) => m.id === vivoId);
       if (!bolha) return;

@@ -1,5 +1,5 @@
 import { useCallback, useEffect, useRef, useState } from "react";
-import { ApiErro, blobUrl, del, get, getStream, post, postStream, qs } from "../services/api";
+import { ApiErro, blobUrl, del, get, getStream, post, postStream, qs, subirAnexo } from "../services/api";
 import { useToast } from "./Toast";
 import { mdParaHtml } from "../lib/md";
 import { TelaGerada } from "./TelaGerada";
@@ -25,7 +25,7 @@ import {
   type FerramentaLinha,
   type Linha,
   type SegmentoRastro,
-  type Transportar, tarefaViva, falarNoTurno } from "../lib/conversa";
+  type Transportar, tarefaViva, falarNoTurno, type AnexoEnviado } from "../lib/conversa";
 import type { ChatHistorico, Compactacao, ProviderResp, Provedor } from "../types";
 
 /** linha de status da tarefa viva (GET /chat/tarefas e GET /chat/tarefa/:id) */
@@ -445,7 +445,11 @@ export function Chat({
   /* v3.41 — imagens coladas (Ctrl+V) no campo: vão junto com a pergunta e o modelo VÊ a imagem.
      Sem texto, a pergunta vira "Analise a imagem que colei." para o turno nunca ir vazio. */
   const [anexos, setAnexos] = useState<AnexoImagem[]>([]);
+  /* v3.46 — arquivos grandes: sobem em blocos para o servidor e só o id viaja na mensagem */
+  const [arquivos, setArquivos] = useState<AnexoEnviado[]>([]);
+  const [subindo, setSubindo] = useState<{ nome: string; pct: number } | null>(null);
   const arquivoRef = useRef<HTMLInputElement>(null);
+  const arquivoGrandeRef = useRef<HTMLInputElement>(null);
   const colado = useRef(true);
   /* v3.39.4: marca que o PRÓXIMO evento de scroll foi disparado por nós (irParaOFim).
      Sem isso, o próprio scroll programático era lido como "o usuário saiu do fim" e
@@ -861,10 +865,12 @@ export function Chat({
   function enviar() {
     const texto = pergunta.trim();
     const imgs = anexos;
-    if (!texto && imgs.length === 0) return;
-    const pedido = texto || "Analise a imagem que colei.";
+    const arqs = arquivos;
+    if (!texto && imgs.length === 0 && arqs.length === 0) return;
+    const pedido = texto || (imgs.length ? "Analise a imagem que colei." : "Segue o arquivo anexado.");
     setPergunta("");
     setAnexos([]);
+    setArquivos([]);
     rascunhos.current.delete(chave); // v3.18 (T014): rascunho daquela gaveta foi usado
     if (campoRef.current) {
       campoRef.current.style.height = "auto";
@@ -882,7 +888,26 @@ export function Chat({
         });
       return;
     }
-    enviarNaConversa(chave, pedido, memoria, tenantParam, transportar, imgs.length ? imgs : undefined);
+    enviarNaConversa(chave, pedido, memoria, tenantParam, transportar, imgs.length ? imgs : undefined, arqs.length ? arqs : undefined);
+  }
+
+  /** v3.46 — arquivo de qualquer tamanho: sobe em blocos (com retomada) e o chat
+   *  manda só o id; o assistente usa enviar_para_maquina para levar a uma máquina. */
+  async function subirArquivos(files: File[]) {
+    for (const f of files.slice(0, 5)) {
+      setSubindo({ nome: f.name, pct: 0 });
+      try {
+        const a = await subirAnexo(f, (feito, total) =>
+          setSubindo({ nome: f.name, pct: total ? feito / total : 0 }),
+        );
+        setArquivos((atual) => [...atual, a]);
+        toast(`${a.nome} pronto (${(a.bytes / 1048576).toFixed(1)} MB)`, "sucesso", 3000);
+      } catch (e) {
+        toast(`subir ${f.name} falhou: ${(e as Error).message}`, "erro", 7000);
+      } finally {
+        setSubindo(null);
+      }
+    }
   }
 
   /** v3.41 — imagem entra por COLAR, ARRASTAR ou pelo botão de clipe: um caminho só. */
@@ -1495,12 +1520,41 @@ export function Chat({
                 if (Array.from(e.dataTransfer?.types ?? []).includes("Files")) e.preventDefault();
               }}
               onDrop={(e) => {
-                const fs = Array.from(e.dataTransfer?.files ?? []).filter((f) => f.type.startsWith("image/"));
-                if (!fs.length) return;
+                const todos = Array.from(e.dataTransfer?.files ?? []);
+                const fs = todos.filter((f) => f.type.startsWith("image/"));
+                const grandes = todos.filter((f) => !f.type.startsWith("image/"));
+                if (!fs.length && !grandes.length) return;
                 e.preventDefault();
-                void lerImagens(fs);
+                if (fs.length) void lerImagens(fs);
+                if (grandes.length) void subirArquivos(grandes);
               }}
             >
+              {arquivos.length > 0 && (
+                <div className="chat-anexos" data-testid="chatArquivos">
+                  {arquivos.map((a) => (
+                    <div className="chat-anexo chat-anexo-arquivo" key={a.id} title={`${a.nome} — ${(a.bytes / 1048576).toFixed(1)} MB`}>
+                      <span className="chat-anexo-nome">{a.nome}</span>
+                      <span className="chat-anexo-tam">{(a.bytes / 1048576).toFixed(1)} MB</span>
+                      <button
+                        className="chat-anexo-x"
+                        title="remover arquivo"
+                        aria-label="remover arquivo"
+                        onClick={(e) => {
+                          e.stopPropagation();
+                          setArquivos((atual) => atual.filter((x) => x.id !== a.id));
+                        }}
+                      >×</button>
+                    </div>
+                  ))}
+                </div>
+              )}
+              {subindo && (
+                <div className="chat-subindo" data-testid="chatSubindo" title={`enviando ${subindo.nome}`}>
+                  <span className="chat-anexo-nome">{subindo.nome}</span>
+                  <span className="chat-anexo-tam">{Math.round(subindo.pct * 100)}%</span>
+                  <div className="chat-subindo-barra"><i style={{ width: `${Math.round(subindo.pct * 100)}%` }} /></div>
+                </div>
+              )}
               {anexos.length > 0 && (
                 <div className="chat-anexos" data-testid="chatAnexos">
                   {anexos.map((a, i) => (
@@ -1560,6 +1614,32 @@ export function Chat({
                 if (fs.length) void lerImagens(fs);
               }}
             />
+            <input
+              ref={arquivoGrandeRef}
+              type="file"
+              multiple
+              className="hidden"
+              onChange={(e) => {
+                const fs = Array.from(e.target.files ?? []);
+                e.target.value = "";
+                if (fs.length) void subirArquivos(fs);
+              }}
+            />
+            <button
+              id="chatAnexarArquivo"
+              className="chat-acao-icone"
+              title="anexar arquivo de qualquer tamanho (até 10 GB, retoma se cair)"
+              aria-label="anexar arquivo"
+              disabled={Boolean(subindo)}
+              onClick={() => arquivoGrandeRef.current?.click()}
+            >
+              <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true">
+                <path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z" />
+                <path d="M14 2v6h6" />
+                <path d="M12 18v-6" />
+                <path d="M9 15l3-3 3 3" />
+              </svg>
+            </button>
             <button
               id="chatAnexar"
               className="chat-acao-icone"

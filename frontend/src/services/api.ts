@@ -65,6 +65,86 @@ export function post<T>(caminho: string, corpo?: unknown): Promise<T> {
   return api<T>(caminho, { method: "POST", body: JSON.stringify(corpo ?? {}) });
 }
 
+/** v3.46: arquivo grande do navegador — sobe em BLOCOS de 8 MB com retomada.
+ *  O id fica preso ao arquivo (nome+tamanho+data) no localStorage: reenviar o
+ *  mesmo arquivo depois de uma queda continua do byte onde o servidor parou. */
+export type AnexoEnviado = { id: string; nome: string; bytes: number };
+
+const BLOCO_UPLOAD = 8 * 1024 * 1024;
+
+function idDoArquivo(f: File): { id: string; chaveLocal: string } {
+  const chaveLocal = `minirag.anexo.${f.name}.${f.size}.${f.lastModified}`;
+  const salvo = localStorage.getItem(chaveLocal);
+  if (salvo && /^[A-Za-z0-9_-]{16,64}$/.test(salvo)) return { id: salvo, chaveLocal };
+  const id = Array.from(crypto.getRandomValues(new Uint8Array(16)))
+    .map((b) => b.toString(16).padStart(2, "0"))
+    .join("");
+  localStorage.setItem(chaveLocal, id);
+  return { id, chaveLocal };
+}
+
+export async function subirAnexo(
+  arquivo: File,
+  onProgresso?: (feito: number, total: number) => void,
+): Promise<AnexoEnviado> {
+  const { id, chaveLocal } = idDoArquivo(arquivo);
+  const total = arquivo.size;
+  const nome = arquivo.name || "arquivo";
+  let offset = 0;
+  try {
+    const st = await get<{ bytes: number; completo: boolean }>(`/anexos/enviar/status?${qs({ id })}`);
+    if (st.bytes > 0 && st.bytes <= total) offset = st.bytes;
+  } catch {
+    /* sem status ainda: começa do zero */
+  }
+  onProgresso?.(offset, total);
+
+  while (offset < total) {
+    const fim = Math.min(offset + BLOCO_UPLOAD, total);
+    const parte = arquivo.slice(offset, fim);
+    let tentativas = 0;
+    for (;;) {
+      try {
+        const r = await fetch(
+          `/anexos/enviar?${qs({ id, offset, total, nome, mime: arquivo.type || "application/octet-stream" })}`,
+          {
+            method: "POST",
+            headers: { Authorization: "B" + "earer " + chave, "Content-Type": "application/octet-stream" },
+            body: parte,
+          },
+        );
+        if (!r.ok) {
+          let detalhe = `${r.status} ${r.statusText}`;
+          try {
+            const j = (await r.json()) as { detail?: string };
+            if (j.detail) detalhe = j.detail;
+          } catch {
+            /* corpo não-JSON */
+          }
+          throw new ApiErro(r.status, detalhe);
+        }
+        const j = (await r.json()) as { bytes?: number };
+        offset = Number(j.bytes ?? fim);
+        onProgresso?.(offset, total);
+        break;
+      } catch (e) {
+        if (++tentativas >= 3) throw e;
+        /* antes de repetir, pergunta o que o servidor já tem — assim a retomada é
+           do byte real, não do começo do bloco */
+        try {
+          const st = await get<{ bytes: number }>(`/anexos/enviar/status?${qs({ id })}`);
+          if (st.bytes > offset) offset = st.bytes;
+        } catch {
+          /* mantém o offset conhecido */
+        }
+        await new Promise((ok) => setTimeout(ok, 800 * tentativas));
+      }
+    }
+  }
+  localStorage.removeItem(chaveLocal);
+  return { id, nome, bytes: total };
+}
+
 /** POST que lê um fluxo de eventos (SSE) e chama `onEvento` para cada `data:`.
  *  Usado pelo chat com streaming; erros antes do fluxo chegam como ApiErro normal. */
 export async function postStream(caminho: string, corpo: unknown, onEvento: (e: any) => void): Promise<void> {
