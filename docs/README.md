@@ -8,11 +8,11 @@ O que vai onde (lugares canônicos da casa — padrão `organizacao-documentacao
 |---|---|---|
 | Fila do que falta (T###) | `docs/proximos-passos.md` | ✅ existe (só o que está em aberto) |
 | Prova de como se testa (contrato por rota) | `docs/testes.md` (dono do método: skill `suite-de-testes`) | ✅ existe |
-| Planos de trabalho temporários | `docs/planos/NNN-assunto.md` | ✅ pasta criada na rodada do plano 001; o plano legado v3.4 (concluído) saiu do repo em 25/10 por ordem do dono — histórico fica no `git log` |
+| Planos de trabalho temporários | `docs/planos/NNN-assunto.md` | pasta só existe enquanto um plano está em execução; ao concluir, o plano sai do repo (histórico no `git log`) |
 | Specs por módulo | `docs/specs/NN-modulo.md` | _nasce na primeira regra escrita_ (pasta sem primeiro doc não se cria) |
 | Casos reais / análises / auditorias datadas | `docs/casos/`, `docs/analises/`, `docs/auditoria/` | _quando surgirem_ |
 | Runbook de operação | `docs/runbook.md` | _quando houver operação manual repetida_ |
-| Histórico do entregue | `CHANGELOG.md` na raiz | ⚠️ pendência declarada — o histórico hoje mora no `README.md` da raiz (seções `## v…`); migrar exige OK do dono |
+| Histórico do entregue | `git log` | ✅ desde 30/10 — o histórico de versões saiu do `README.md` (eram 86 seções); o repo é a fonte |
 | Guia de uso / API | `README.md` da raiz + seção de exemplos | ✅ existe (raiz) |
 
 ## Índice do estado atual (medido 2026-10-30)
@@ -20,7 +20,6 @@ O que vai onde (lugares canônicos da casa — padrão `organizacao-documentacao
 | Arquivo | Assunto | Linhas |
 |---|---|---|
 | `proximos-passos.md` | **só o aberto**: T052 (sandbox Python) + ideias não numeradas | ~35 |
-| `planos/001-basico-chat.md` | checklist do lote v3.18 (histórico) | ~55 |
 | `testes.md` | contrato da suíte do nexos (ponteiro para `suite-de-testes`) | 105 |
 
 Nada neste mapa autoriza execução: tarefas viram código com OK explícito do dono (25/10, regra gravada no roadmap).
