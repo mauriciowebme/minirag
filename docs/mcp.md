@@ -83,13 +83,28 @@ Medido em 30/10/2026 (v3.50.0), conta **operador** com o controle de máquinas l
 | Pareamento | 1 | `gerar_pareamento` |
 | Máquinas (túnel) | 26 | só existem com o **controle de máquinas** ligado pelo operador |
 
-**`rodar_python` (v3.50, T052)** — o modelo escreve um script e roda no servidor. Dentro dele,
+**`rodar_python` (T052)** — o modelo escreve um script e roda no servidor. Dentro dele,
 `import nexos` dá as ferramentas como funções (`nexos.web_search(query="...")`,
 `nexos.search(...)`, `nexos.rodar_comando(...)`); `nexos.ferramentas()` lista as disponíveis.
 Cada chamada passa pela mesma checagem de permissão de quem pediu, e volta na resposta com
-nome, ok e tempo. Teto de 120 s (parâmetro `segundos`), saída cortada em 120 KB,
-pasta temporária apagada no fim, sem rede direta (a internet só pelas ferramentas).
-Nesta versão é **só de operador**.
+nome, ok e tempo. Teto de 120 s (parâmetro `segundos`), saída cortada em 120 KB.
+Só de operador.
+
+**Cada conta tem a sua pasta** (v3.51) em `/app/dados/usuarios/<conta>/`:
+
+| Caminho | O que é |
+|---|---|
+| `venv/` | bibliotecas daquela conta (criado na primeira execução) |
+| `scripts/saida/` | arquivos que os scripts geram — ficam entre execuções |
+| `scripts/ferramentas/` | scripts salvos como ferramenta (etapa 2b, ainda não entregue) |
+| `dependencias.txt` | o que já foi instalado, com data |
+| `pip-cache/` | downloads guardados |
+
+Para usar uma biblioteca, o script **declara** o que precisa no parâmetro `dependencias`
+(`["openpyxl", "pandas==2.2.2"]`); o servidor instala só o que falta e guarda. Teto de **2 GB**
+por conta (`NEXOS_SANDBOX_TETO_MB`). O `pip` é o único processo com rede; o script continua
+sem rede direta e alcança a internet só pelas ferramentas. Nome com URL ou opção
+(`git+https://…`) é recusado.
 
 **O que o operador controla (e vale para todo mundo):**
 
