@@ -609,7 +609,7 @@ test("nexos v2 — suíte completa", async (t) => {
     let r = await call("GET", "/mcp/catalogo", { key: TESTKEY });
     const cats = (r.json?.ferramentas ?? []) as any[];
     const soOp = cats.filter((x) => x.motivo === "papel").map((x) => x.nome).sort();
-    f.check("catálogo da conta comum marca as 5 de operador como 'papel'", r.status === 200 && soOp.join(",") === "apagar_usuario,criar_usuario,esquecimento,gerir_mcp,listar_usuarios", soOp.join(","));
+    f.check("catálogo da conta comum marca as 6 de operador como 'papel'", r.status === 200 && soOp.join(",") === "apagar_usuario,criar_usuario,esquecimento,gerir_mcp,listar_usuarios,rodar_python", soOp.join(","));
     f.check("as demais nascem liberadas (nenhuma desligada de fábrica)", cats.filter((x) => x.motivo === "desligada").length === 0, cats.filter((x) => x.motivo === "desligada").length);
     f.check("ferramenta de operador não é ajustável pelo comum", cats.filter((x) => x.motivo === "papel" && x.ajustavel === true).length === 0, "ajustável indevido");
 
@@ -629,7 +629,7 @@ test("nexos v2 — suíte completa", async (t) => {
     r = await call("PATCH", "/config/mcp/usuarios", { key: OPKEY, corpo: { ativo: false } });
     f.check("operador desliga o MCP das contas", r.status === 200 && r.json?.usuarios_habilitado === false, r.texto.slice(0, 160));
     f.check("com o MCP desligado a conta comum não vê ferramenta nenhuma", (await lista(TESTKEY)).length === 0, (await lista(TESTKEY)).length);
-    f.check("o operador continua entrando (para poder reverter)", (await lista(OPKEY)).length === 56, (await lista(OPKEY)).length);
+    f.check("o operador continua entrando (para poder reverter)", (await lista(OPKEY)).length === 57, (await lista(OPKEY)).length);
     r = await call("POST", "/mcp", { key: TESTKEY, corpo: { jsonrpc: "2.0", id: 8, method: "tools/call", params: { name: "health", arguments: {} } } });
     f.check("chamada da conta comum com MCP desligado: 403 com o motivo", r.status === 403 && /desligado/.test(r.texto), r.texto.slice(0, 160));
 
@@ -3877,6 +3877,63 @@ await bloco(t, "v3.6: máquinas por usuário — hub WS, pareamento, run, escopo
     sh("rm -f /tmp/e2e-nav.bin /tmp/e2e-nav-destino.bin /tmp/e2e-cli-nav.json");
     await call("DELETE", `/maquinas/${HOST}`, { key: TESTKEY });
     f.fechar("v3.46 navegador -> máquina");
+  });
+
+  await bloco(t, "v3.50: sandbox Python — rodar_python, ponte nexos e papel", async () => {
+    const f = fiscal();
+    const rpcTool = (key: string, args: Record<string, unknown>, id: unknown = 1) =>
+      call("POST", "/mcp", {
+        key,
+        corpo: { jsonrpc: "2.0", id, method: "tools/call", params: { name: "rodar_python", arguments: args } },
+      });
+    const saida = (r: any) => {
+      try {
+        return JSON.parse(r.json?.result?.content?.[0]?.text ?? "{}");
+      } catch {
+        return {};
+      }
+    };
+
+    /* 1. conta comum: não vê a ferramenta e a chamada é recusada */
+    let lista = await call("POST", "/mcp", { key: TESTKEY, corpo: { jsonrpc: "2.0", id: 1, method: "tools/list" } });
+    const nomesComum = (lista.json?.result?.tools ?? []).map((t: any) => t.name);
+    f.check("v3.50 conta comum não vê rodar_python", !nomesComum.includes("rodar_python"), nomesComum.length);
+
+    let r = await rpcTool(TESTKEY, { codigo: "print(1)" });
+    const textoComum = r.json?.result?.content?.[0]?.text ?? "";
+    f.check("v3.50 conta comum é recusada (403), não executa", /403/.test(textoComum) && !saida(r).ok, textoComum.slice(0, 120));
+
+    /* 2. operador: roda e devolve o stdout */
+    r = await rpcTool(OPKEY, { codigo: "print('ola', 6*7)" });
+    let s = saida(r);
+    f.check("v3.50 operador roda script e recebe o stdout", s.ok === true && s.saida === "ola 42", JSON.stringify(s).slice(0, 200));
+
+    /* 3. ponte: a ferramenta do servidor vira função Python */
+    r = await rpcTool(OPKEY, { codigo: "import nexos\nprint(nexos.health()['versao'])" });
+    s = saida(r);
+    f.check("v3.50 import nexos chama a ferramenta health", s.ok === true && Array.isArray(s.chamadas) && s.chamadas.some((c: any) => c.ferramenta === "health"), JSON.stringify(s.chamadas ?? s).slice(0, 200));
+
+    /* 4. rede direta bloqueada */
+    r = await rpcTool(OPKEY, { codigo: "import urllib.request\ntry:\n    urllib.request.urlopen('http://example.com', timeout=3)\n    print('acessou')\nexcept Exception:\n    print('bloqueado')\n" });
+    s = saida(r);
+    f.check("v3.50 rede direta bloqueada (só pelas ferramentas)", s.saida === "bloqueado", JSON.stringify(s).slice(0, 200));
+
+    /* 5. erro do script volta com o traceback */
+    r = await rpcTool(OPKEY, { codigo: "raise ValueError('falha proposital')" });
+    s = saida(r);
+    f.check("v3.50 erro do script volta com traceback", s.ok === false && String(s.erro).includes("falha proposital"), JSON.stringify(s).slice(0, 200));
+
+    /* 6. saída grande é cortada no teto */
+    r = await rpcTool(OPKEY, { codigo: "print('x'*300000)" });
+    s = saida(r);
+    f.check("v3.50 saída cortada no teto de 120 KB", s.truncado === true && s.saida.length <= 120000, `${s.saida?.length}`);
+
+    /* 7. teto de tempo mata o script */
+    r = await rpcTool(OPKEY, { codigo: "import time\ntime.sleep(30)", segundos: 5 }, 9);
+    s = saida(r);
+    f.check("v3.50 teto de tempo encerra o script", s.ok === false && s.ms < 15000, `ok=${s.ok} ms=${s.ms}`);
+
+    f.fechar("v3.50");
   });
 
   await bloco(t, "freio de força bruta (último: bloqueia o IP)", async () => {
