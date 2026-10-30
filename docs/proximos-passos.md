@@ -2,8 +2,8 @@
 
 > **Última atualização:** 2026-10-30 · **Versão:** 3.49.3 · **Dono:** Mauricio
 
-As tarefas **entregues** saíram daqui e vivem em [`concluidos.md`](./concluidos.md) — este arquivo
-tem só o que está em aberto. Execução de qualquer T### exige OK explícito do Mauricio.
+Este arquivo tem **só o que está em aberto** — as tarefas entregues foram removidas na limpeza de
+30/10 (o histórico fica no `git log`). Execução de qualquer T### exige OK explícito do Mauricio.
 
 ## Índice
 

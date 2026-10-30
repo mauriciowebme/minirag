@@ -7,7 +7,6 @@ O que vai onde (lugares canônicos da casa — padrão `organizacao-documentacao
 | Conteúdo | Lugar | Estado |
 |---|---|---|
 | Fila do que falta (T###) | `docs/proximos-passos.md` | ✅ existe (só o que está em aberto) |
-| Histórico do que já foi entregue (T###) | `docs/concluidos.md` | ✅ existe (criado em 30/10: 51 tarefas entregues) |
 | Prova de como se testa (contrato por rota) | `docs/testes.md` (dono do método: skill `suite-de-testes`) | ✅ existe |
 | Planos de trabalho temporários | `docs/planos/NNN-assunto.md` | ✅ pasta criada na rodada do plano 001; o plano legado v3.4 (concluído) saiu do repo em 25/10 por ordem do dono — histórico fica no `git log` |
 | Specs por módulo | `docs/specs/NN-modulo.md` | _nasce na primeira regra escrita_ (pasta sem primeiro doc não se cria) |
@@ -21,7 +20,6 @@ O que vai onde (lugares canônicos da casa — padrão `organizacao-documentacao
 | Arquivo | Assunto | Linhas |
 |---|---|---|
 | `proximos-passos.md` | **só o aberto**: T052 (sandbox Python) + ideias não numeradas | ~35 |
-| `concluidos.md` | histórico das 51 tarefas entregues, com o detalhe de cada uma | ~1.100 |
 | `planos/001-basico-chat.md` | checklist do lote v3.18 (histórico) | ~55 |
 | `testes.md` | contrato da suíte do nexos (ponteiro para `suite-de-testes`) | 105 |
 
