@@ -6,7 +6,7 @@
 
 # ---------------------------------------------------------------- estágio 1
 # Dependências Python + modelo (muda raramente; fica no topo de propósito)
-FROM python:3.11-slim AS py
+FROM python:3.12-slim AS py
 
 ENV PYTHONDONTWRITEBYTECODE=1 \
     PYTHONUNBUFFERED=1 \
@@ -36,7 +36,7 @@ RUN python -c "from sentence_transformers import SentenceTransformer; m = Senten
 COPY embedder ./embedder
 RUN cd /app/embedder \
     && python -c "import ocr; ocr._motor(); print('motor OCR ok')" \
-    && ls /usr/local/lib/python3.11/site-packages/rapidocr/models/*.onnx
+    && ls /usr/local/lib/python3.12/site-packages/rapidocr/models/*.onnx
 
 # ---------------------------------------------------------------- estágio 2
 # Build do TypeScript e do painel
@@ -75,7 +75,7 @@ RUN bash scripts/build-cliente.sh \
 
 # ---------------------------------------------------------------- estágio 3
 # Imagem final: Node + Python no MESMO container (2 containers no total)
-FROM python:3.11-slim AS runtime
+FROM python:3.12-slim AS runtime
 
 ENV PYTHONUNBUFFERED=1 \
     NODE_ENV=production \
@@ -96,7 +96,7 @@ RUN apt-get update \
     && rm -rf /var/lib/apt/lists/*
 
 # deps Python + modelo vindos do estágio 1 (mesmas camadas, sem reinstalar)
-COPY --from=py /usr/local/lib/python3.11/site-packages /usr/local/lib/python3.11/site-packages
+COPY --from=py /usr/local/lib/python3.12/site-packages /usr/local/lib/python3.12/site-packages
 COPY --from=py /usr/local/bin/uvicorn /usr/local/bin/uvicorn
 COPY --from=py /app/models /app/models
 
