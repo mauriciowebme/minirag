@@ -22,6 +22,25 @@ parecidos com a pergunta, com uma nota de 0 a 1.
 
 ---
 ---
+## v3.47.1 (30/10) — o produto agora se chama Nexos
+
+O nome antigo descrevia só a busca; a ferramenta hoje guarda memória, conversa, executa
+nas suas máquinas, fabrica telas e transfere arquivos. **Nexos** diz o que ela faz: liga
+tudo isso.
+
+O que muda na prática:
+
+- **Na tela**: login (`◆ Nexos`), título da aba, autor das mensagens e conversa exportada.
+- **Endereço novo**: `https://nexos.techupsistemas.com`. O domínio antigo respondeu por
+  algumas horas só para as máquinas que ainda tinham o endereço velho salvo e depois saiu.
+- **Cliente de máquina**: o binário novo usa o endereço novo e reescreve sozinho a
+  configuração antiga na primeira subida — a máquina não precisa ser reconfigurada.
+- **Variáveis**: `NEXOS_*` é o nome oficial; `MINIRAG_*` continua aceito e o boot copia
+  automaticamente para o nome novo, então env antigo não quebra.
+- **O que ficou com o nome antigo de propósito**: os volumes (`minirag_data`,
+  `minirag_arquivos`), os nomes dos serviços no Docker e os binários do cliente — renomear
+  cada um exige copiar dados ou uma versão intermediária, e nada disso aparece para quem usa.
+
 ## v3.46.0 (30/10) — arquivo grande nos dois sentidos: do navegador para a máquina
 
 O que você vê: o compositor do chat ganhou o botão de **anexar arquivo** (ao lado do de
