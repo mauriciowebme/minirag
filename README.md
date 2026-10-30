@@ -22,6 +22,24 @@ parecidos com a pergunta, com uma nota de 0 a 1.
 
 ---
 ---
+## v3.49.1 (30/10) — as três ferramentas que mexem em arquivo voltam a funcionar no Windows
+
+**O que você vê:** `capturar_tela`, `baixar_arquivo` e `copiar_arquivo` param de responder
+"envio parou em 0%" quando a máquina é Windows.
+
+**Por que quebrava:** o envio sobe o arquivo em blocos de 32 MB por um script PowerShell que
+usava `System.Net.Http.HttpClient`. No Windows PowerShell 5.1 esse assembly não vem carregado, então
+o `New-Object` estourava com "não é possível localizar o tipo [System.Net.Http.HttpClient]" — em
+qualquer Windows, sempre. O teste automático não pegava porque roda em Linux e lá o caminho é outro
+(`dd | curl`).
+
+**Como ficou:** o script carrega o assembly (`Add-Type -AssemblyName System.Net.Http`) e, se isso
+ainda falhar, cai para o `System.Net.WebClient`, que existe em qualquer .NET Framework.
+
+**Como é provado:** na máquina Windows real (JPPCINFODEV01), `Add-Type` + `HttpClient` respondendo
+200 no `/health`; depois o teste das 25 ferramentas de máquina, com captura de tela e envio de
+arquivo de verdade.
+
 ## v3.49.0 (30/10) — o sistema inteiro com a mesma cara
 
 **O que você vê:** a tela de Arquivos deixou de ser um caso isolado e virou o padrão. Paleta mais clara

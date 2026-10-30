@@ -1060,26 +1060,43 @@ async function statusDoEnvio(ctx: Ctx, base: string, id: string, chave: string):
 /** comando que envia UM bloco (32 MB) do arquivo, a partir de `off` */
 function comandoDoBloco(ctx: Ctx, url: string, caminho: string, off: number, n: number): string {
   if (ctx.so === "windows") {
-    return psEncoded(
-      "$ErrorActionPreference='Stop'\n" +
-        `$fs=[System.IO.File]::OpenRead('${pq(caminho)}')\n` +
-        "$fs.Position=" + off + "\n" +
-        `$n=${n}\n` +
-        "$buf=New-Object byte[] $n\n" +
-        "$lido=0\n" +
-        "while($lido -lt $n){ $r=$fs.Read($buf,$lido,$n-$lido); if($r -le 0){break}; $lido+=$r }\n" +
-        "$fs.Close()\n" +
-        "if($lido -le 0){ exit 8 }\n" +
-        "if($lido -lt $n){ $envio=New-Object byte[] $lido; [Array]::Copy($buf,$envio,$lido) } else { $envio=$buf }\n" +
-        "$hc=New-Object System.Net.Http.HttpClient\n" +
-        "$hc.Timeout=[TimeSpan]::FromMinutes(30)\n" +
-        "$cont=New-Object System.Net.Http.ByteArrayContent(,$envio)\n" +
-        "$cont.Headers.ContentType=[System.Net.Http.Headers.MediaTypeHeaderValue]::Parse('application/octet-stream')\n" +
-        `$res=$hc.PostAsync('${pq(url)}',$cont).Result\n` +
-        "$txt=$res.Content.ReadAsStringAsync().Result\n" +
-        "if(-not $res.IsSuccessStatusCode){ Write-Output $txt; exit 7 }\n" +
-        "Write-Output $txt\n",
-    );
+    /* v3.49.1 — no Windows PowerShell 5.1 o assembly System.Net.Http NÃO vem carregado,
+       então `New-Object System.Net.Http.HttpClient` estourava com "não é possível localizar
+       o tipo". Era o que derrubava capturar_tela, baixar_arquivo e copiar_arquivo em TODO
+       Windows (o teste em Linux nunca passava por aqui). Carrega o assembly e, se ainda
+       falhar, cai para o WebClient, que existe em qualquer .NET Framework. */
+    const ps = [
+      "$ErrorActionPreference='Stop'",
+      `$fs=[System.IO.File]::OpenRead('${pq(caminho)}')`,
+      `$fs.Position=${off}`,
+      `$n=${n}`,
+      "$buf=New-Object byte[] $n",
+      "$lido=0",
+      "while($lido -lt $n){ $r=$fs.Read($buf,$lido,$n-$lido); if($r -le 0){break}; $lido+=$r }",
+      "$fs.Close()",
+      "if($lido -le 0){ exit 8 }",
+      "if($lido -lt $n){ $envio=New-Object byte[] $lido; [Array]::Copy($buf,$envio,$lido) } else { $envio=$buf }",
+      `$alvo='${pq(url)}'`,
+      "$txt=$null",
+      "try {",
+      "  Add-Type -AssemblyName System.Net.Http -ErrorAction Stop",
+      "  $hc=New-Object System.Net.Http.HttpClient",
+      "  $hc.Timeout=[TimeSpan]::FromMinutes(30)",
+      "  $cont=New-Object System.Net.Http.ByteArrayContent(,$envio)",
+      "  $cont.Headers.ContentType=[System.Net.Http.Headers.MediaTypeHeaderValue]::Parse('application/octet-stream')",
+      "  $res=$hc.PostAsync($alvo,$cont).Result",
+      "  $txt=$res.Content.ReadAsStringAsync().Result",
+      "  if(-not $res.IsSuccessStatusCode){ Write-Output $txt; exit 7 }",
+      "} catch {",
+      "  if($null -ne $txt){ Write-Output $txt; exit 7 }",
+      "  $wc=New-Object System.Net.WebClient",
+      "  $wc.Headers.Add('Content-Type','application/octet-stream')",
+      "  $bytes=$wc.UploadData($alvo,'POST',$envio)",
+      "  $txt=[Text.Encoding]::UTF8.GetString($bytes)",
+      "}",
+      "Write-Output $txt",
+    ].join("\n");
+    return psEncoded(ps);
   }
   /* GNU dd com skip_bytes/count_bytes: recorta exatamente o bloco, sem carregar o arquivo */
   return shCmd(
