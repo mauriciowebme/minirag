@@ -4002,6 +4002,49 @@ await bloco(t, "v3.6: máquinas por usuário — hub WS, pareamento, run, escopo
     f.fechar("v3.51");
   });
 
+  await bloco(t, "v3.52: OCR por URL — user-agent de navegador e trava de endereço interno", async () => {
+    const f = fiscal();
+    const rpcImg = (key: string, args: Record<string, unknown>) =>
+      call("POST", "/mcp", {
+        key,
+        corpo: { jsonrpc: "2.0", id: 1, method: "tools/call", params: { name: "analisar_imagem", arguments: args } },
+      });
+    const texto = (r: any) => r.json?.result?.content?.[0]?.text ?? "";
+    const corpo = (r: any) => {
+      try {
+        return JSON.parse(texto(r));
+      } catch {
+        return {};
+      }
+    };
+
+    /* 1. o caminho local (base64) continua funcionando */
+    const PNG = "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";
+    let r = await rpcImg(OPKEY, { base64: PNG });
+    let s = corpo(r);
+    f.check("v3.52 OCR lê o texto da imagem em base64", s.ok === true && /NEXOS TESTE 123/.test(s.texto ?? ""), JSON.stringify(s).slice(0, 160));
+
+    /* 2. endereço interno é recusado antes de qualquer requisição */
+    for (const alvo of [
+      "http://127.0.0.1:8001/imagem.png",
+      "http://localhost/x.png",
+      "http://169.254.169.254/latest/meta-data",
+      "http://[::1]/x.png",
+      "http://192.168.48.1/x.png",
+    ]) {
+      r = await rpcImg(OPKEY, { url: alvo });
+      f.check(`v3.52 recusa endereço interno (${alvo})`, /endereco interno nao permitido/.test(texto(r)), texto(r).slice(0, 120));
+    }
+
+    /* 3. URL pública que exige user-agent de navegador: o Wikimedia devolvia 400 com o UA do Node */
+    r = await rpcImg(OPKEY, { url: "https://upload.wikimedia.org/wikipedia/commons/thumb/8/80/Wikipedia-logo-v2.svg/500px-Wikipedia-logo-v2.svg.png" });
+    const t3 = texto(r);
+    s = corpo(r);
+    f.check("v3.52 baixa imagem pública com UA de navegador (sem 400)", (s.ok === true && Number(s.bytes) > 0) || /nao saiu texto/.test(t3), t3.slice(0, 160));
+
+    f.fechar("v3.52");
+  });
+
   await bloco(t, "freio de força bruta (último: bloqueia o IP)", async () => {
     const f = fiscal();
     for (let i = 0; i < 10; i++) {
