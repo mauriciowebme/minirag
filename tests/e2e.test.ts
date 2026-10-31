@@ -3913,10 +3913,10 @@ await bloco(t, "v3.6: máquinas por usuário — hub WS, pareamento, run, escopo
     s = saida(r);
     f.check("v3.50 import nexos chama a ferramenta health", s.ok === true && Array.isArray(s.chamadas) && s.chamadas.some((c: any) => c.ferramenta === "health"), JSON.stringify(s.chamadas ?? s).slice(0, 200));
 
-    /* 4. rede direta bloqueada */
-    r = await rpcTool(OPKEY, { codigo: "import urllib.request\ntry:\n    urllib.request.urlopen('http://example.com', timeout=3)\n    print('acessou')\nexcept Exception:\n    print('bloqueado')\n" });
+    /* 4. rede: desde a v3.53 a internet passa pelo proxy; socket direto fora dele é bloqueado */
+    r = await rpcTool(OPKEY, { codigo: "import socket\ns=socket.socket()\ntry:\n    s.connect(('127.0.0.1', 9099))\n    print('acessou')\nexcept Exception:\n    print('bloqueado')\n" });
     s = saida(r);
-    f.check("v3.50 rede direta bloqueada (só pelas ferramentas)", s.saida === "bloqueado", JSON.stringify(s).slice(0, 200));
+    f.check("v3.50 socket direto fora do proxy é bloqueado", s.saida === "bloqueado", JSON.stringify(s).slice(0, 200));
 
     /* 5. erro do script volta com o traceback */
     r = await rpcTool(OPKEY, { codigo: "raise ValueError('falha proposital')" });
@@ -3994,10 +3994,10 @@ await bloco(t, "v3.6: máquinas por usuário — hub WS, pareamento, run, escopo
     const recusa = r.json?.result?.content?.[0]?.text ?? "";
     f.check("v3.51 dependencia invalida é recusada", /dependencia invalida/.test(recusa), String(recusa).slice(0, 120));
 
-    /* 7. com venv, a rede direta continua fechada */
-    r = await rpcTool(OPKEY, { codigo: "import urllib.request\ntry:\n    urllib.request.urlopen('http://example.com', timeout=3)\n    print('acessou')\nexcept Exception:\n    print('bloqueado')" }, 6);
+    /* 7. com venv, socket direto fora do proxy continua bloqueado */
+    r = await rpcTool(OPKEY, { codigo: "import socket\ns=socket.socket()\ntry:\n    s.connect(('127.0.0.1', 9099))\n    print('acessou')\nexcept Exception:\n    print('bloqueado')" }, 6);
     s = saida(r);
-    f.check("v3.51 rede direta continua bloqueada", s.saida === "bloqueado", JSON.stringify(s).slice(0, 160));
+    f.check("v3.51 socket direto continua bloqueado", s.saida === "bloqueado", JSON.stringify(s).slice(0, 160));
 
     f.fechar("v3.51");
   });
@@ -4043,6 +4043,75 @@ await bloco(t, "v3.6: máquinas por usuário — hub WS, pareamento, run, escopo
     f.check("v3.52 baixa imagem pública com UA de navegador (sem 400)", (s.ok === true && Number(s.bytes) > 0) || /nao saiu texto/.test(t3), t3.slice(0, 160));
 
     f.fechar("v3.52");
+  });
+
+  await bloco(t, "v3.53: sandbox — uid por conta, rede pelo proxy e teto de memória", async () => {
+    const f = fiscal();
+    const CONTAINER = process.env.CONTAINER ?? "";
+    const rpcPy = (codigo: string) =>
+      call("POST", "/mcp", {
+        key: OPKEY,
+        corpo: { jsonrpc: "2.0", id: 1, method: "tools/call", params: { name: "rodar_python", arguments: { codigo } } },
+      });
+    const corpo = (r: any) => {
+      const texto = r.json?.result?.content?.[0]?.text ?? "";
+      try {
+        return JSON.parse(texto);
+      } catch {
+        return {};
+      }
+    };
+
+    /* pasta de OUTRA conta: só o root lê (700), com um segredo dentro */
+    if (CONTAINER) {
+      execFileSync("docker", ["exec", CONTAINER, "sh", "-c",
+        "mkdir -p /app/dados/usuarios/intruso/scripts/saida && echo SEGREDO > /app/dados/usuarios/intruso/scripts/saida/segredo.txt && chmod 700 /app/dados/usuarios/intruso/scripts/saida && chmod 700 /app/dados/usuarios/intruso"],
+        { stdio: "ignore" });
+    }
+
+    let r = await rpcPy("import os\nprint(os.getuid())");
+    let s = corpo(r);
+    f.check("v3.53 script não roda como root", s.ok === true && Number(s.saida) > 0, JSON.stringify(s).slice(0, 120));
+
+    r = await rpcPy("p='/app/dados/usuarios/intruso/scripts/saida/segredo.txt'\ntry:\n    print('LEU', open(p).read().strip())\nexcept Exception as e:\n    print('NEGADO', type(e).__name__)");
+    s = corpo(r);
+    f.check("v3.53 não lê arquivo de outra conta", s.saida === "NEGADO PermissionError", JSON.stringify(s).slice(0, 160));
+
+    r = await rpcPy("import os\ntry:\n    os.listdir('/app/dados/usuarios')\n    print('LISTOU')\nexcept Exception as e:\n    print('NEGADO', type(e).__name__)");
+    s = corpo(r);
+    f.check("v3.53 não lista as pastas das outras contas", s.saida === "NEGADO PermissionError", JSON.stringify(s).slice(0, 160));
+
+    r = await rpcPy("import urllib.request\nprint(urllib.request.urlopen('https://api.github.com', timeout=15).status)");
+    s = corpo(r);
+    f.check("v3.53 internet liberada pelo proxy", s.ok === true && s.saida === "200", JSON.stringify(s).slice(0, 160));
+    f.check("v3.53 proxy registra o destino usado", Array.isArray(s.rede) && s.rede.some((d: any) => /api\.github\.com/.test(d.alvo)), JSON.stringify(s.rede ?? []).slice(0, 160));
+
+    r = await rpcPy("import urllib.request\ntry:\n    urllib.request.urlopen('http://127.0.0.1:8000/health', timeout=5)\n    print('ACESSOU')\nexcept Exception:\n    print('NEGADO')");
+    s = corpo(r);
+    f.check("v3.53 proxy recusa endereço interno", s.saida === "NEGADO" && Array.isArray(s.rede) && s.rede.some((d: any) => /interno/.test(d.motivo ?? "")), JSON.stringify(s).slice(0, 200));
+
+    r = await rpcPy("import socket\ns=socket.socket()\ntry:\n    s.connect(('127.0.0.1', 9099))\n    print('ACESSOU')\nexcept Exception as e:\n    print('NEGADO', type(e).__name__)");
+    s = corpo(r);
+    f.check("v3.53 socket direto fora do proxy é bloqueado", s.saida === "NEGADO _RedeBloqueada", JSON.stringify(s).slice(0, 160));
+
+    /* o escape antigo: processo filho não passa pelo proxy */
+    r = await rpcPy("import subprocess\ntry:\n    subprocess.run(['curl','-s','-m','3','http://127.0.0.1:8000/health'])\n    print('ACESSOU')\nexcept Exception as e:\n    print('NEGADO', type(e).__name__)");
+    s = corpo(r);
+    f.check("v3.53 processo filho (curl) bloqueado", s.saida === "NEGADO PermissionError", JSON.stringify(s).slice(0, 160));
+
+    r = await rpcPy("import os\ntry:\n    os.system('curl -s -m 3 http://127.0.0.1:8000/health')\n    print('ACESSOU')\nexcept Exception as e:\n    print('NEGADO', type(e).__name__)");
+    s = corpo(r);
+    f.check("v3.53 os.system bloqueado", s.saida === "NEGADO PermissionError", JSON.stringify(s).slice(0, 160));
+
+    r = await rpcPy("try:\n    import ctypes\n    ctypes.CDLL('libc.so.6')\n    print('ACESSOU')\nexcept Exception as e:\n    print('NEGADO', type(e).__name__)");
+    s = corpo(r);
+    f.check("v3.53 ctypes bloqueado", s.saida === "NEGADO PermissionError", JSON.stringify(s).slice(0, 160));
+
+    r = await rpcPy("x=bytearray(900*1024*1024)\nprint('alocou')");
+    s = corpo(r);
+    f.check("v3.53 teto de memória derruba script que aloca demais", s.ok === false && /MemoryError/.test(String(s.erro)), JSON.stringify(s).slice(0, 160));
+
+    f.fechar("v3.53");
   });
 
   await bloco(t, "freio de força bruta (último: bloqueia o IP)", async () => {
