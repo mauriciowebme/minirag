@@ -29,13 +29,14 @@
  */
 import { execFile, spawn } from "node:child_process";
 import { constants as fsConstants } from "node:fs";
-import { access, appendFile, mkdir, mkdtemp, readFile, rm, writeFile } from "node:fs/promises";
+import { access, appendFile, chmod, chown, mkdir, mkdtemp, readFile, rm, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import path from "node:path";
 import readline from "node:readline";
 import { promisify } from "node:util";
 import type { Usuario } from "./config";
 import { log } from "./config";
+import { subirProxy, type DestinoProxy } from "./sandbox_proxy";
 
 const rodar = promisify(execFile);
 
@@ -47,6 +48,8 @@ const TETO_MB = Number(process.env.NEXOS_SANDBOX_TETO_MB ?? 2048);
 const TETO_SAIDA = 120_000;
 /** Tempo máximo de uma execução. */
 const TETO_SEG = 120;
+/** Teto de memória do processo Python (endereço virtual). */
+const TETO_MEM_MB = Number(process.env.NEXOS_SANDBOX_MEM_MB ?? 512);
 
 export type ChamadaFerramenta = { ferramenta: string; ok: boolean; ms: number };
 
@@ -58,6 +61,8 @@ export type ResultadoPython = {
   truncado: boolean;
   ms: number;
   chamadas: ChamadaFerramenta[];
+  /** Destinos que passaram (ou foram recusados) pelo proxy de saída. */
+  rede: DestinoProxy[];
   instalados: string[];
   pasta: string;
   uso_mb: number;
@@ -114,11 +119,34 @@ def ferramentas():
 ${funcoes}`;
 }
 
-/** Gera o `sitecustomize.py`: fecha a rede direta ANTES do script rodar. */
-const BLOQUEIO_REDE = `"""Rede direta desligada no sandbox (T052): a internet so pelas ferramentas do nexos."""
-import socket as _sock
+/** Gera o `sitecustomize.py`: rede do script só pelo proxy e nenhuma saída por processo. */
+function moduloRede(porta: number): string {
+  return `"""Rede e processos do sandbox (T053).
 
+- Conexao de rede: SO pelo proxy local do nexos (127.0.0.1:${porta}).
+- Processo: subprocess/os.system/exec/fork e ctypes sao recusados, para que um
+  script nao escape do proxy chamando curl, wget ou binario proprio.
+
+O gancho de auditoria nao pode ser removido em tempo de execucao: quem instala
+depois dele tambem e chamado, mas nada desliga o que ja esta posto.
+"""
+import socket as _sock
+import sys as _sys
+
+_PORTA = ${porta}
 _orig = _sock.socket
+
+_PROXY = ("127.0.0.1", "::1", "localhost")
+_EVENTOS_PROCESSO = (
+    "subprocess.Popen",
+    "os.system",
+    "os.exec",
+    "os.posix_spawn",
+    "os.spawn",
+    "os.fork",
+    "os.forkpty",
+    "pty.spawn",
+)
 
 
 class _RedeBloqueada(OSError):
@@ -127,23 +155,70 @@ class _RedeBloqueada(OSError):
 
 def _recusar(*_a, **_k):
     raise _RedeBloqueada(
-        "rede direta bloqueada no sandbox: use as ferramentas do nexos "
-        "(nexos.web_search, nexos.web_open, nexos.baixar_arquivo, ...)"
+        "rede direta bloqueada no sandbox: use HTTP_PROXY/HTTPS_PROXY (o proxy do nexos) "
+        "ou as ferramentas (nexos.web_search, nexos.web_open)"
     )
 
 
-class _Socket(_orig):
-    def connect(self, *a, **k):
-        _recusar()
+def _addr_de(args):
+    """Aceita (socket, addr) ou (addr,) — o evento socket.connect varia por versao."""
+    for a in args:
+        if isinstance(a, (tuple, list)) and len(a) >= 2:
+            return a[0], a[1]
+    return None, None
 
-    def connect_ex(self, *a, **k):
+
+def _auditar(evento, args):
+    if evento == "socket.connect":
+        host, port = _addr_de(args)
+        try:
+            if int(port) == _PORTA and str(host) in _PROXY:
+                return
+        except Exception:
+            pass
         _recusar()
+    if evento in _EVENTOS_PROCESSO:
+        raise PermissionError(
+            "execucao de processo bloqueada no sandbox: o script roda direto; "
+            "para buscar dados use HTTP_PROXY/HTTPS_PROXY ou as ferramentas do nexos"
+        )
+    if evento.startswith("ctypes."):
+        raise PermissionError(
+            "ctypes bloqueado no sandbox: nao e possivel chamar biblioteca nativa "
+            "para contornar as regras de rede e processo"
+        )
+
+
+def _liberado(addr):
+    try:
+        return int(addr[1]) == _PORTA and str(addr[0]) in _PROXY
+    except Exception:
+        return False
+
+
+class _Socket(_orig):
+    def connect(self, addr, *a, **k):
+        if not _liberado(addr):
+            _recusar()
+        return super().connect(addr, *a, **k)
+
+    def connect_ex(self, addr, *a, **k):
+        if not _liberado(addr):
+            _recusar()
+        return super().connect_ex(addr, *a, **k)
 
 
 _sock.socket = _Socket
-_sock.create_connection = _recusar
-_sock.getaddrinfo = _recusar
+_sys.addaudithook(_auditar)
 `;
+}
+
+/** uid/gid estável por conta (20000..29999): o processo do script não é root. */
+export function uidDoTenant(tenant: string): number {
+  let h = 0;
+  for (let i = 0; i < tenant.length; i++) h = (h * 31 + tenant.charCodeAt(i)) >>> 0;
+  return 20000 + (h % 10000);
+}
 
 /** Só nome de pacote com versão/extras opcional — nada de URL, `-r`, `--index-url`, `git+`. */
 const PACOTE_VALIDO =
@@ -279,29 +354,58 @@ export async function rodarPython(
 
   const base = path.join(RAIZ, pastaDe(user.tenant));
   const pastaSaida = path.join(base, "scripts", "saida");
+  const casa = path.join(base, "home");
   await mkdir(pastaSaida, { recursive: true });
+  await mkdir(casa, { recursive: true });
 
   const venv = await garantirVenv(base);
   const instalados = await garantirDependencias(base, venv, pacotesValidos(opts.dependencias));
 
+  /* T053 — o script não roda como root. A pasta da conta é só travessia (711); o que ele
+     pode escrever (saida e home) pertence ao uid dele e é 700: o diretório de outra conta
+     responde "permissão negada" mesmo que o script tente caminho absoluto. */
+  const uid = uidDoTenant(user.tenant);
+  const comoRoot = process.platform !== "win32" && typeof process.getuid === "function" && process.getuid() === 0;
+  if (comoRoot) {
+    await chmod(path.dirname(base), 0o711).catch(() => {});
+    await chmod(base, 0o711).catch(() => {});
+    await chown(pastaSaida, uid, uid).catch(() => {});
+    await chown(casa, uid, uid).catch(() => {});
+  }
+  await chmod(pastaSaida, 0o700).catch(() => {});
+  await chmod(casa, 0o700).catch(() => {});
+
+  const proxy = await subirProxy();
   const pasta = await mkdtemp(path.join(tmpdir(), "nexos-py-"));
   const script = path.join(pasta, "script.py");
   await writeFile(path.join(pasta, "nexos.py"), moduloPonte(permitidas.map((t) => t.name), descricoes), "utf8");
-  await writeFile(path.join(pasta, "sitecustomize.py"), BLOQUEIO_REDE, "utf8");
+  await writeFile(path.join(pasta, "sitecustomize.py"), moduloRede(proxy.porta), "utf8");
   await writeFile(script, codigo, "utf8");
+  await chmod(pasta, 0o755).catch(() => {});
+  for (const nome of ["nexos.py", "sitecustomize.py", "script.py"]) {
+    await chmod(path.join(pasta, nome), 0o644).catch(() => {});
+  }
 
-  const filho = spawn(pythonDoVenv(venv), [script], {
+  const proxyUrl = `http://127.0.0.1:${proxy.porta}`;
+  const filho = spawn("/bin/sh", ["-c", `ulimit -v ${TETO_MEM_MB * 1024}; exec ${JSON.stringify(pythonDoVenv(venv))} ${JSON.stringify(script)}`], {
     cwd: pastaSaida,
     env: {
       PATH: process.env.PATH ?? "/usr/local/bin:/usr/bin:/bin",
       PYTHONPATH: pasta,
-      HOME: base,
+      HOME: casa,
       TMPDIR: pasta,
       LANG: "C.UTF-8",
       PYTHONIOENCODING: "utf-8",
       PYTHONUNBUFFERED: "1",
       PYTHONDONTWRITEBYTECODE: "1",
+      HTTP_PROXY: proxyUrl,
+      HTTPS_PROXY: proxyUrl,
+      http_proxy: proxyUrl,
+      https_proxy: proxyUrl,
+      NO_PROXY: "",
+      no_proxy: "",
     },
+    ...(comoRoot ? { uid, gid: uid } : {}),
     /* [stdin, stdout, stderr, fd3] */
     stdio: ["pipe", "pipe", "pipe", "pipe"],
   });
@@ -365,6 +469,8 @@ export async function rodarPython(
   });
 
   leitor.close();
+  const destinos = [...proxy.destinos];
+  await proxy.fechar().catch(() => {});
   await rm(pasta, { recursive: true, force: true }).catch(() => {});
 
   return {
@@ -375,6 +481,7 @@ export async function rodarPython(
     truncado,
     ms: Date.now() - inicio,
     chamadas,
+    rede: destinos,
     instalados,
     pasta: `usuarios/${pastaDe(user.tenant)}/scripts/saida`,
     uso_mb: await usoMb(base),

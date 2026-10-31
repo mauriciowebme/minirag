@@ -243,7 +243,7 @@ const BLOQUEADOS = [
   /^\[?fe80:/i,
 ];
 
-function ipInterno(ip: string) {
+export function enderecoInterno(ip: string) {
   return BLOQUEADOS.some((re) => re.test(ip)) || BLOQUEADOS.some((re) => re.test(ip.replace(/^\[|\]$/g, "")));
 }
 
@@ -259,11 +259,11 @@ export async function validarUrlPublica(urlBruta: string): Promise<URL> {
   }
   if (u.protocol !== "http:" && u.protocol !== "https:") throw new Error("so http e https");
   const host = u.hostname.replace(/^\[|\]$/g, "");
-  if (ipInterno(host)) throw new Error("endereco interno nao permitido");
+  if (enderecoInterno(host)) throw new Error("endereco interno nao permitido");
   if (!isIP(host)) {
     try {
       const { address } = await lookup(host, { verbatim: true });
-      if (ipInterno(address)) throw new Error("endereco interno nao permitido");
+      if (enderecoInterno(address)) throw new Error("endereco interno nao permitido");
     } catch (e) {
       if ((e as Error).message.includes("interno")) throw e;
       throw new Error(`nao consegui resolver ${host}`);
