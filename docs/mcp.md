@@ -90,6 +90,19 @@ Cada chamada passa pela mesma checagem de permissão de quem pediu, e volta na r
 nome, ok e tempo. Teto de 120 s (parâmetro `segundos`), saída cortada em 120 KB.
 Só de operador.
 
+**Isolamento (v3.53)** — o script roda como um usuário próprio por conta (uid 20000–29999),
+nunca root:
+
+| Camada | Regra |
+|---|---|
+| Arquivos | a pasta da conta responde "permissão negada" a outra conta; o script não lista nem abre o diretório alheio |
+| Rede | internet **só** pelo proxy local (`HTTP_PROXY`/`HTTPS_PROXY`); socket direto é recusado, e o proxy barra qualquer destino que resolva para endereço interno |
+| Memória | `ulimit -v` (512 MB por padrão, `NEXOS_SANDBOX_MEM_MB`) |
+| Tempo e saída | 120 s e 120 KB, como antes |
+
+O retorno traz `rede`: a lista de destinos que passaram pelo proxy e os que foram negados
+(com o motivo).
+
 **Cada conta tem a sua pasta** (v3.51) em `/app/dados/usuarios/<conta>/`:
 
 | Caminho | O que é |

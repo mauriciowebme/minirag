@@ -10,6 +10,7 @@ Este arquivo tem **só o que está em aberto** — as tarefas entregues foram re
 | T### | Nome | Módulo | Prioridade | Status | Link |
 |---|---|---|---|---|---|
 | T052 | Sandbox Python com as ferramentas do nexos + biblioteca + agenda | sandbox + ferramentas | 🟠 Alta | 🟢 Etapas 1 e 2 na v3.51.0 (falta a agenda) | [#t052](#t052) |
+| T053 | Sandbox: isolamento por conta, rede pelo proxy e cota | sandbox | 🟠 Alta | 🟢 Camadas 1–3 na v3.53.0; falta a tela de bibliotecas | [#t053](#t053) |
 
 ## Correções já no ar
 
@@ -46,6 +47,16 @@ Este arquivo tem **só o que está em aberto** — as tarefas entregues foram re
 **Limite conhecido da etapa 1:** o bloqueio de rede é no Python (`socket` substituído por
 `sitecustomize.py`); um script que chame `subprocess` com `curl` ainda alcança a rede. O limite
 de verdade continua sendo o container — o confinamento por processo fica na etapa 2.
+
+### T053 — Sandbox: liberdade com isolamento
+
+| Campo | Conteúdo |
+|---|---|
+| **Módulo** | sandbox |
+| **Pedido** | "o mais liberdade possível com o mais seguro possível sem vazamentos" |
+| **Entregue na v3.53.0** | (1) o script roda como **uid próprio por conta** (20000–29999, nunca root) e a pasta da conta é 700 — outra conta recebe "permissão negada"; (2) a internet passa **só pelo proxy local** (`HTTP_PROXY`/`HTTPS_PROXY`), que recusa qualquer destino interno e registra o que passou e o que foi negado; (3) **teto de memória** por `ulimit -v` (512 MB, `NEXOS_SANDBOX_MEM_MB`); (4) o retorno traz `rede` com os destinos. |
+| **Limite conhecido** | o bloqueio de socket é no Python (`sitecustomize`); um script que chame `subprocess` com `curl`, ou `ctypes`, ainda alcança a rede. Fechar isso exige barreira de SO (namespace de rede ou regra por uid), e o container atual não tem `CAP_SYS_ADMIN`/`CAP_NET_ADMIN` — medido: `bwrap` e `unshare -U` respondem "Operation not permitted". Alternativa: serviço executor separado com rede própria (custo: um serviço a mais). |
+| **Falta** | tela do que está instalado por conta, com botão de apagar; `pip` livre com registro; agenda da T052. |
 
 ## Ideias ainda não numeradas
 
