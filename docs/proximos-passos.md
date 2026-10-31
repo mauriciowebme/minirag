@@ -1,6 +1,6 @@
 # Próximos passos — Nexos
 
-> **Última atualização:** 2026-10-30 · **Versão:** 3.49.3 · **Dono:** Mauricio
+> **Última atualização:** 2026-10-30 · **Versão:** 3.52.0 · **Dono:** Mauricio
 
 Este arquivo tem **só o que está em aberto** — as tarefas entregues foram removidas na limpeza de
 30/10 (o histórico fica no `git log`). Execução de qualquer T### exige OK explícito do Mauricio.
@@ -10,6 +10,12 @@ Este arquivo tem **só o que está em aberto** — as tarefas entregues foram re
 | T### | Nome | Módulo | Prioridade | Status | Link |
 |---|---|---|---|---|---|
 | T052 | Sandbox Python com as ferramentas do nexos + biblioteca + agenda | sandbox + ferramentas | 🟠 Alta | 🟢 Etapas 1 e 2 na v3.51.0 (falta a agenda) | [#t052](#t052) |
+
+## Correções já no ar
+
+| Versão | O que corrigiu | Como foi achado |
+|---|---|---|
+| 3.52.0 | `analisar_imagem` baixava a imagem sem user-agent (sites exigentes, como o Wikimedia, devolviam 400) e aceitava endereço interno (dava para pedir `127.0.0.1:8001`, o embedder). Agora usa o mesmo UA de navegador do `web_open` e passa pela mesma trava de endereço interno, inclusive a cada salto de redirecionamento. | Teste de todas as 57 ferramentas (30/10), chamando cada uma de verdade. |
 
 ---
 
