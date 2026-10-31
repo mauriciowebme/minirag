@@ -28,7 +28,7 @@ import { NOMES_MAQUINA_TOOLS, toolMaquina, wrapComando } from "./maquinas_tools"
 import { eDeMaquina, ferramentaPermitida, motivoDeBloqueio } from "./mcp_acesso";
 import { responderChat, salvarProvider, testarProvider, verProvider } from "./provider";
 import { montarTela } from "./telas";
-import { abrirPagina, buscarWeb } from "./web";
+import { abrirPagina, baixarImagem, buscarWeb } from "./web";
 import {
   atualizarFerramentas,
   atualizarServidor,
@@ -796,18 +796,8 @@ async function analisarImagem(args: Row) {
   let origem: string;
   if (url) {
     if (!/^https?:\/\//i.test(url)) throw new Error("url precisa ser http(s)");
-    const ctrl = new AbortController();
-    const t = setTimeout(() => ctrl.abort(), 20000);
-    try {
-      const r = await fetch(url, { signal: ctrl.signal });
-      if (!r.ok) throw new Error(`a imagem respondeu ${r.status}`);
-      const tipo = (r.headers.get("content-type") ?? "").toLowerCase();
-      if (!tipo.startsWith("image/")) throw new Error(`a URL nao devolveu imagem (${tipo || "sem content-type"})`);
-      buf = Buffer.from(await r.arrayBuffer());
-      origem = url;
-    } finally {
-      clearTimeout(t);
-    }
+    buf = (await baixarImagem(url)).buffer;
+    origem = url;
   } else if (b64Cru) {
     buf = Buffer.from(b64Cru.replace(/^data:[^;]+;base64,/, "").replace(/\s+/g, ""), "base64");
     if (!buf.length) throw new Error("base64 invalido");

@@ -247,22 +247,9 @@ function ipInterno(ip: string) {
   return BLOQUEADOS.some((re) => re.test(ip)) || BLOQUEADOS.some((re) => re.test(ip.replace(/^\[|\]$/g, "")));
 }
 
-/** web_open: baixa a página e devolve texto limpo. Bloqueia endereço interno. */
-const POUCO_TEXTO = 250;
-
-export async function abrirPagina(
-  urlBruta: string,
-  opcoes: { js?: boolean } = {},
-): Promise<{
-  url: string;
-  titulo: string;
-  texto: string;
-  truncado: boolean;
-  bytes: number;
-  renderizado: boolean;
-  ms: number;
-}> {
-  const t0 = Date.now();
+/** Normaliza e valida uma URL de saída: so http(s), nunca endereco interno (SSRF).
+ *  Vale para web_open e para qualquer download (imagem do OCR, por exemplo). */
+export async function validarUrlPublica(urlBruta: string): Promise<URL> {
   const cru = (urlBruta ?? "").trim();
   let u: URL;
   try {
@@ -282,6 +269,67 @@ export async function abrirPagina(
       throw new Error(`nao consegui resolver ${host}`);
     }
   }
+  return u;
+}
+
+/** Baixa uma imagem de URL publica com o mesmo user-agent do navegador (sites exigentes,
+ *  como o Wikimedia, devolvem 400 para o UA padrao do Node). Bloqueia endereco interno e
+ *  valida cada salto de redirecionamento — sem isso um 302 para 127.0.0.1 furaria o SSRF. */
+export async function baixarImagem(
+  urlBruta: string,
+  limite = 8 * 1024 * 1024,
+): Promise<{ buffer: Buffer; tipo: string }> {
+  let atual = await validarUrlPublica(urlBruta);
+  for (let salto = 0; salto < 4; salto++) {
+    const ctrl = new AbortController();
+    const t = setTimeout(() => ctrl.abort(), TIMEOUT);
+    try {
+      const r = await fetch(atual.toString(), {
+        redirect: "manual",
+        signal: ctrl.signal,
+        headers: {
+          "User-Agent": UA,
+          Accept: "image/*,*/*;q=0.8",
+          "Accept-Language": "pt-BR,pt;q=0.9,en;q=0.7",
+        },
+      });
+      if (r.status >= 300 && r.status < 400) {
+        const loc = r.headers.get("location");
+        if (!loc) throw new Error(`a imagem respondeu ${r.status} sem destino`);
+        atual = await validarUrlPublica(new URL(loc, atual).toString());
+        continue;
+      }
+      if (!r.ok) throw new Error(`a imagem respondeu ${r.status}`);
+      const tipo = (r.headers.get("content-type") ?? "").toLowerCase();
+      if (!tipo.startsWith("image/")) throw new Error(`a URL nao devolveu imagem (${tipo || "sem content-type"})`);
+      const buffer = Buffer.from(await r.arrayBuffer());
+      if (buffer.length > limite)
+        throw new Error(`imagem de ${(buffer.length / 1024 / 1024).toFixed(1)}MB passa do teto de ${limite / 1024 / 1024}MB`);
+      return { buffer, tipo };
+    } finally {
+      clearTimeout(t);
+    }
+  }
+  throw new Error("a imagem redirecionou vezes demais");
+}
+
+/** web_open: baixa a página e devolve texto limpo. Bloqueia endereço interno. */
+const POUCO_TEXTO = 250;
+
+export async function abrirPagina(
+  urlBruta: string,
+  opcoes: { js?: boolean } = {},
+): Promise<{
+  url: string;
+  titulo: string;
+  texto: string;
+  truncado: boolean;
+  bytes: number;
+  renderizado: boolean;
+  ms: number;
+}> {
+  const t0 = Date.now();
+  const u = await validarUrlPublica(urlBruta);
 
   const r = await baixar(u.toString());
   /* 403/429 no curl costuma ser bloqueio de robô, não conteúdo inexistente: o navegador
